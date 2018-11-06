@@ -29,7 +29,7 @@ dop() { # do and print
   eval $@
 }
 
-dop ocamlbuild -use-menhir -use-ocamlfind $file.byte
+dop make $file.byte
 
 # Build -I flags for repl
 flags=$(find $build -type d | while read d; do

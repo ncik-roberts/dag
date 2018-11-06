@@ -49,6 +49,7 @@ and expr =
       binary_operand2 : expr;
     }
   | Const of int32
+  | Variable of string
 
 type fun_defn = {
   fun_ret_type : typ;

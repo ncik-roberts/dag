@@ -46,6 +46,7 @@ rule initial =
   | ';'         { P.SEMICOLON }
 
   | '='         { P.ASSIGN }
+  | "<-"         { P.BIND }
 
   | '+'         { P.PLUS }
   | '-'         { P.MINUS }
@@ -54,6 +55,7 @@ rule initial =
   | '%'         { P.MOD }
 
   | "return"    { P.RETURN }
+  | "parallel"    { P.PARALLEL }
 
   | decnum as n { decnumber n lexbuf }
 

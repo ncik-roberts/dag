@@ -22,7 +22,7 @@
 // %token LOGICAL_AND
 // %token LOGICAL_OR
 
-%token ASSIGN BACK_ARROW
+%token ASSIGN BIND
 %token SEMICOLON COMMA
 
 %token PARALLEL
@@ -137,7 +137,7 @@ stmt :
       { Ast.Let { let_type; let_ident; let_expr; } }
   | bind_type = typ;
     bind_ident = IDENT;
-    BACK_ARROW;
+    BIND;
     bind_expr = expr;
       { Ast.Bind { bind_type; bind_ident; bind_expr; } }
   | RETURN;
@@ -152,6 +152,8 @@ stmt :
 expr :
   | i = CONST;
       { Ast.Const i }
+  | ident = IDENT;
+      { Ast.Variable ident }
   | call_name = IDENT;
     LPAREN;
     call_args = args;

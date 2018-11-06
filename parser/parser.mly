@@ -99,11 +99,17 @@ params :
  * ARGUMENTS
  **********************************/
 
+arg :
+  | b = binop;
+      { Ast.Bare_binop b }
+  | e = expr;
+      { Ast.Expr e }
+
 arg_tail :
   | /* empty */
       { [] }
   | COMMA;
-    argument = expr;
+    argument = arg;
     arguments = arg_tail;
       { argument :: arguments }
   ;
@@ -111,7 +117,7 @@ arg_tail :
 args :
   | /* empty */
       { [] }
-  | first_argument = expr;
+  | first_argument = arg;
     other_arguments = arg_tail;
       { first_argument :: other_arguments }
   ;

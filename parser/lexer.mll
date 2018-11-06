@@ -27,58 +27,57 @@ let eof () =
 
 let id = ['A'-'Z' 'a'-'z' '_']['A'-'Z' 'a'-'z' '0'-'9' '_']*
 let decnum = ("0" | ['1'-'9'](['0'-'9']*))
-let hexnum = "0"['x' 'X']['0'-'9' 'a'-'f' 'A'-'F']+
-
 let ws = [' ' '\t' '\r' '\011' '\012']
 
 rule initial =
   parse
-  | ws+         { initial lexbuf }
-  | '\n'        { initial lexbuf }
+  | ws+ { initial lexbuf }
+  | '\n' { initial lexbuf }
 
-  | '{'         { P.LBRACE }
-  | '}'         { P.RBRACE }
-  | '('         { P.LPAREN }
-  | ')'         { P.RPAREN }
-  | '['         { P.LBRACKET }
-  | ']'         { P.RBRACKET }
+  | '{' { P.LBRACE }
+  | '}' { P.RBRACE }
+  | '(' { P.LPAREN }
+  | ')' { P.RPAREN }
+  | '[' { P.LBRACKET }
+  | ']' { P.RBRACKET }
 
-  | ';'         { P.SEMICOLON }
+  | ',' { P.COMMA }
+  | ';' { P.SEMICOLON }
 
-  | '='         { P.ASSIGN }
-  | "<-"         { P.BIND }
+  | '=' { P.ASSIGN }
+  | "<-" { P.BIND }
 
-  | '+'         { P.PLUS }
-  | '-'         { P.MINUS }
-  | '*'         { P.TIMES }
-  | '/'         { P.DIV }
-  | '%'         { P.MOD }
+  | '+' { P.PLUS }
+  | '-' { P.MINUS }
+  | '*' { P.TIMES }
+  | '/' { P.DIV }
+  | '%' { P.MOD }
 
-  | "return"    { P.RETURN }
-  | "parallel"    { P.PARALLEL }
+  | "return" { P.RETURN }
+  | "parallel" { P.PARALLEL }
 
   | decnum as n { decnumber n lexbuf }
 
-  | id as name  { P.IDENT name }
+  | id as name { P.IDENT name }
 
-  | "/*"        { enterComment lexbuf; comment lexbuf }
-  | "*/"        { error "unbalanced comments" }
+  | "/*" { enterComment lexbuf; comment lexbuf }
+  | "*/" { error "unbalanced comments" }
 
-  | "//"        { comment_line lexbuf }
-  | eof         { eof () }
-  | _           { errorf lexbuf "illegal character: \"%s\"" }
+  | "//" { comment_line lexbuf }
+  | eof { eof () }
+  | _ { errorf lexbuf "illegal character: \"%s\"" }
 
 and comment =
   parse
-  | "/*"       { enterComment lexbuf; comment lexbuf }
-  | "*/"       { (if exitComment () then initial else comment) lexbuf }
-  | eof        { eof () }
-  | _          { comment lexbuf }
+  | "/*" { enterComment lexbuf; comment lexbuf }
+  | "*/" { (if exitComment () then initial else comment) lexbuf }
+  | eof { eof () }
+  | _ { comment lexbuf }
 
 and comment_line =
   parse
-  | '\n'       { initial lexbuf }
-  | eof        { eof () }
-  | _          { comment_line lexbuf }
+  | '\n' { initial lexbuf }
+  | eof { eof () }
+  | _ { comment_line lexbuf }
 
 {}

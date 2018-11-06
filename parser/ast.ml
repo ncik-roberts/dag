@@ -33,11 +33,15 @@ type stmt =
     }
   | Return of expr
 
+and arg =
+  | Expr of expr
+  | Bare_binop of binop
+
 and expr =
   | Parallel of stmt list
   | Fun_call of {
       call_name : ident;
-      call_args : expr list;
+      call_args : arg list;
     }
   | Unop of {
       unary_operator : unop;

@@ -1,0 +1,2 @@
+true: include, annot, bin_annot, thread
+true: package(core)

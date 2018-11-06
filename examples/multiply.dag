@@ -1,0 +1,17 @@
+int[] dotProduct(int[] v1, int[] v2) {
+  return reduce(+, zipWith(*, v1, v2));
+}
+
+int[][] multiplyMatrixVector(int[][] m, int[] v) {
+  return parallel {
+    int[] row <- m;
+    return dotProduct(row, v);
+  };
+}
+
+int[][] multiplyMatrixMatrix(int[][] m1, int[][] m2) {
+  return parallel {
+    int[] col <- transpose(m2);
+    return multiplyMatrixVector(m1, col);
+  };
+}

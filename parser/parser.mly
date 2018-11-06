@@ -1,0 +1,205 @@
+/*
+ * DAG parser
+ *
+ * Dan Cascaval
+ * Nick Roberts
+ * Carnegie Mellon University
+ */
+
+%token <string> IDENT
+%token <int32> CONST
+
+// Operators
+// %token DOT ARROW
+%token TIMES DIV MOD
+%token PLUS MINUS
+// %token LSHIFT RSHIFT
+// %token LT GT LTE GTE
+// %token EQUALS NOT_EQUALS
+// %token BITWISE_AND
+// %token BITWISE_XOR
+// %token BITWISE_OR
+// %token LOGICAL_AND
+// %token LOGICAL_OR
+
+%token ASSIGN BACK_ARROW
+%token SEMICOLON COMMA
+
+%token PARALLEL
+%token RETURN
+
+%token LBRACE RBRACE /* {} */
+%token LBRACKET RBRACKET /* [] */
+%token LPAREN RPAREN /* () */
+
+%token EOF
+
+// Precedences
+%left PLUS MINUS
+%left TIMES DIV MOD
+%nonassoc UNARY_MINUS
+
+%type <Ast.fun_defn list> fun_defns
+%start fun_defns
+
+%%
+
+/**********************************
+ * FUN DEFNS
+ **********************************/
+
+fun_defns :
+  | EOF;
+      { [] }
+  | f = fun_defn;
+    fs = fun_defns;
+      { f :: fs }
+  ;
+
+fun_defn :
+  | fun_ret_type = typ;
+    fun_name = IDENT;
+    LPAREN;
+    fun_params = params;
+    RPAREN;
+    LBRACE;
+    fun_body = stmts;
+    RBRACE;
+      { Ast.{ fun_ret_type; fun_name; fun_params; fun_body; } }
+  ;
+
+/**********************************
+ * PARAMS
+ **********************************/
+
+param :
+  | param_type = typ;
+    param_ident = IDENT;
+      { Ast.{ param_type; param_ident; } }
+  ;
+
+param_tail :
+  | /* empty */
+      { [] }
+  | COMMA;
+    p = param;
+    ps = param_tail;
+      { p :: ps }
+  ;
+
+params :
+  | /* empty */
+      { [] }
+  | first_param = param;
+    other_params = param_tail;
+      { first_param :: other_params }
+  ;
+
+/**********************************
+ * ARGUMENTS
+ **********************************/
+
+arg_tail :
+  | /* empty */
+      { [] }
+  | COMMA;
+    argument = expr;
+    arguments = arg_tail;
+      { argument :: arguments }
+  ;
+
+args :
+  | /* empty */
+      { [] }
+  | first_argument = expr;
+    other_arguments = arg_tail;
+      { first_argument :: other_arguments }
+  ;
+
+/**********************************
+ * STATEMENTS
+ **********************************/
+
+stmts :
+  | /* empty */
+      { [] }
+  | s = stmt;
+    SEMICOLON;
+    ss = stmts;
+      { s :: ss }
+  ;
+
+stmt :
+  | let_type = typ;
+    let_ident = IDENT;
+    ASSIGN;
+    let_expr = expr;
+      { Ast.Let { let_type; let_ident; let_expr; } }
+  | bind_type = typ;
+    bind_ident = IDENT;
+    BACK_ARROW;
+    bind_expr = expr;
+      { Ast.Bind { bind_type; bind_ident; bind_expr; } }
+  | RETURN;
+    ret_expr = expr;
+      { Ast.Return ret_expr }
+  ;
+
+/**********************************
+ * EXPRESSIONS
+ **********************************/
+
+expr :
+  | i = CONST;
+      { Ast.Const i }
+  | call_name = IDENT;
+    LPAREN;
+    call_args = args;
+    RPAREN;
+      { Ast.Fun_call { call_name; call_args; } }
+  | unary_operator = unop;
+    unary_operand = expr;
+      %prec UNARY_MINUS
+      { Ast.Unop { unary_operator; unary_operand; } }
+  | binary_operand1 = expr;
+    binary_operator = binop;
+    binary_operand2 = expr;
+      { Ast.Binop { binary_operand1; binary_operator; binary_operand2; } }
+  | PARALLEL;
+    LBRACE;
+    body = stmts;
+    RBRACE;
+      { Ast.Parallel body }
+  ;
+
+unop :
+  | MINUS;
+      { Ast.Negate }
+  ;
+
+%inline
+binop :
+  | PLUS;
+      { Ast.Plus }
+  | MINUS;
+      { Ast.Minus }
+  | TIMES;
+      { Ast.Times }
+  | DIV;
+      { Ast.Div }
+  | MOD;
+      { Ast.Mod }
+  ;
+
+/**********************************
+ * TYPES
+ **********************************/
+
+typ :
+  | ident = IDENT;
+      { Ast.Ident ident }
+  | t = typ;
+    LBRACKET;
+    RBRACKET;
+      { Ast.Array t }
+  ;

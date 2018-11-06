@@ -1,0 +1,4 @@
+S top
+S parser
+B _build/**
+PKG core

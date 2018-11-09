@@ -1,8 +1,8 @@
-int[] dotProduct(int[] v1, int[] v2) {
-  return reduce(+, zipWith(*, v1, v2));
+int dotProduct(int[] v1, int[] v2) {
+  return reduce(+, 0, zipWith(*, v1, v2));
 }
 
-int[][] multiplyMatrixVector(int[][] m, int[] v) {
+int[] multiplyMatrixVector(int[][] m, int[] v) {
   return parallel {
     int[] row <- m;
     return dotProduct(row, v);

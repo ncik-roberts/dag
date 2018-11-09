@@ -37,10 +37,17 @@ and arg =
   | Expr of expr
   | Bare_binop of binop
 
+and call_name =
+  | Reduce
+  | Map
+  | Transpose
+  | Zip_with
+  | Fun_ident of ident
+
 and expr =
   | Parallel of stmt list
   | Fun_call of {
-      call_name : ident;
+      call_name : call_name;
       call_args : arg list;
     }
   | Unop of {

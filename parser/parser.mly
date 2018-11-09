@@ -160,11 +160,17 @@ expr :
       { Ast.Const i }
   | ident = IDENT;
       { Ast.Variable ident }
-  | call_name = IDENT;
+  | call_ident = IDENT;
     LPAREN;
     call_args = args;
     RPAREN;
-      { Ast.Fun_call { call_name; call_args; } }
+      { let call_name = match call_ident with
+          | "reduce" -> Ast.Reduce
+          | "transpose" -> Ast.Transpose
+          | "map" -> Ast.Map
+          | "zipWith" -> Ast.Zip_with
+          | _ -> Ast.Fun_ident call_ident
+        in Ast.Fun_call { call_name; call_args; } }
   | unary_operator = unop;
     unary_operand = expr;
       %prec UNARY_MINUS

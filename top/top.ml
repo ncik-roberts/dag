@@ -1,39 +1,5 @@
-let fun_ctx : Tc.fun_type Tc.IdentMap.t =
-  let open Tc in
-  IdentMap.of_alist_exn
-    [ ( "zipWith"
-      , { return_type = Array Int
-        ; param_types =
-            [ Fun
-                { return_type = Int
-                ; param_types = [ Int; Int; ]
-                }
-            ; Array Int
-            ; Array Int
-            ]
-        }
-      )
-    ; ( "reduce"
-      , { return_type = Int
-        ; param_types =
-            [ Fun
-                { return_type = Int
-                ; param_types = [ Int; Int; ]
-                }
-            ; Int
-            ; Array Int
-            ]
-        }
-      )
-    ; ( "transpose"
-      , { return_type = Array (Array Int)
-        ; param_types = [ Array (Array Int); ]
-        }
-      )
-    ]
-
 let run_on_ast (ast : Ast.t) : unit =
-  Tc.check_with Tc.{ empty with fun_ctx } ast;
+  Tc.check ast;
   print_endline "Typechecking succeeded."
 
 let run_on_file (file : string) : unit =

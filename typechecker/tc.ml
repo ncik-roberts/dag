@@ -70,13 +70,47 @@ let check_unop (typ : typ) (unop : Ast.unop) : typ =
   then failwith "Invalid unop types."
   else fun_type.return_type
 
-let check_fun (ctx : t) (fun_name : ident) (arg_types : typ list) : typ =
-  match IdentMap.find ctx.fun_ctx fun_name with
-  | Some fun_type ->
-      if List.equal ~equal:(=) arg_types fun_type.param_types
-      then fun_type.return_type
-      else failwith "Invalid argument types."
-  | None -> failwithf "Unknown function `%s`" fun_name ()
+let check_fun (ctx : t) (fun_name : Ast.call_name) (arg_types : typ list) : typ =
+  match fun_name with
+  | Ast.Map ->
+      begin
+        match arg_types with
+        | [ Fun fun_type; Array typ; ] when [ typ ] = fun_type.param_types ->
+            Array (fun_type.return_type)
+        | _ -> failwith "Invalid argument to map."
+      end
+  | Ast.Reduce ->
+      begin
+        match arg_types with
+        | [ Fun fun_type; typ1; Array typ2; ] when
+            typ1 = typ2
+              && [ typ1; typ2; ] = fun_type.param_types
+              && typ1 = fun_type.return_type -> typ1
+        | _ -> failwith "Invalid argument to reduce."
+      end
+  | Ast.Zip_with ->
+      begin
+        match arg_types with
+        | [ Fun fun_type; Array typ1; Array typ2; ]
+            when fun_type.param_types = [ typ1; typ2; ] ->
+              Array (fun_type.return_type)
+        | _ -> failwith "Invalid argument to zip_with."
+      end
+  | Ast.Transpose ->
+      begin
+        match arg_types with
+        | [ Array (Array typ); ] -> Array (Array typ)
+        | _ -> failwith "Invalid argument to transpose."
+      end
+  | Ast.Fun_ident fun_name ->
+      begin
+        match IdentMap.find ctx.fun_ctx fun_name with
+        | Some fun_type ->
+            if List.equal ~equal:(=) arg_types fun_type.param_types
+            then fun_type.return_type
+            else failwith "Invalid argument types."
+        | None -> failwithf "Unknown function `%s`" fun_name ()
+      end
 
 let rec check_type (ctx : t) (ast : Ast.typ) : typ = match ast with
   | Ast.Ident "int" -> Int

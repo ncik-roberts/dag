@@ -1,4 +1,6 @@
 S top
 S parser
+S dag
+S lib
 B _build/**
 PKG core

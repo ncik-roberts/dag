@@ -6,7 +6,7 @@ module Inverter (C : Comparable.S) = struct
       ~f:(fun ~key ~data acc ->
         List.fold_left data ~init:acc
           ~f:(fun acc vertex ->
-            C.Map.update acc key ~f:(function
-              | None -> C.Set.singleton vertex
-              | Some set -> C.Set.add set vertex)))
+            C.Map.update acc vertex ~f:(function
+              | None -> C.Set.singleton key
+              | Some set -> C.Set.add set key)))
 end

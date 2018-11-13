@@ -1,4 +1,4 @@
-default: main.native
+dagc: main.native
 	mv main.native dagc
 
 clean:

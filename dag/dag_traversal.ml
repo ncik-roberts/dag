@@ -43,8 +43,8 @@ let any_traversal (dag : Dag.dag) : traversal =
           then failwith "Invariant destroyed: evaluated vertex added to frontier.";
         let frontier = Vertex.Set.remove ctx.frontier vertex in
         let predecessors = Vertex.Set.of_list (Dag.predecessors dag vertex) in
-        let non_evaluated_predecessors = Vertex.Set.diff ctx.evaluated predecessors in
-        let non_evaluating_predecessors = Vertex.Set.diff (evaluating ctx) non_evaluated_predecessors in
+        let non_evaluated_predecessors = Vertex.Set.diff predecessors ctx.evaluated in
+        let non_evaluating_predecessors = Vertex.Set.diff non_evaluated_predecessors (evaluating ctx) in
         let (newly_evaluated, dependencies) = find_newly_evaluated vertex ctx in
         (* Add all predecessors of current vertex to frontier. *)
         let ctx' = {

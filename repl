@@ -16,7 +16,7 @@ packages=( core, ppx_jane ) # packages you'd like to load into the repl
   exit 1
 }
 
-file=${1%.*} # Remove .ml file extension if necessary
+file=$(basename "${1%.*}") # Remove .ml file extension if necessary
 
 if ! which $repl > /dev/null; then
   echo "utop not found. Run the following command to install:"

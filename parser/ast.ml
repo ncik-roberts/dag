@@ -1,17 +1,21 @@
-type ident = string
+open Core
+
+type ident = string [@@deriving sexp]
 
 type typ =
   | Ident of ident
   | Array of typ
+  [@@deriving sexp]
 
 type param = {
   param_type : typ;
   param_ident : ident;
-}
+} [@@deriving sexp]
 
 type unop =
   | Negate
   | Logical_not
+  [@@deriving sexp]
 
 type binop =
   | Plus
@@ -19,6 +23,7 @@ type binop =
   | Times
   | Div
   | Mod
+  [@@deriving sexp]
 
 type stmt =
   | Let of {
@@ -32,10 +37,12 @@ type stmt =
       bind_expr : expr;
     }
   | Return of expr
+  [@@deriving sexp]
 
 and arg =
   | Expr of expr
   | Bare_binop of binop
+  [@@deriving sexp]
 
 and call_name =
   | Reduce
@@ -43,6 +50,7 @@ and call_name =
   | Transpose
   | Zip_with
   | Fun_ident of ident
+  [@@deriving sexp]
 
 and expr =
   | Parallel of stmt list
@@ -61,12 +69,13 @@ and expr =
     }
   | Const of int32
   | Variable of ident
+  [@@deriving sexp]
 
 type fun_defn = {
   fun_ret_type : typ;
   fun_name : ident;
   fun_params : param list;
   fun_body : stmt list;
-}
+} [@@deriving sexp]
 
 type t = fun_defn list

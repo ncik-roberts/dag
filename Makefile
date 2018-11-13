@@ -1,5 +1,5 @@
-default: top.native
-	mv top.native dagc
+default: main.native
+	mv main.native dagc
 
 clean:
 	ocamlbuild -clean

@@ -116,9 +116,12 @@ module Result = struct
 end
 
 (** Dag of ast *)
-let of_fun_defn (f : Ast.fun_defn) : dag_fun =
+type t = dag_fun list [@@deriving sexp]
+let of_ast : Ast.t -> t =
   (* All the below "loop" functions make use of the following mutable state:
    *   - next_vertex for determining fresh vertex numberings.
+   * next_vertex will always return a globally unique vertex, even across
+   * invocations of `of_ast`.
    *)
   let next_vertex = make_counter ~seed:0l ~next:Int32.succ in
 
@@ -249,26 +252,26 @@ let of_fun_defn (f : Ast.fun_defn) : dag_fun =
     Option.value_exn return_result
   in
 
-  let input_names = Ast.(List.map f.fun_params ~f:(fun p -> p.param_ident)) in
-  let inputs = List.map input_names ~f:(fun _ -> next_vertex ()) in
-  let input_pairs = List.zip_exn input_names inputs in
+  let of_fun_defn (f : Ast.fun_defn) : dag_fun =
+    let input_names = Ast.(List.map f.fun_params ~f:(fun p -> p.param_ident)) in
+    let inputs = List.map input_names ~f:(fun _ -> next_vertex ()) in
+    let input_pairs = List.zip_exn input_names inputs in
 
-  (* Initial local variable context *)
-  let init_ctx = String.Map.of_alist_exn input_pairs in
+    (* Initial local variable context *)
+    let init_ctx = String.Map.of_alist_exn input_pairs in
 
-  let result = loop_stmts init_ctx Ast.(f.fun_body) in {
-    dag_name = Ast.(f.fun_name);
-    dag_graph =
-      let Result.{ predecessors; views; vertex = return_vertex; } = result in
-      (* Add input views. *)
-      let views =
-        List.fold_left input_pairs ~init:views
-          ~f:(fun acc (name, vtx) -> Map.add_exn acc ~key:vtx ~data:(Vertex_view.Input name))
-      in
-      let successors = Invert_vertex.invert predecessors in
-      let vertex_infos = Vertex_info.collect_into_map ~successors ~predecessors ~views in
-      { vertex_infos; return_vertex; inputs; }
-  }
-
-type t = dag_fun list [@@deriving sexp]
-let of_ast = List.map ~f:of_fun_defn
+    let result = loop_stmts init_ctx Ast.(f.fun_body) in
+    { dag_name = Ast.(f.fun_name);
+      dag_graph =
+        let Result.{ predecessors; views; vertex = return_vertex; } = result in
+        (* Add input views. *)
+        let views =
+          List.fold_left input_pairs ~init:views
+            ~f:(fun acc (name, vtx) -> Map.add_exn acc ~key:vtx ~data:(Vertex_view.Input name))
+        in
+        let successors = Invert_vertex.invert predecessors in
+        let vertex_infos = Vertex_info.collect_into_map ~successors ~predecessors ~views in
+        { vertex_infos; return_vertex; inputs; }
+    }
+  in
+  List.map ~f:of_fun_defn

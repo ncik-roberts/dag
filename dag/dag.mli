@@ -34,3 +34,5 @@ type dag_fun = {
 
 type t = dag_fun list [@@deriving sexp]
 val of_ast : Ast.t -> t
+
+(** TODO: inline; i.e. write a function inline : dag -> t -> dag. *)

@@ -20,21 +20,47 @@ module Vertex_view = struct
     [@@deriving sexp]
 end
 
+module Vertex_info = struct
+  type t = {
+    successors : Vertex.Set.t;
+    predecessors : Vertex.t list;
+    view : Vertex_view.t;
+  } [@@deriving sexp]
+
+  let collect_into_map
+    ~(predecessors : Vertex.t list Vertex.Map.t)
+    ~(successors : Vertex.Set.t Vertex.Map.t)
+    ~(views : Vertex_view.t Vertex.Map.t) : t Vertex.Map.t =
+    let preds_succs =
+      Map.fold2 predecessors successors
+        ~init:Vertex.Map.empty
+        ~f:(fun ~key ~data acc -> match data with
+          | `Both (p, s) -> Map.add_exn acc ~key ~data:(p, s)
+          | `Left p -> Map.add_exn acc ~key ~data:(p, Vertex.Set.empty)
+          | `Right s -> Map.add_exn acc ~key ~data:([], s))
+    in
+    Map.fold2 views preds_succs
+      ~init:Vertex.Map.empty
+      ~f:(fun ~key ~data acc -> match data with
+        | `Both (v, (p, s)) ->
+            Map.add_exn acc ~key ~data:{ view = v; predecessors = p; successors = s; }
+        | `Left v ->
+            Map.add_exn acc ~key ~data:{ view = v; predecessors = []; successors = Vertex.Set.empty; }
+        | `Right (_p, _s) -> failwithf "Unknown vertex `%ld`." key ())
+end
+
 (** Directed acyclic graph *)
 type dag = {
-  successors : Vertex.Set.t Vertex.Map.t;
-  predecessors : Vertex.t list Vertex.Map.t;
+  vertex_infos : Vertex_info.t Vertex.Map.t;
   return_vertex : Vertex.t;
   inputs : Vertex.t list;
-  views : Vertex_view.t Vertex.Map.t
 } [@@deriving sexp]
 
 let return_vertex dag = dag.return_vertex
-let predecessors dag =
-  Fn.compose (Option.value ~default:[]) (Map.find dag.predecessors)
-let view dag = Map.find_exn dag.views
-let successors dag =
-  Fn.compose (Option.value ~default:Vertex.Set.empty) (Map.find dag.successors)
+let vertex_info dag = Map.find_exn dag.vertex_infos
+let predecessors dag key = (vertex_info dag key).Vertex_info.predecessors
+let view dag key = (vertex_info dag key).Vertex_info.view
+let successors dag key = (vertex_info dag key).Vertex_info.successors
 let inputs dag = dag.inputs
 
 type 'a counter = unit -> 'a
@@ -58,7 +84,7 @@ module Result = struct
     views : Vertex_view.t Vertex.Map.t;
     predecessors : Vertex.t list Vertex.Map.t;
     vertex : Vertex.t;
-  }
+  } [@@deriving sexp]
 
   (** Return a result for the given vertex, additionally adding singleton
    * bindings for in the maps if provided as optional arguments. *)
@@ -200,8 +226,14 @@ let of_fun_defn (f : Ast.fun_defn) : dag_fun =
     let (_ctx, return_result) =
       (* Right-bias fold so that return_result belongs to the last statement. *)
       List.fold_left stmts
-        ~init:(ctx, None) ~f:(fun (ctx, _) stmt ->
-          let result = loop_stmt ctx stmt in
+        ~init:(ctx, None) ~f:(fun (ctx, prev_result) stmt ->
+          (* Retain contex from previous result, except replacing the vertex with
+           * the current vertex (hence right bias). *)
+          let union_with_previous =
+            Option.value_map prev_result
+              ~default:Fn.id ~f:(Result.union_with_bias ~bias:`Right)
+          in
+          let result = union_with_previous (loop_stmt ctx stmt) in
 
           (* Update ctx with binding *)
           let ctx' = match stmt with
@@ -219,16 +251,23 @@ let of_fun_defn (f : Ast.fun_defn) : dag_fun =
 
   let input_names = Ast.(List.map f.fun_params ~f:(fun p -> p.param_ident)) in
   let inputs = List.map input_names ~f:(fun _ -> next_vertex ()) in
+  let input_pairs = List.zip_exn input_names inputs in
 
   (* Initial local variable context *)
-  let init_ctx = String.Map.of_alist_exn (List.zip_exn input_names inputs) in
+  let init_ctx = String.Map.of_alist_exn input_pairs in
 
   let result = loop_stmts init_ctx Ast.(f.fun_body) in {
     dag_name = Ast.(f.fun_name);
     dag_graph =
       let Result.{ predecessors; views; vertex = return_vertex; } = result in
+      (* Add input views. *)
+      let views =
+        List.fold_left input_pairs ~init:views
+          ~f:(fun acc (name, vtx) -> Map.add_exn acc ~key:vtx ~data:(Vertex_view.Input name))
+      in
       let successors = Invert_vertex.invert predecessors in
-      { predecessors; views; successors; return_vertex; inputs; }
+      let vertex_infos = Vertex_info.collect_into_map ~successors ~predecessors ~views in
+      { vertex_infos; return_vertex; inputs; }
   }
 
 type t = dag_fun list [@@deriving sexp]

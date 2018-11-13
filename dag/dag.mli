@@ -10,11 +10,13 @@ module Vertex_view : sig
     [@@deriving sexp]
 
   type t =
-    | Parallel_block of Vertex.t
+    | Parallel_block of Vertex.t (* Return statement *)
     | Function of Ast.call_name
     | Binop of Ast.binop
     | Unop of Ast.unop
     | Literal of literal
+    | Parallel_binding of Ast.ident
+    | Input of Ast.ident
     | Return
     [@@deriving sexp]
 end

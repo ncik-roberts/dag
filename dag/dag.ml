@@ -9,11 +9,13 @@ module Vertex_view = struct
     [@@deriving sexp]
 
   type t =
-    | Parallel_block of Vertex.t
+    | Parallel_block of Vertex.t (* Return of block. *)
     | Function of Ast.call_name
     | Binop of Ast.binop
     | Unop of Ast.unop
     | Literal of literal
+    | Parallel_binding of Ast.ident
+    | Input of Ast.ident
     | Return
     [@@deriving sexp]
 end
@@ -28,9 +30,11 @@ type dag = {
 } [@@deriving sexp]
 
 let return_vertex dag = dag.return_vertex
-let predecessors dag = Vertex.Map.find_exn dag.predecessors
+let predecessors dag =
+  Fn.compose (Option.value ~default:[]) (Map.find dag.predecessors)
 let view dag = Map.find_exn dag.views
-let successors dag = Map.find_exn dag.successors
+let successors dag =
+  Fn.compose (Option.value ~default:Vertex.Set.empty) (Map.find dag.successors)
 let inputs dag = dag.inputs
 
 type 'a counter = unit -> 'a
@@ -45,12 +49,16 @@ type dag_fun = {
 
 module Invert_vertex = Utils.Inverter (Vertex)
 
+type acc
+
 (** Dag of ast *)
 let of_fun_defn (fun_defn : Ast.fun_defn) : dag_fun =
   (* All the below "loop" functions make use of the following mutable state:
-   *   - counter for determining fresh vertex numberings, and
-   *   - lookup_local_var for determining the vertices corresponding to local variables.
+   *   - next_vertex for determining fresh vertex numberings, and
    *   - predecessors for populating the predecessors field of the return value.
+   *   - local_vars for determining the vertices corresponding to local variables.
+   *   - inputs for determining the vertices corresponding to input parameters.
+   *   - views for determining the identity of any vertex.
    *)
   let next_vertex = make_counter ~seed:0l ~next:Int32.succ in
   let predecessors : (Vertex.t list) Vertex.Table.t = Vertex.Table.create () in
@@ -58,6 +66,10 @@ let of_fun_defn (fun_defn : Ast.fun_defn) : dag_fun =
 
   let input_pairs = List.map Ast.(fun_defn.fun_params) ~f:Ast.(fun param -> (param.param_ident, next_vertex ())) in
   let local_vars = String.Table.of_alist_exn input_pairs in
+
+  (** Initialize input map *)
+  let inputs = List.map ~f:snd input_pairs in
+  List.iter input_pairs ~f:(fun (name, key) -> Vertex.Table.set views ~key ~data:(Vertex_view.Input name));
 
   (* Returns id of expression vertex. *)
   let rec loop_expr (expr : Ast.expr) : Vertex.t =
@@ -113,10 +125,19 @@ let of_fun_defn (fun_defn : Ast.fun_defn) : dag_fun =
   and loop_stmts (stmts : Ast.stmt list) : Vertex.t =
     (* Returns the vertex of the expression involved in the binding or return. *)
     let rec loop_stmt (stmt : Ast.stmt) : Vertex.t = match stmt with
-      | Ast.Bind { bind_ident = ident; bind_expr = expr; _; }
-      | Ast.Let { let_ident = ident; let_expr = expr; _; } ->
-          let expr_vertex = loop_expr expr in
-          String.Table.add_exn local_vars ~key:ident ~data:expr_vertex;
+      | Ast.Bind bind_stmt ->
+          let expr_vertex = loop_expr bind_stmt.bind_expr in
+          let bind_vertex = next_vertex () in
+          let view = Vertex_view.Parallel_binding bind_stmt.bind_ident in
+
+          (** Add intermediary vertex expressing parallel bind. *)
+          Vertex.Table.add_exn predecessors ~key:bind_vertex ~data:[expr_vertex];
+          Vertex.Table.add_exn views ~key:bind_vertex ~data:view;
+          String.Table.add_exn local_vars ~key:bind_stmt.bind_ident ~data:bind_vertex;
+          bind_vertex
+      | Ast.Let let_stmt ->
+          let expr_vertex = loop_expr let_stmt.let_expr in
+          String.Table.add_exn local_vars ~key:let_stmt.let_ident ~data:expr_vertex;
           expr_vertex
       | Ast.Return expr -> loop_expr expr
     in
@@ -130,7 +151,6 @@ let of_fun_defn (fun_defn : Ast.fun_defn) : dag_fun =
       let predecessors = Vertex.Map.of_hashtbl_exn predecessors in
       let views = Vertex.Map.of_hashtbl_exn views in
       let successors = Invert_vertex.invert predecessors in
-      let inputs = List.map ~f:snd input_pairs in
       { predecessors; views; successors; return_vertex; inputs; }
   }
 

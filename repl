@@ -9,7 +9,7 @@
 
 repl=utop    # your favorite repl
 build=_build # build directory
-packages=( core ) # packages you'd like to load into the repl
+packages=( core, ppx_jane ) # packages you'd like to load into the repl
 
 [ "$#" -eq 1 ] || {
   echo "Usage: $0 FILE"

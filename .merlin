@@ -4,3 +4,4 @@ S dag
 S lib
 B _build/**
 PKG core
+PKG ppx_jane

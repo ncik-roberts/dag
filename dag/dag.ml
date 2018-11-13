@@ -6,6 +6,7 @@ module Vertex_view = struct
   type literal =
     | Int32 of int32
     | Bare_binop of Ast.binop
+    [@@deriving sexp]
 
   type t =
     | Parallel_block of Vertex.t
@@ -14,16 +15,17 @@ module Vertex_view = struct
     | Unop of Ast.unop
     | Literal of literal
     | Return
+    [@@deriving sexp]
 end
 
 (** Directed acyclic graph *)
-type t = {
+type dag = {
   successors : Vertex.Set.t Vertex.Map.t;
   predecessors : (Vertex.t list) Vertex.Map.t;
   return_vertex : Vertex.t;
   inputs : Vertex.t list;
   views : Vertex_view.t Vertex.Map.t
-}
+} [@@deriving sexp]
 
 let return_vertex dag = dag.return_vertex
 let predecessors dag = Vertex.Map.find_exn dag.predecessors
@@ -38,8 +40,8 @@ let make_counter ~(seed:'a) ~(next:'a -> 'a) : 'a counter =
 
 type dag_fun = {
   dag_name : string;
-  dag_graph : t;
-}
+  dag_graph : dag;
+} [@@deriving sexp]
 
 module Invert_vertex = Utils.Inverter (Vertex)
 
@@ -132,4 +134,5 @@ let of_fun_defn (fun_defn : Ast.fun_defn) : dag_fun =
       { predecessors; views; successors; return_vertex; inputs; }
   }
 
+type t = dag_fun list [@@deriving sexp]
 let of_ast = List.map ~f:of_fun_defn

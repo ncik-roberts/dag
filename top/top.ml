@@ -1,8 +1,8 @@
 let run_on_ast (ast : Ast.t) : unit =
   Tc.check ast;
   print_endline "Typechecking succeeded.";
-  ignore (Dag.of_ast ast);
-  print_endline "Creation of dag succeeded."
+  let dag = Dag.of_ast ast in
+  print_endline (Core.Sexp.to_string (Dag.sexp_of_t dag))
 
 let run_on_file (file : string) : unit =
   if not (Sys.file_exists file)

@@ -5,5 +5,5 @@ clean:
 	ocamlbuild -clean
 
 %:
-	ocamlbuild -use-ocamlfind -use-menhir top.native
+	ocamlbuild -use-ocamlfind -use-menhir $*
 

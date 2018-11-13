@@ -2,7 +2,7 @@ open Core
 
 (** Directed acyclic graph *)
 type dag [@@deriving sexp]
-module Vertex : Comparable.S
+module Vertex : Utils.Comparable_sexpable
 module Vertex_view : sig
   type literal =
     | Int32 of int32

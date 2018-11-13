@@ -61,4 +61,4 @@ let any_traversal (dag : Dag.dag) : traversal =
     evaluated = Vertex.Set.empty;
   }
 
-let all_traversals (dag : Dag.dag) : traversal = raise (Failure "hey")
+let all_traversals (dag : Dag.dag) : traversal list = raise (Failure "hey")

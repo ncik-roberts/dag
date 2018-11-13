@@ -63,6 +63,13 @@ let view dag key = (vertex_info dag key).Vertex_info.view
 let successors dag key = (vertex_info dag key).Vertex_info.successors
 let inputs dag = dag.inputs
 
+let unroll dag key =
+  let open Vertex_view in
+  (* Only recursive production is Parallel_block *)
+  match view dag key with
+  | Parallel_block t -> Some t
+  | Return | Function _ | Binop _ | Unop _ | Literal _ | Parallel_binding _ | Input _ -> None
+
 type 'a counter = unit -> 'a
 let make_counter ~(seed:'a) ~(next:'a -> 'a) : 'a counter =
   let ctr = ref seed in
@@ -127,18 +134,12 @@ let of_ast : Ast.t -> t =
 
   (* Returns id of expression vertex. *)
   let rec loop_expr (ctx : Vertex.t Context.t) (expr : Ast.expr) : Result.t =
-    (* vertex: the id of the expression vertex.
-     * result: if None, that means the expression is a local var, so it is represented solely
-     *           by edges in the graph.
-     *         if Some _, that means the expression is not a local var, so we must overtly
-     *           represent it as a view in the hash table.
-     *)
     let vertex_info = match expr with
       | Ast.Fun_call fun_call ->
           let vertex = next_vertex () in
           let view = Vertex_view.Function fun_call.call_name in
           let results = List.map fun_call.call_args ~f:(loop_arg ctx) in
-          `New_vertex (vertex, view, results, `No_additional_predecessors)
+          `New_vertex (vertex, view, results, `Only_result_predecessors)
       | Ast.Parallel stmts ->
           let vertex = next_vertex () in
           let { Result.vertex = return_vertex; _; } as result = loop_stmts ctx stmts in
@@ -156,22 +157,22 @@ let of_ast : Ast.t -> t =
               ~init:Vertex.Set.empty
               ~f:(fun ~key:_ ~data -> Set.union (Set.inter (Vertex.Set.of_list data) ctx_keys))
           in
-          `New_vertex (vertex, view, [result], `With_additional_predecessors additional_predecessors)
+          `New_vertex (vertex, view, [result], `With_predecessors additional_predecessors)
       | Ast.Const i ->
           let vertex = next_vertex () in
           let view = Vertex_view.(Literal (Int32 i)) in
-          `New_vertex (vertex, view, [], `No_additional_predecessors)
+          `New_vertex (vertex, view, [], `Only_result_predecessors)
       | Ast.Binop binop ->
           let vertex = next_vertex () in
           let view = Vertex_view.Binop binop.binary_operator in
           let result1 = loop_expr ctx binop.binary_operand1 in
           let result2 = loop_expr ctx binop.binary_operand2 in
-          `New_vertex (vertex, view, [result1; result2], `No_additional_predecessors)
+          `New_vertex (vertex, view, [result1; result2], `Only_result_predecessors)
       | Ast.Unop unop ->
           let vertex = next_vertex () in
           let view = Vertex_view.Unop unop.unary_operator in
           let result = loop_expr ctx unop.unary_operand in
-          `New_vertex (vertex, view, [result], `No_additional_predecessors)
+          `New_vertex (vertex, view, [result], `Only_result_predecessors)
       | Ast.Variable v ->
           let vertex = Map.find_exn ctx v in
           `Reused_vertex vertex
@@ -182,12 +183,11 @@ let of_ast : Ast.t -> t =
     | `Reused_vertex vertex -> Result.empty_of vertex
     | `New_vertex (vertex, view, results, predecessor_status) ->
         (* Fold results together. *)
-        let vertices = List.map results ~f:(fun r -> Result.(r.vertex)) in
         let predecessors =
           begin
             match predecessor_status with
-            | `No_additional_predecessors -> vertices
-            | `With_additional_predecessors ps -> vertices @ Set.to_list ps
+            | `Only_result_predecessors -> List.map results ~f:(fun r -> Result.(r.vertex))
+            | `With_predecessors ps -> Set.to_list ps
           end |> function
           (* Short circuit: add no binding if the predecessors is empty. *)
           | [] -> None

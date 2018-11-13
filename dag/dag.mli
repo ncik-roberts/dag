@@ -26,6 +26,12 @@ val predecessors : dag -> Vertex.t -> Vertex.t list
 val successors : dag -> Vertex.t -> Vertex.Set.t
 val inputs : dag -> Vertex.t list
 
+(* Does the vertex contain a nested graph? (E.g. a parallel block vertex
+ * contains a nested graph.) If so, return the return vertex of that
+ * graph. The name `unroll` is customary for recursive types.
+ *)
+val unroll : dag -> Vertex.t -> Vertex.t option
+
 (** Function name + graph. *)
 type dag_fun = {
   dag_name : string;

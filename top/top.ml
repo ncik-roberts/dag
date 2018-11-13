@@ -4,7 +4,10 @@ let run_on_ast (ast : Ast.t) : unit =
   Tc.check ast;
   print_endline "Typechecking succeeded.";
   let dag = Dag.of_ast ast in
-  print_endline (Core.Sexp.to_string_hum (Dag.sexp_of_t dag))
+  List.iter dag ~f:(fun dag_fun ->
+    print_endline (Sexp.to_string_hum (Dag.sexp_of_dag_fun dag_fun));
+    let traversal = Dag_traversal.any_traversal Dag.(dag_fun.dag_graph) in
+    print_endline (Sexp.to_string_hum (List.sexp_of_t Dag.Vertex.sexp_of_t traversal)))
 
 let run_on_file (file : string) : unit =
   match Sys.file_exists file with

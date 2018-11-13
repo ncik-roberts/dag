@@ -10,3 +10,8 @@ module Inverter (C : Comparable.S) = struct
               | None -> C.Set.singleton key
               | Some set -> C.Set.add set key)))
 end
+
+module type Comparable_sexpable = sig
+  include Comparable.S
+  include Sexpable.S with type t := t
+end

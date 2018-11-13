@@ -60,14 +60,24 @@ module Result = struct
     vertex : Vertex.t;
   }
 
-  let to_singleton vertex =
-    Option.value_map ~f:(Vertex.Map.singleton vertex) ~default:Vertex.Map.empty
+  (** Return a result for the given vertex, additionally adding singleton
+   * bindings for in the maps if provided as optional arguments. *)
+  let empty_of
+    : ?view:Vertex_view.t option
+    -> ?predecessors:Vertex.t list option
+    -> Vertex.t -> t =
+    let to_singleton vertex =
+      Option.value_map ~f:(Vertex.Map.singleton vertex) ~default:Vertex.Map.empty in
+    fun ?(view=None) ?(predecessors=None) (vertex : Vertex.t) ->
+      let views = to_singleton vertex view in
+      let predecessors = to_singleton vertex predecessors in
+      { views; predecessors; vertex; }
 
-  let empty_of ?(view=None) ?(predecessors=None) (vertex : Vertex.t) =
-    let views = to_singleton vertex view in
-    let predecessors = to_singleton vertex predecessors in
-    { views; predecessors; vertex; }
-
+  (**
+   * Bias indicates whether to take vertex from left or right argument.
+   * Otherwise, merges; failing if there is a duplicate key in the merged
+   * maps.
+   *)
   let union_with_bias : bias:[ `Left | `Right ] -> t -> t -> t =
     let merge_exn = Map.merge_skewed ~combine:(fun ~key -> failwith "Duplicate key.") in
     fun ~bias result1 result2 -> {
@@ -99,27 +109,40 @@ let of_fun_defn (f : Ast.fun_defn) : dag_fun =
           let vertex = next_vertex () in
           let view = Vertex_view.Function fun_call.call_name in
           let results = List.map fun_call.call_args ~f:(loop_arg ctx) in
-          `New_vertex (vertex, view, results)
+          `New_vertex (vertex, view, results, `No_additional_predecessors)
       | Ast.Parallel stmts ->
           let vertex = next_vertex () in
           let { Result.vertex = return_vertex; _; } as result = loop_stmts ctx stmts in
           let view = Vertex_view.Parallel_block return_vertex in
-          `New_vertex (vertex, view, [result])
+
+          (* For a parallel block, the additional predecessors are the vertices used
+           * in the statements that are already in the context.
+           *
+           * Intuitively, these are what must be computed before the parallel block can
+           * be run.
+           *)
+          let additional_predecessors =
+            let ctx_keys = Vertex.Set.of_list (Map.data ctx) in
+            Map.fold Result.(result.predecessors)
+              ~init:Vertex.Set.empty
+              ~f:(fun ~key:_ ~data -> Set.union (Set.inter (Vertex.Set.of_list data) ctx_keys))
+          in
+          `New_vertex (vertex, view, [result], `With_additional_predecessors additional_predecessors)
       | Ast.Const i ->
           let vertex = next_vertex () in
           let view = Vertex_view.(Literal (Int32 i)) in
-          `New_vertex (vertex, view, [])
+          `New_vertex (vertex, view, [], `No_additional_predecessors)
       | Ast.Binop binop ->
           let vertex = next_vertex () in
           let view = Vertex_view.Binop binop.binary_operator in
           let result1 = loop_expr ctx binop.binary_operand1 in
           let result2 = loop_expr ctx binop.binary_operand2 in
-          `New_vertex (vertex, view, [result1; result2])
+          `New_vertex (vertex, view, [result1; result2], `No_additional_predecessors)
       | Ast.Unop unop ->
           let vertex = next_vertex () in
           let view = Vertex_view.Unop unop.unary_operator in
           let result = loop_expr ctx unop.unary_operand in
-          `New_vertex (vertex, view, [result])
+          `New_vertex (vertex, view, [result], `No_additional_predecessors)
       | Ast.Variable v ->
           let vertex = Map.find_exn ctx v in
           `Reused_vertex vertex
@@ -128,10 +151,20 @@ let of_fun_defn (f : Ast.fun_defn) : dag_fun =
     (* Take action based on vertex status. *)
     match vertex_info with
     | `Reused_vertex vertex -> Result.empty_of vertex
-    | `New_vertex (vertex, view, results) ->
+    | `New_vertex (vertex, view, results, predecessor_status) ->
         (* Fold results together. *)
         let vertices = List.map results ~f:(fun r -> Result.(r.vertex)) in
-        let init = Result.empty_of vertex ~predecessors:(Some vertices) ~view:(Some view) in
+        let predecessors =
+          begin
+            match predecessor_status with
+            | `No_additional_predecessors -> vertices
+            | `With_additional_predecessors ps -> vertices @ Set.to_list ps
+          end |> function
+          (* Short circuit: add no binding if the predecessors is empty. *)
+          | [] -> None
+          | xs -> Some xs
+        in
+        let init = Result.empty_of vertex ~predecessors ~view:(Some view) in
         List.fold_left results ~init ~f:(Result.union_with_bias ~bias:`Left)
 
   and loop_arg (ctx : Vertex.t Context.t) (arg : Ast.arg) : Result.t = match arg with
@@ -190,8 +223,8 @@ let of_fun_defn (f : Ast.fun_defn) : dag_fun =
   (* Initial local variable context *)
   let init_ctx = String.Map.of_alist_exn (List.zip_exn input_names inputs) in
 
-  let result = loop_stmts init_ctx Ast.(f.fun_body) in
-  { dag_name = Ast.(f.fun_name);
+  let result = loop_stmts init_ctx Ast.(f.fun_body) in {
+    dag_name = Ast.(f.fun_name);
     dag_graph =
       let Result.{ predecessors; views; vertex = return_vertex; } = result in
       let successors = Invert_vertex.invert predecessors in

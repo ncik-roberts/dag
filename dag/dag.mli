@@ -17,7 +17,6 @@ module Vertex_view : sig
     | Literal of literal
     | Parallel_binding of Ast.ident
     | Input of Ast.ident
-    | Return
     [@@deriving sexp]
 end
 
@@ -25,6 +24,12 @@ val return_vertex : dag -> Vertex.t
 val predecessors : dag -> Vertex.t -> Vertex.t list
 val successors : dag -> Vertex.t -> Vertex.Set.t
 val inputs : dag -> Vertex.t list
+
+(** Returned in smallest-to-largest order. *)
+val enclosing_parallel_blocks : dag -> Vertex.t -> Vertex.t list
+
+(** Raises invalid argument exception if the vertex is not a parallel block vertex. *)
+val vertices_in_block : dag -> parallel_block_vertex:Vertex.t -> Vertex.Set.t
 
 (* Does the vertex contain a nested graph? (E.g. a parallel block vertex
  * contains a nested graph.) If so, return the return vertex of that

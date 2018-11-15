@@ -16,7 +16,6 @@ module Vertex_view = struct
     | Literal of literal
     | Parallel_binding of Ast.ident
     | Input of Ast.ident
-    | Return
     [@@deriving sexp]
 end
 
@@ -25,28 +24,48 @@ module Vertex_info = struct
     successors : Vertex.Set.t;
     predecessors : Vertex.t list;
     view : Vertex_view.t;
+    enclosing_parallel_blocks : Vertex.t list;
+    vertices_in_block : Vertex.Set.t option; (* Populated only if the view is a return vertex. *)
   } [@@deriving sexp]
 
   let collect_into_map
     ~(predecessors : Vertex.t list Vertex.Map.t)
     ~(successors : Vertex.Set.t Vertex.Map.t)
-    ~(views : Vertex_view.t Vertex.Map.t) : t Vertex.Map.t =
-    let preds_succs =
-      Map.fold2 predecessors successors
-        ~init:Vertex.Map.empty
-        ~f:(fun ~key ~data acc -> match data with
-          | `Both (p, s) -> Map.add_exn acc ~key ~data:(p, s)
-          | `Left p -> Map.add_exn acc ~key ~data:(p, Vertex.Set.empty)
-          | `Right s -> Map.add_exn acc ~key ~data:([], s))
+    ~(views : Vertex_view.t Vertex.Map.t)
+    ~(enclosing_parallel_blocks : Vertex.t list Vertex.Map.t)
+    ~(vertices_in_block : Vertex.Set.t Vertex.Map.t) : t Vertex.Map.t =
+
+    let for_key (key : Vertex.t) : t =
+      let find map ~default ~f = Option.value_map (Map.find map key) ~f ~default in
+      let p = find predecessors ~default:[] ~f:Fn.id in
+      let s = find successors ~default:Vertex.Set.empty ~f:Fn.id in
+      let v = match Map.find views key with
+        | Some v -> v
+        | None -> failwithf "Unknown vertex `%ld`." key ()
+      in
+      let e = find enclosing_parallel_blocks ~default:[] ~f:Fn.id in
+      let vtx = find vertices_in_block ~f:Option.some ~default:None in
+      { predecessors = p;
+        successors = s;
+        view = v;
+        enclosing_parallel_blocks = e;
+        vertices_in_block = vtx;
+      }
     in
-    Map.fold2 views preds_succs
-      ~init:Vertex.Map.empty
-      ~f:(fun ~key ~data acc -> match data with
-        | `Both (v, (p, s)) ->
-            Map.add_exn acc ~key ~data:{ view = v; predecessors = p; successors = s; }
-        | `Left v ->
-            Map.add_exn acc ~key ~data:{ view = v; predecessors = []; successors = Vertex.Set.empty; }
-        | `Right (_p, _s) -> failwithf "Unknown vertex `%ld`." key ())
+
+    let keys =
+      let ks = Vertex.Set.of_map_keys in
+      Vertex.Set.union_list
+        [ ks predecessors;
+          ks successors;
+          ks views;
+          ks enclosing_parallel_blocks;
+          ks vertices_in_block;
+        ]
+    in
+
+    Vertex.Set.to_map keys ~f:for_key
+
 end
 
 (** Directed acyclic graph *)
@@ -62,13 +81,18 @@ let predecessors dag key = (vertex_info dag key).Vertex_info.predecessors
 let view dag key = (vertex_info dag key).Vertex_info.view
 let successors dag key = (vertex_info dag key).Vertex_info.successors
 let inputs dag = dag.inputs
+let enclosing_parallel_blocks dag key = (vertex_info dag key).Vertex_info.enclosing_parallel_blocks
+let vertices_in_block dag ~parallel_block_vertex:key =
+  match (vertex_info dag key).Vertex_info.vertices_in_block with
+  | None -> invalid_argf "Not a return vertex: `%ld`." key ()
+  | Some vs -> vs
 
 let unroll dag key =
   let open Vertex_view in
   (* Only recursive production is Parallel_block *)
   match view dag key with
   | Parallel_block t -> Some t
-  | Return | Function _ | Binop _ | Unop _ | Literal _ | Parallel_binding _ | Input _ -> None
+  | Function _ | Binop _ | Unop _ | Literal _ | Parallel_binding _ | Input _ -> None
 
 type 'a counter = unit -> 'a
 let make_counter ~(seed:'a) ~(next:'a -> 'a) : 'a counter =
@@ -83,13 +107,19 @@ type dag_fun = {
 module Invert_vertex = Utils.Inverter (Vertex)
 
 (** Local variable context. *)
-module Context = String.Map
+module Context = struct
+  type t = {
+    local_vars : Vertex.t String.Map.t;
+    enclosing_parallel_blocks : Vertex.t list;
+  }
+end
 
 (** Result of translation. *)
 module Result = struct
   type t = {
     views : Vertex_view.t Vertex.Map.t;
     predecessors : Vertex.t list Vertex.Map.t;
+    enclosing_parallel_blocks : Vertex.t list Vertex.Map.t;
     vertex : Vertex.t;
   } [@@deriving sexp]
 
@@ -98,13 +128,15 @@ module Result = struct
   let empty_of
     : ?view:Vertex_view.t option
     -> ?predecessors:Vertex.t list option
+    -> ?enclosing_parallel_blocks:Vertex.t list
     -> Vertex.t -> t =
     let to_singleton vertex =
       Option.value_map ~f:(Vertex.Map.singleton vertex) ~default:Vertex.Map.empty in
-    fun ?(view=None) ?(predecessors=None) (vertex : Vertex.t) ->
+    fun ?(view=None) ?(predecessors=None) ?(enclosing_parallel_blocks=[]) (vertex : Vertex.t) ->
       let views = to_singleton vertex view in
       let predecessors = to_singleton vertex predecessors in
-      { views; predecessors; vertex; }
+      let enclosing_parallel_blocks = Vertex.Map.singleton vertex enclosing_parallel_blocks in
+      { views; predecessors; vertex; enclosing_parallel_blocks; }
 
   (**
    * Bias indicates whether to take vertex from left or right argument.
@@ -116,6 +148,11 @@ module Result = struct
     fun ~bias result1 result2 -> {
       views = merge_exn result1.views result2.views;
       predecessors = merge_exn result1.predecessors result2.predecessors;
+      (* These are redundant but that's ok. Just take either result. *)
+      enclosing_parallel_blocks =
+        Map.merge_skewed ~combine:(fun ~key -> Fn.const)
+          result1.enclosing_parallel_blocks
+          result2.enclosing_parallel_blocks;
       vertex = match bias with
         | `Left -> result1.vertex
         | `Right -> result2.vertex;
@@ -133,7 +170,7 @@ let of_ast : Ast.t -> t =
   let next_vertex = make_counter ~seed:0l ~next:Int32.succ in
 
   (* Returns id of expression vertex. *)
-  let rec loop_expr (ctx : Vertex.t Context.t) (expr : Ast.expr) : Result.t =
+  let rec loop_expr (ctx : Context.t) (expr : Ast.expr) : Result.t =
     let vertex_info = match expr with
       | Ast.Fun_call fun_call ->
           let vertex = next_vertex () in
@@ -142,7 +179,8 @@ let of_ast : Ast.t -> t =
           `New_vertex (vertex, view, results, `Only_result_predecessors)
       | Ast.Parallel stmts ->
           let vertex = next_vertex () in
-          let { Result.vertex = return_vertex; _; } as result = loop_stmts ctx stmts in
+          let ctx' = Context.{ ctx with enclosing_parallel_blocks = vertex :: ctx.enclosing_parallel_blocks } in
+          let { Result.vertex = return_vertex; _; } as result = loop_stmts ctx' stmts in
           let view = Vertex_view.Parallel_block return_vertex in
 
           (* For a parallel block, the additional predecessors are the vertices used
@@ -152,7 +190,7 @@ let of_ast : Ast.t -> t =
            * be run.
            *)
           let additional_predecessors =
-            let ctx_keys = Vertex.Set.of_list (Map.data ctx) in
+            let ctx_keys = Vertex.Set.of_list (Map.data Context.(ctx.local_vars)) in
             Map.fold Result.(result.predecessors)
               ~init:Vertex.Set.empty
               ~f:(fun ~key:_ ~data -> Set.union (Set.inter (Vertex.Set.of_list data) ctx_keys))
@@ -174,7 +212,7 @@ let of_ast : Ast.t -> t =
           let result = loop_expr ctx unop.unary_operand in
           `New_vertex (vertex, view, [result], `Only_result_predecessors)
       | Ast.Variable v ->
-          let vertex = Map.find_exn ctx v in
+          let vertex = Map.find_exn Context.(ctx.local_vars) v in
           `Reused_vertex vertex
     in
 
@@ -193,20 +231,24 @@ let of_ast : Ast.t -> t =
           | [] -> None
           | xs -> Some xs
         in
-        let init = Result.empty_of vertex ~predecessors ~view:(Some view) in
+        let init = Result.empty_of vertex
+          ~enclosing_parallel_blocks:Context.(ctx.enclosing_parallel_blocks)
+          ~predecessors ~view:(Some view)
+        in
         List.fold_left results ~init ~f:(Result.union_with_bias ~bias:`Left)
 
-  and loop_arg (ctx : Vertex.t Context.t) (arg : Ast.arg) : Result.t = match arg with
+  and loop_arg (ctx : Context.t) (arg : Ast.arg) : Result.t = match arg with
     | Ast.Bare_binop binop ->
         let vertex = next_vertex () in
         let view = Vertex_view.(Literal (Bare_binop binop)) in
         Result.empty_of vertex ~view:(Some view)
+          ~enclosing_parallel_blocks:Context.(ctx.enclosing_parallel_blocks)
     | Ast.Expr expr -> loop_expr ctx expr
 
   (* The vertex field of the result is the return expression vertex. *)
-  and loop_stmts (ctx : Vertex.t Context.t) (stmts : Ast.stmt list) : Result.t =
+  and loop_stmts (ctx : Context.t) (stmts : Ast.stmt list) : Result.t =
     (* Returns the vertex of the expression involved in the binding or return. *)
-    let rec loop_stmt (ctx : Vertex.t Context.t) (stmt : Ast.stmt) : Result.t =
+    let rec loop_stmt (ctx : Context.t) (stmt : Ast.stmt) : Result.t =
       match stmt with
       | Ast.Bind bind_stmt ->
           let expr_result = loop_expr ctx bind_stmt.bind_expr in
@@ -217,7 +259,10 @@ let of_ast : Ast.t -> t =
 
           let result =
             let open Result in
-            empty_of bind_vertex ~view:(Some view) ~predecessors:(Some [expr_result.vertex])
+            empty_of bind_vertex
+              ~enclosing_parallel_blocks:Context.(ctx.enclosing_parallel_blocks)
+              ~view:(Some view)
+              ~predecessors:(Some [expr_result.vertex])
           in
 
           (* Left bias so that bind_vertex is taken. *)
@@ -242,7 +287,9 @@ let of_ast : Ast.t -> t =
           let ctx' = match stmt with
             | Ast.Let { let_ident = ident }
             | Ast.Bind { bind_ident = ident } ->
-                Context.add_exn ctx ~key:ident ~data:Result.(result.vertex)
+                Context.{ ctx with
+                  local_vars = Map.add_exn ctx.local_vars ~key:ident ~data:Result.(result.vertex)
+                }
             | Ast.Return _ -> ctx
           in
 
@@ -258,19 +305,31 @@ let of_ast : Ast.t -> t =
     let input_pairs = List.zip_exn input_names inputs in
 
     (* Initial local variable context *)
-    let init_ctx = String.Map.of_alist_exn input_pairs in
+    let init_ctx = Context.{
+      local_vars = String.Map.of_alist_exn input_pairs;
+      enclosing_parallel_blocks = [];
+    } in
 
     let result = loop_stmts init_ctx Ast.(f.fun_body) in
     { dag_name = Ast.(f.fun_name);
       dag_graph =
-        let Result.{ predecessors; views; vertex = return_vertex; } = result in
+        let Result.{ predecessors; views; vertex = return_vertex; enclosing_parallel_blocks; } = result in
         (* Add input views. *)
         let views =
           List.fold_left input_pairs ~init:views
             ~f:(fun acc (name, vtx) -> Map.add_exn acc ~key:vtx ~data:(Vertex_view.Input name))
         in
         let successors = Invert_vertex.invert predecessors in
-        let vertex_infos = Vertex_info.collect_into_map ~successors ~predecessors ~views in
+        let vertices_in_block = Invert_vertex.invert enclosing_parallel_blocks in
+        let vertex_infos = Vertex_info.collect_into_map
+          (* Look at all this data I collected: *)
+          (* Hope you like it. :) *)
+          ~successors
+          ~predecessors
+          ~views
+          ~enclosing_parallel_blocks
+          ~vertices_in_block
+        in
         { vertex_infos; return_vertex; inputs; }
     }
   in

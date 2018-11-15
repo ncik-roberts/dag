@@ -7,7 +7,7 @@ let run_on_ast (ast : Ast.t) : unit =
   List.iter dag ~f:(fun dag_fun ->
     print_endline (Sexp.to_string_hum (Dag.sexp_of_dag_fun dag_fun));
     let traversal = Dag_traversal.any_traversal Dag.(dag_fun.dag_graph) in
-    print_endline (Sexp.to_string_hum (List.sexp_of_t Dag.Vertex.sexp_of_t traversal)))
+    print_endline (Sexp.to_string_hum (Dag_traversal.sexp_of_traversal traversal)))
 
 let run_on_file (file : string) : unit =
   match Sys.file_exists file with

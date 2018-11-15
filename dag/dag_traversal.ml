@@ -3,10 +3,16 @@ open Core
 module Vertex = Dag.Vertex
 
 (** Topological sort of dag. *)
-type traversal_tree = Block of Vertex.t * traversal
+type traversal_tree =
+  | Block of Vertex.t * traversal
+  | Just of Vertex.t
+  [@@deriving sexp]
+
 and traversal = traversal_tree list [@@deriving sexp]
 
-let rec traversal_to_list = List.concat_map ~f:(function Block (x, ys) -> x :: traversal_to_list ys)
+let rec traversal_to_list = List.concat_map ~f:(function
+  | Just v -> [v]
+  | Block (x, ys) -> x :: traversal_to_list ys)
 
 (**
  * When reading the documentation for this context, keep in mind that
@@ -58,7 +64,11 @@ let any_traversal (dag : Dag.dag) : traversal =
             |> intersect_with_subgraph
             |> Set.union predecessors_minus_vertex;
         evaluated = Set.union ctx.evaluated (Vertex.Set.of_list (vertex :: traversal_to_list subtraversal));
-      } in loop ctx' ~acc:(Block (vertex, subtraversal) :: acc)
+      } in loop ctx' ~acc:(
+        let elem = match Dag.view dag vertex with
+          | Dag.Vertex_view.Parallel_block _ -> Block (vertex, subtraversal)
+          | _ -> Just vertex
+        in elem :: acc)
     in
     match candidate with
     | None when Vertex.Set.is_empty ctx.direct_predecessors -> acc

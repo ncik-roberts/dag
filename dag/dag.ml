@@ -16,6 +16,7 @@ module Vertex_view = struct
     | Literal of literal
     | Parallel_binding of Ast.ident
     | Input of Ast.ident
+    | Return
     [@@deriving sexp]
 end
 
@@ -92,7 +93,7 @@ let unroll dag key =
   (* Only recursive production is Parallel_block *)
   match view dag key with
   | Parallel_block t -> Some t
-  | Function _ | Binop _ | Unop _ | Literal _ | Parallel_binding _ | Input _ -> None
+  | Return | Function _ | Binop _ | Unop _ | Literal _ | Parallel_binding _ | Input _ -> None
 
 type 'a counter = unit -> 'a
 let make_counter ~(seed:'a) ~(next:'a -> 'a) : 'a counter =
@@ -269,7 +270,20 @@ let of_ast : Ast.t -> t =
           Result.union_with_bias ~bias:`Left result expr_result
 
       | Ast.Let let_stmt -> loop_expr ctx let_stmt.let_expr
-      | Ast.Return expr -> loop_expr ctx expr
+      | Ast.Return expr ->
+          let expr_result = loop_expr ctx expr in
+          let return_vertex = next_vertex () in
+          let view = Vertex_view.Return in
+
+          let result =
+            let open Result in
+            empty_of return_vertex
+              ~enclosing_parallel_blocks:Context.(ctx.enclosing_parallel_blocks)
+              ~view:(Some view)
+              ~predecessors:(Some [expr_result.vertex])
+          in
+          (* Left bias so that bind_vertex is taken. *)
+          Result.union_with_bias ~bias:`Left result expr_result
     in
     let (_ctx, return_result) =
       (* Right-bias fold so that return_result belongs to the last statement. *)

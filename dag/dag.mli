@@ -17,6 +17,7 @@ module Vertex_view : sig
     | Literal of literal
     | Parallel_binding of Ast.ident
     | Input of Ast.ident
+    | Return
     [@@deriving sexp]
 end
 
@@ -24,6 +25,7 @@ val return_vertex : dag -> Vertex.t
 val predecessors : dag -> Vertex.t -> Vertex.t list
 val successors : dag -> Vertex.t -> Vertex.Set.t
 val inputs : dag -> Vertex.t list
+val view : dag -> Vertex.t -> Vertex_view.t
 
 (** Returned in smallest-to-largest order. *)
 val enclosing_parallel_blocks : dag -> Vertex.t -> Vertex.t list

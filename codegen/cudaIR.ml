@@ -1,11 +1,13 @@
 
 open Core
 
-type cuda_type = Integer | Float | Double | Void | Pointer of cuda_type | Const of cuda_type | Struct of string
+type cuda_ident = string
+
+type cuda_type = Integer | Float | Double | Void | Pointer of cuda_type | Const of cuda_type | Struct of cuda_ident
 
 type cuda_mem_type = Host | Device | Shared
 
-type cuda_ident = string
+type cuda_struct = cuda_ident * (cuda_type * cuda_ident) list
 
 (* Basic arithmetic. *)
 type binop = ADD | SUB | MUL | DIV | MOD
@@ -51,7 +53,12 @@ and cuda_stmt =
   | Free of cuda_ident
   | Sync
 
-type cuda_program = cuda_func list
+type cuda_gstmt = 
+  | Function of cuda_func
+  | Decl of cuda_stmt
+  | StructDecl of cuda_struct
+
+type cuda_program = cuda_gstmt list
 
 let fmt_args args =
   (List.fold args ~init:"(" ~f:(fun str a -> str^", "^a))^")"
@@ -155,5 +162,17 @@ let fmt_func f =
   let body = fmt_block 0 (f.body) in
   "\n"^header^body^"\n"
 
-let print_program funcs = 
-  List.map funcs ~f:(fun f -> prerr_endline (fmt_func f))
+let fmt_struct (id,fields) = 
+  let sp = str_depth 1 in
+  let header = sprintf "struct %s{\n" id in
+  let block = List.map fields ~f:(fun (t,id) -> sp^(fmt_typ t)^" "^id^";\n") in
+  let block' = String.concat block^"}\n" in
+  header^block'
+
+let fmt_gstm = function
+  | Function f -> fmt_func f
+  | Decl d -> fmt_stmt 0 d
+  | StructDecl (id,fields) -> fmt_struct (id,fields)
+
+let print_program (program : cuda_program) = 
+  List.map program ~f:(fun f -> prerr_endline (fmt_gstm f))

@@ -41,7 +41,7 @@ struct dag_array_t{
 const int tp_TILE_DIM = 32;
 const int tp_BLOCK_ROWS = 8;
 
-__global__ void transposeCoalesced(int *result, const float *in)
+__global__ void transposeCoalesced(int *result, const int *in)
 {
   int TILE_DIM = tp_TILE_DIM;
   int BLOCK_ROWS = tp_BLOCK_ROWS;
@@ -65,7 +65,7 @@ __global__ void transposeCoalesced(int *result, const float *in)
 }
 
 
-__global__ multiplyMatrixVector(int* result, int* matrix, int* vector, int cols)
+__global__ void multiplyMatrixVector(int* result, int* matrix, int* vector, int cols)
 {
   __shared__ int reduce_array[blockDim.x]; // Within a block
 
@@ -115,7 +115,7 @@ void matrixMultiply(dag_array_t* result, dag_array_t* m1, dag_array_t* m2){
 
     int* d_m2;  
     cudaMalloc(&d_m2,size_m2);
-    cudaMemcpy(d_m1,m2->matrix,size_m2,cudaMemcpyHostToDevice);
+    cudaMemcpy(d_m2,m2->matrix,size_m2,cudaMemcpyHostToDevice);
 
     int* d_col; // We know that transpose will return same # of elem.
     cudaMalloc(&d_col,size_m2)

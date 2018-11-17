@@ -1,4 +1,4 @@
-
+#include <stdio.h>
  /*
   * This file is an attempt at producing what the generated target code 
   * should look like for the multiplyMatrixMatrix routine. This includes
@@ -25,7 +25,7 @@ struct dag_array_t{
   size_t rows;
   size_t cols; 
   int* matrix;
-}
+};
 
  /* 
    DAG Primitive. Here, we leverage the NVIDIA developer examples 
@@ -43,8 +43,8 @@ const int tp_BLOCK_ROWS = 8;
 
 __global__ void transposeCoalesced(int *result, const int *in)
 {
-  int TILE_DIM = tp_TILE_DIM;
-  int BLOCK_ROWS = tp_BLOCK_ROWS;
+  const int TILE_DIM = tp_TILE_DIM;
+  const int BLOCK_ROWS = tp_BLOCK_ROWS;
 
   __shared__ int tile[TILE_DIM][TILE_DIM];
 
@@ -67,9 +67,7 @@ __global__ void transposeCoalesced(int *result, const int *in)
 
 __global__ void multiplyMatrixVector(int* result, int* matrix, int* vector, int cols)
 {
-  __shared__ int reduce_array[blockDim.x]; // Within a block
-
-  int idx = blockDim.x * blockIdx.x + threadIdx.x;
+  __shared__ int reduce_array[256]; // Within a block
 
   //Todo: how do we merge nested parallel blocks into a single kernel?
   // (By propagating the index and blocks - but more precisely)
@@ -98,11 +96,6 @@ __global__ void multiplyMatrixVector(int* result, int* matrix, int* vector, int 
 // We use single-dimensional lists.
 void matrixMultiply(dag_array_t* result, dag_array_t* m1, dag_array_t* m2){
 
-    if (m1->cols != m2->rows){
-      printf("Invalid Matmult Dimensions : (%u x %u) x (%u x %u)\n"
-            m1->rows,m1->cols,m2->rows,m2->cols);
-      assert(false);
-    }
     // Precompute size information
     size_t size_m1 = m1->rows * m1->cols;
     size_t size_m2 = m2->rows * m2->cols;
@@ -118,7 +111,7 @@ void matrixMultiply(dag_array_t* result, dag_array_t* m1, dag_array_t* m2){
     cudaMemcpy(d_m2,m2->matrix,size_m2,cudaMemcpyHostToDevice);
 
     int* d_col; // We know that transpose will return same # of elem.
-    cudaMalloc(&d_col,size_m2)
+    cudaMalloc(&d_col,size_m2);
 
     int* d_result; // Allocate our result.
     cudaMalloc(&d_result,size_result);
@@ -129,10 +122,10 @@ void matrixMultiply(dag_array_t* result, dag_array_t* m1, dag_array_t* m2){
     transposeCoalesced<<<dimGrid,dimBlock>>>(d_col,d_m2);
 
     const int threadsPerBlock = 256;
-    dim3 dimBlock(threadsPerBlock,1,1); // 256 threads per row
-    dim3 dimGrid((m1->rows + threadsPerBlock - 1) / threadsPerBlock,
+    dim3 dimBlock2(threadsPerBlock,1,1); // 256 threads per row
+    dim3 dimGrid2((m1->rows + threadsPerBlock - 1) / threadsPerBlock,
                  (m2->rows + threadsPerBlock - 1) / threadsPerBlock,1);
-    multiplyMatrixVector<<<dimGrid,dimBlock>>>(d_result,d_m1,d_col,m1->cols);
+    multiplyMatrixVector<<<dimGrid2,dimBlock2>>>(d_result,d_m1,d_col,m1->cols);
 
     cudaMemcpy(result->matrix,d_result,size_result,cudaMemcpyDeviceToHost);
     result->rows = m1->rows;
@@ -142,4 +135,43 @@ void matrixMultiply(dag_array_t* result, dag_array_t* m1, dag_array_t* m2){
     cudaFree(d_m2);
     cudaFree(d_result);
     cudaFree(d_col);
+}
+
+int main(){
+  int* a = (int*) malloc(100*sizeof(int));
+  int* b = (int*) malloc(100*sizeof(int));
+
+  dag_array_t A;
+  A.rows = 10;
+  A.cols = 10;
+  A.matrix = a;
+
+  dag_array_t B;
+  B.rows = 10;
+  B.cols = 10;
+  B.matrix = b;
+
+  dag_array_t C;
+  C.rows = 10;
+  C.cols = 10;
+  C.matrix = (int*) malloc(100*sizeof(int));
+
+  for (int i = 0; i < 10; i++)
+  {
+    for (int j = 0; j < 10; j++)
+    {
+      a[i*10+j] = 1;
+      b[i*10+j] = 2;
+    }
+  }
+
+  matrixMultiply(&C,&A,&B);
+
+  for (int i = 0; i < 10; i++)
+  {
+    for (int j = 0; j < 10; j++)
+    {
+      printf(" %d ",C.matrix[i*10+j]);
+    }
+  }
 }

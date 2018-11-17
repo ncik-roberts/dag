@@ -121,6 +121,7 @@ let rec fmt_expr = function
   | Cmpop (c,e1,e2) ->
     sprintf "(%s %s %s)" (fmt_expr e1) (fmt_cmpop c) (fmt_expr e2)
   | Address e -> sprintf "&(%s)" (fmt_expr e)
+  | Index (e,i) -> sprintf "%s[%s]" (fmt_expr e) (fmt_expr i) 
   | Deref e -> sprintf "*(%s)" (fmt_expr e)
   | Field (s,f) -> sprintf "(%s)->%s" (fmt_expr s) f
 
@@ -197,8 +198,7 @@ let print_program (program : cuda_program) =
   List.map program ~f:(fun f -> prerr_endline (fmt_gstm f))
 
 (* IR Representation of the Transpose function from the CUDA documentation. *)
-
-let primitive_transpose = 
+let primitive_transpose : cuda_program = 
   [
     Decl(DeclareAssign(ConstType(Integer),"tp_TILE_DIM",Const 32L));
     Decl(DeclareAssign(ConstType(Integer),"tp_BLOCK_ROWS",Const 8L)); 
@@ -210,8 +210,8 @@ let primitive_transpose =
       args = [(Pointer(Integer),"result");(ConstType(Pointer(Integer)),"in")];
       body = 
       [
-        DeclareAssign(Integer,"TILE_DIM",Var "tp_TILE_DIM");
-        DeclareAssign(Integer,"BLOCK_ROWS",Var "tp_BLOCK_ROWS");
+        DeclareAssign(ConstType(Integer),"TILE_DIM",Var "tp_TILE_DIM");
+        DeclareAssign(ConstType(Integer),"BLOCK_ROWS",Var "tp_BLOCK_ROWS");
         DeclareArray(Shared,Integer,"tile",[Var "TILE_DIM";Var "TILE_DIM"]);
 
         DeclareAssign(Integer,"x",Binop(ADD,Binop(MUL,Var "blockIdx.x",Var "TILE_DIM"),Var "threadIdx.x"));

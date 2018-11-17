@@ -3,7 +3,7 @@ open Core
 
 type cuda_ident = string
 
-type cuda_type = Integer | Float | Double | Void | Pointer of cuda_type | Const of cuda_type | Struct of cuda_ident
+type cuda_type = Integer | Float | Double | Void | Pointer of cuda_type | ConstType of cuda_type | Struct of cuda_ident
 
 type cuda_mem_type = Host | Device | Shared
 
@@ -23,6 +23,7 @@ type cuda_expr =
   | Cmpop of cmpop * cuda_expr * cuda_expr
   | Address of cuda_expr
   | Deref of cuda_expr
+  | Index of cuda_expr * cuda_expr
   | Field of cuda_expr * cuda_ident
 
 type grid_dim = cuda_expr * cuda_expr * cuda_expr
@@ -37,8 +38,14 @@ type cuda_func = {
 }
 
 and cuda_stmt = 
+  | DeclareArray of cuda_mem_type * cuda_type * cuda_ident * (cuda_expr list)
               (* type ident = expr *)
-  | Assign of cuda_type * cuda_ident * cuda_expr
+  | DeclareAssign of cuda_type * cuda_ident * cuda_expr
+
+   (* Pretending exprs are lvalues. *)
+  | Assign of cuda_expr * cuda_expr 
+  | AssignOp of binop * cuda_expr * cuda_expr
+  | Expression of cuda_expr 
               (* for(_,_,_), {_} *)
   | Loop of (cuda_stmt * cuda_expr * cuda_stmt) * cuda_stmt list
               (* if (_) then {_} else {_} *)
@@ -71,7 +78,7 @@ let rec fmt_typ = function
   | Float -> "float"
   | Double -> "double"
   | Void -> "void"
-  | Const t -> "const "^(fmt_typ t)
+  | ConstType t -> "const "^(fmt_typ t)
   | Pointer t -> (fmt_typ t)^"*"
   | Struct s -> s
 
@@ -126,8 +133,20 @@ let rec fmt_block n block =
 and fmt_stmt n stm = 
  let sp = str_depth n in
  match stm with 
- | Assign (typ,id,exp) ->
+ | DeclareAssign (typ,id,exp) ->
    sprintf "%s %s %s = %s;" sp (fmt_typ typ) (id) (fmt_expr exp)
+
+ | DeclareArray (mem,typ,id,sizes) ->
+   let arr_exps = String.concat(List.map sizes ~f:(fun e -> "["^fmt_expr e^"]")) in
+   sprintf "%s %s %s %s %s;" sp (fmt_mem_hdr mem) (fmt_typ typ) id arr_exps
+ 
+ | Assign (l,exp) ->
+   sprintf "%s %s = %s;" sp (fmt_expr l) (fmt_expr exp)
+ 
+ | AssignOp (op,l,exp) ->
+   sprintf "%s %s %s=  %s;" sp (fmt_expr l) (fmt_binop op) (fmt_expr exp)
+
+ | Expression e -> sp^fmt_expr e^";"
 
  | Loop ((f,e,a),b) -> 
    let guard = sprintf "%s for(%s %s %s)\n" sp (fmt_stmt 0 f) (fmt_expr e) (fmt_stmt 0 a) in
@@ -176,3 +195,57 @@ let fmt_gstm = function
 
 let print_program (program : cuda_program) = 
   List.map program ~f:(fun f -> prerr_endline (fmt_gstm f))
+
+(* IR Representation of the Transpose function from the CUDA documentation. *)
+
+let primitive_transpose = 
+  [
+    Decl(DeclareAssign(ConstType(Integer),"tp_TILE_DIM",Const 32L));
+    Decl(DeclareAssign(ConstType(Integer),"tp_BLOCK_ROWS",Const 8L)); 
+    
+    Function {
+      typ = Device;
+      ret = Void;
+      name = "transposeCoalesced";
+      args = [(Pointer(Integer),"result");(ConstType(Pointer(Integer)),"in")];
+      body = 
+      [
+        DeclareAssign(Integer,"TILE_DIM",Var "tp_TILE_DIM");
+        DeclareAssign(Integer,"BLOCK_ROWS",Var "tp_BLOCK_ROWS");
+        DeclareArray(Shared,Integer,"tile",[Var "TILE_DIM";Var "TILE_DIM"]);
+
+        DeclareAssign(Integer,"x",Binop(ADD,Binop(MUL,Var "blockIdx.x",Var "TILE_DIM"),Var "threadIdx.x"));
+        DeclareAssign(Integer,"y",Binop(ADD,Binop(MUL,Var "blockIdx.y",Var "TILE_DIM"),Var "threadIdx.y"));
+
+        DeclareAssign(Integer,"width",Binop(MUL,Var "gridDim.x",Var "TILE_DIM"));
+
+        Loop(
+          (DeclareAssign(Integer,"j",Const 0L),
+           Cmpop(LT,Var "j",Var "TILE_DIM"),
+           AssignOp(ADD,Var "j",Var "BLOCK_ROWS")),
+          [
+            Assign(
+              Index(Index(Var "tile",Binop(ADD,Var "threadIdx.y",Var "j")),Var "threadIdx.x"),
+              Index(Var "in",Binop(ADD,Binop(MUL,Binop(ADD,Var "y",Var "j"),Var "width"),Var "x"))
+            );
+          ]);
+
+        Sync;
+        Assign(Var "x",Binop(ADD,Binop(MUL,Var "blockIdx.y",Var "TILE_DIM"),Var "threadIdx.x"));
+        Assign(Var "y",Binop(ADD,Binop(MUL,Var "blockIdx.x",Var "TILE_DIM"),Var "threadIdx.y"));
+
+        Loop(
+          (DeclareAssign(Integer,"j",Const 0L),
+           Cmpop(LT,Var "j",Var "TILE_DIM"),
+           AssignOp(ADD,Var "j",Var "BLOCK_ROWS")),
+          [
+            Assign(
+              Index(Var "result",Binop(ADD,Binop(MUL,Binop(ADD,Var "y",Var "j"),Var "width"),Var "x")),
+              Index(Index(Var "tile",Var "threadIdx.x"),Binop(ADD,Var "threadIdx.y",Var "j"))
+            ); 
+          ]);
+      ]
+    };
+
+    
+  ]

@@ -45,7 +45,7 @@ rule initial =
   | ';' { P.SEMICOLON }
 
   | '=' { P.ASSIGN }
-  | "<-" { P.BIND }
+  | "->" { P.BIND }
 
   | '+' { P.PLUS }
   | '-' { P.MINUS }

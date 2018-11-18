@@ -26,11 +26,6 @@ type stmt =
       let_ident : ident;
       let_expr : expr;
     }
-  | Bind of {
-      bind_type : typ;
-      bind_ident : ident;
-      bind_expr : expr;
-    }
   | Return of expr
 
 and arg =
@@ -45,7 +40,12 @@ and call_name =
   | Fun_ident of ident
 
 and expr =
-  | Parallel of stmt list
+  | Parallel of {
+      parallel_arg : expr;
+      parallel_type : typ;
+      parallel_ident : ident;
+      parallel_body : stmt list;
+    }
   | Fun_call of {
       call_name : call_name;
       call_args : arg list;

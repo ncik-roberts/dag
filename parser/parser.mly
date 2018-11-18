@@ -141,11 +141,6 @@ stmt :
     ASSIGN;
     let_expr = expr;
       { Ast.Let { let_type; let_ident; let_expr; } }
-  | bind_type = typ;
-    bind_ident = IDENT;
-    BIND;
-    bind_expr = expr;
-      { Ast.Bind { bind_type; bind_ident; bind_expr; } }
   | RETURN;
     ret_expr = expr;
       { Ast.Return ret_expr }
@@ -180,10 +175,16 @@ expr :
     binary_operand2 = expr;
       { Ast.Binop { binary_operand1; binary_operator; binary_operand2; } }
   | PARALLEL;
+    LPAREN;
+    parallel_arg = expr;
+    RPAREN;
     LBRACE;
-    body = stmts;
+    parallel_type = typ;
+    parallel_ident = IDENT;
+    BIND;
+    parallel_body = stmts;
     RBRACE;
-      { Ast.Parallel body }
+      { Ast.Parallel { parallel_arg; parallel_type; parallel_ident; parallel_body; } }
   ;
 
 unop :

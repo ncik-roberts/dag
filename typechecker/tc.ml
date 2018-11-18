@@ -129,9 +129,21 @@ let rec check_expr (ctx : t) (ast : Ast.expr) : typ = match ast with
   | Ast.Unop unop ->
       let typ = check_expr ctx unop.unary_operand in
       check_unop typ unop.unary_operator
-  | Ast.Parallel stmts ->
+  | Ast.Parallel parallel ->
       begin
-        match infer_stmts { ctx with return_type = None } stmts with
+        let typ = check_expr ctx parallel.parallel_arg in
+        let given_typ = check_type ctx parallel.parallel_type in
+        begin
+          match typ, given_typ with
+          | Array t1, t2 when t1 = t2 -> ()
+          | _ -> failwith "Incompatible types in parallel binding."
+        end;
+        let ctx' = { ctx with local_var_ctx =
+          add_with_failure ctx.local_var_ctx ~key:parallel.parallel_ident ~data:given_typ
+            ~on_duplicate:"Duplicate parallel binding defn `%s`.";
+          return_type = None;
+        } in
+        match infer_stmts ctx' parallel.parallel_body with
         | { return_type = None; _; } -> failwith "Parallel stmts no return."
         | { return_type = Some typ; _; } -> Array typ
       end
@@ -145,18 +157,6 @@ let rec check_expr (ctx : t) (ast : Ast.expr) : typ = match ast with
 and check_stmt (ctx : t) (ast : Ast.stmt) : t =
   if Option.is_some ctx.return_type then failwith "Function already returned.";
   match ast with
-  | Ast.Bind bind ->
-      let typ = check_type ctx bind.bind_type in
-      let body_type = check_expr ctx bind.bind_expr in
-      begin
-        if body_type <> Array typ
-        then failwithf "Wrong type annotation on `%s`" bind.bind_ident ()
-      end;
-      { ctx with
-          local_var_ctx =
-            add_with_failure ctx.local_var_ctx
-              ~key:bind.bind_ident ~data:typ
-              ~on_duplicate:"Duplicate local variable definition `%s`"; }
   | Ast.Let let_exp ->
       let typ = check_type ctx let_exp.let_type in
       let body_type = check_expr ctx let_exp.let_expr in

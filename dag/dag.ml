@@ -16,7 +16,6 @@ module Vertex_view = struct
     | Literal of literal
     | Parallel_binding of Ast.ident
     | Input of Ast.ident
-    | Return
     [@@deriving sexp]
 end
 
@@ -26,7 +25,7 @@ module Vertex_info = struct
     predecessors : Vertex.t list;
     view : Vertex_view.t;
     enclosing_parallel_blocks : Vertex.t list;
-    vertices_in_block : Vertex.Set.t option; (* Populated only if the view is a return vertex. *)
+    vertices_in_block : Vertex.Set.t option; (* Populated only if the view is a parallel block vertex. *)
   } [@@deriving sexp]
 
   let collect_into_map
@@ -93,7 +92,7 @@ let unroll dag key =
   (* Only recursive production is Parallel_block *)
   match view dag key with
   | Parallel_block t -> Some t
-  | Return | Function _ | Binop _ | Unop _ | Literal _ | Parallel_binding _ | Input _ -> None
+  | Function _ | Binop _ | Unop _ | Literal _ | Parallel_binding _ | Input _ -> None
 
 type 'a counter = unit -> 'a
 let make_counter ~(seed:'a) ~(next:'a -> 'a) : 'a counter =
@@ -160,15 +159,16 @@ module Result = struct
     }
 end
 
+(* All the below "loop" functions make use of the following mutable state:
+ *   - next_vertex for determining fresh vertex numberings.
+ * next_vertex will always return a globally unique vertex, even across
+ * invocations of `of_ast`.
+ *)
+let next_vertex = make_counter ~seed:0l ~next:Int32.succ
+
 (** Dag of ast *)
 type t = dag_fun list [@@deriving sexp]
 let of_ast : Ast.t -> t =
-  (* All the below "loop" functions make use of the following mutable state:
-   *   - next_vertex for determining fresh vertex numberings.
-   * next_vertex will always return a globally unique vertex, even across
-   * invocations of `of_ast`.
-   *)
-  let next_vertex = make_counter ~seed:0l ~next:Int32.succ in
 
   (* Returns id of expression vertex. *)
   let rec loop_expr (ctx : Context.t) (expr : Ast.expr) : Result.t =
@@ -270,20 +270,7 @@ let of_ast : Ast.t -> t =
           Result.union_with_bias ~bias:`Left result expr_result
 
       | Ast.Let let_stmt -> loop_expr ctx let_stmt.let_expr
-      | Ast.Return expr ->
-          let expr_result = loop_expr ctx expr in
-          let return_vertex = next_vertex () in
-          let view = Vertex_view.Return in
-
-          let result =
-            let open Result in
-            empty_of return_vertex
-              ~enclosing_parallel_blocks:Context.(ctx.enclosing_parallel_blocks)
-              ~view:(Some view)
-              ~predecessors:(Some [expr_result.vertex])
-          in
-          (* Left bias so that bind_vertex is taken. *)
-          Result.union_with_bias ~bias:`Left result expr_result
+      | Ast.Return expr -> loop_expr ctx expr
     in
     let (_ctx, return_result) =
       (* Right-bias fold so that return_result belongs to the last statement. *)
@@ -348,3 +335,110 @@ let of_ast : Ast.t -> t =
     }
   in
   List.map ~f:of_fun_defn
+
+let renumber_with (dag : dag) (new_number : Vertex.t -> Vertex.t) : dag =
+  let vertex_info_list = Map.to_alist dag.vertex_infos in
+  let vertex_info_list' = List.map vertex_info_list ~f:(fun (k, v) ->
+    let v' = Vertex_info.{
+      successors = Vertex.Set.map ~f:new_number v.successors;
+      predecessors = List.map ~f:new_number v.predecessors;
+      view = begin
+        let open Vertex_view in
+        match v.view with
+        | Parallel_block vtx -> Parallel_block (new_number vtx)
+        | x -> x
+      end;
+      enclosing_parallel_blocks = List.map ~f:new_number v.enclosing_parallel_blocks;
+      vertices_in_block = Option.map ~f:(Vertex.Set.map ~f:new_number) v.vertices_in_block;
+    } in (new_number k, v'))
+  in
+  {
+    inputs = List.map ~f:new_number dag.inputs;
+    return_vertex = new_number dag.return_vertex;
+    vertex_infos = Vertex.Map.of_alist_exn vertex_info_list';
+  }
+
+let renumber_map (dag : dag) (map : Vertex.t Vertex.Map.t) : dag =
+  renumber_with dag (fun k -> Option.value ~default:k (Map.find map k))
+
+let renumber (dag : dag) : dag =
+  let new_number =
+    let table = Vertex.Table.create () in
+    Hashtbl.find_or_add table ~default:next_vertex
+  in renumber_with dag new_number
+
+let substitute (source : dag) (vertex : Vertex.t) (target : dag) : dag =
+  let source = renumber source in
+  let enclosing_blocks = enclosing_parallel_blocks target vertex in
+
+  (* As we fold through the contents of source, we do two things:
+   *   - Update the enclosing parallel blocks for all members of source.
+   *   - Update the vertices_in_block value for target.
+   * This doesn't wire together inputs/ouputs yet; we do that in the next step.
+   *)
+  let (source, target) =
+    Map.fold source.vertex_infos ~init:(source, target) ~f:(fun ~key ~data (source, target) ->
+      let source_vertex_infos = Map.update source.vertex_infos key ~f:(function
+        | None -> failwith "Impossible: vertex not found in source."
+        | Some vertex_info -> Vertex_info.{ vertex_info with
+            enclosing_parallel_blocks =
+              vertex_info.enclosing_parallel_blocks @ enclosing_blocks
+          })
+      in
+      let target_vertex_infos =
+        List.fold_left enclosing_blocks ~init:target.vertex_infos ~f:(fun acc vtx ->
+          Map.update acc vtx ~f:(function
+            | None -> failwith "Unknown enclosing parallel block."
+            | Some vertex_info -> Vertex_info.{ vertex_info with
+                vertices_in_block =
+                  Option.map ~f:(Fn.flip Set.add key) vertex_info.vertices_in_block
+              }))
+      in
+      ({ source with vertex_infos = source_vertex_infos },
+       { target with vertex_infos = target_vertex_infos }))
+  in
+
+  (**
+   * Now we wire together the predecessors of the vertex into the inputs of source.
+   *)
+  let input_pred_pairs = List.zip_exn source.inputs (predecessors target vertex) in
+  (* First subgoal: update successors in target. *)
+  let target = List.fold_left input_pred_pairs ~init:target
+    ~f:(fun target (input, pred) ->
+      let target_vertex_infos = Map.update target.vertex_infos pred ~f:(function
+        | None -> failwith "Impossible: not found predecessor."
+        | Some vertex_info -> Vertex_info.{ vertex_info with
+            successors = Set.union (successors target vertex) vertex_info.successors;
+          })
+      in Vertex_info.{ target with vertex_infos = target_vertex_infos })
+  in
+  (* Next subgoal: globally rename input vertices in source to the predecessors. *)
+  let source = renumber_map source (Vertex.Map.of_alist_exn input_pred_pairs) in
+
+  (* Now we wire together the return vertex of source to the successors of the function call in target
+   * by renaming the function call to the return vertex. *)
+  let target = renumber_map target (Vertex.Map.singleton vertex source.return_vertex) in
+
+  (* Now for the death blow: add everything from source into target. *)
+  { target with vertex_infos = Map.merge_skewed target.vertex_infos source.vertex_infos
+      ~combine:(fun ~key -> failwith "Duplicate key in source and target. :(") }
+
+let inline (dag : dag) (ast : t) : dag =
+  let ast_map = String.Map.of_alist_exn (List.map ast ~f:(fun d -> (d.dag_name, d.dag_graph))) in
+  let rec loop (visited : Vertex.Set.t) (candidates : Vertex.Set.t) (dag : dag) : dag =
+    match Vertex.Set.choose candidates with
+    | None -> dag
+    | Some vertex ->
+        let visited' = Set.add visited vertex in
+        let open Vertex_view in
+        match view dag vertex with
+        | Function (Ast.Fun_ident name) ->
+            let f = Map.find_exn ast_map name in
+            let dag' = substitute f vertex dag in
+            let candidates' = Set.diff (Set.of_map_keys dag'.vertex_infos) visited' in
+            loop visited' candidates' dag'
+        | _ ->
+          let candidates' = Vertex.Set.remove candidates vertex in
+          loop visited' candidates' dag
+  in
+  loop Vertex.Set.empty (Vertex.Set.singleton dag.return_vertex) dag

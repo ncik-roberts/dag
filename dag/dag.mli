@@ -17,7 +17,6 @@ module Vertex_view : sig
     | Literal of literal
     | Parallel_binding of Ast.ident
     | Input of Ast.ident
-    | Return
     [@@deriving sexp]
 end
 
@@ -48,4 +47,5 @@ type dag_fun = {
 type t = dag_fun list [@@deriving sexp]
 val of_ast : Ast.t -> t
 
-(** TODO: inline; i.e. write a function inline : dag -> t -> dag. *)
+(** Inline all function calls. *)
+val inline : dag -> t -> dag

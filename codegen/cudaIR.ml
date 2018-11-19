@@ -14,10 +14,19 @@ type binop = ADD | SUB | MUL | DIV | MOD
 type unop = INCR | DECR
 type cmpop = EQ  | NEQ | GTE | LTE | GT | LT
 
+type dim = X | Y | Z
+
+type cuda_variable = 
+  | BlockIdx  of dim
+  | BlockDim  of dim
+  | GridDim   of dim
+  | ThreadIdx of dim
+
 (* Simple nested expressions. *)
 type cuda_expr =
   | Const of Int64.t
   | Var of cuda_ident
+  | KVar of cuda_variable
   | Unop of unop * cuda_expr
   | Binop of binop * cuda_expr * cuda_expr
   | Cmpop of cmpop * cuda_expr * cuda_expr
@@ -111,9 +120,21 @@ let fmt_cmpop = function
   | GT  -> ">"
   | GTE -> ">="
 
+let fmt_dim = function
+  | X -> "x"
+  | Y -> "y"
+  | Z -> "z"
+
+let fmt_kvar = function
+  | BlockIdx  idx ->  "blockIdx."^fmt_dim idx
+  | BlockDim  idx ->  "blockDim."^fmt_dim idx
+  | GridDim   idx ->   "gridDim."^fmt_dim idx
+  | ThreadIdx idx -> "threadIdx."^fmt_dim idx
+
 let rec fmt_expr = function
   | Const c -> Int64.to_string c
   | Var v -> v
+  | KVar v -> fmt_kvar v
   | Unop (u,e) -> 
     sprintf "(%s)%s" (fmt_expr e) (fmt_unop u)
   | Binop (b,e1,e2) -> 
@@ -214,10 +235,10 @@ let primitive_transpose : cuda_program =
         DeclareAssign(ConstType(Integer),"BLOCK_ROWS",Var "tp_BLOCK_ROWS");
         DeclareArray(Shared,Integer,"tile",[Var "TILE_DIM";Var "TILE_DIM"]);
 
-        DeclareAssign(Integer,"x",Binop(ADD,Binop(MUL,Var "blockIdx.x",Var "TILE_DIM"),Var "threadIdx.x"));
-        DeclareAssign(Integer,"y",Binop(ADD,Binop(MUL,Var "blockIdx.y",Var "TILE_DIM"),Var "threadIdx.y"));
+        DeclareAssign(Integer,"x",Binop(ADD,Binop(MUL,KVar (BlockIdx X),Var "TILE_DIM"),KVar (ThreadIdx X)));
+        DeclareAssign(Integer,"y",Binop(ADD,Binop(MUL,KVar (BlockIdx Y),Var "TILE_DIM"),KVar (ThreadIdx Y)));
 
-        DeclareAssign(Integer,"width",Binop(MUL,Var "gridDim.x",Var "TILE_DIM"));
+        DeclareAssign(Integer,"width",Binop(MUL,KVar (GridDim X),Var "TILE_DIM"));
 
         Loop(
           (DeclareAssign(Integer,"j",Const 0L),
@@ -225,14 +246,14 @@ let primitive_transpose : cuda_program =
            AssignOp(ADD,Var "j",Var "BLOCK_ROWS")),
           [
             Assign(
-              Index(Index(Var "tile",Binop(ADD,Var "threadIdx.y",Var "j")),Var "threadIdx.x"),
+              Index(Index(Var "tile",Binop(ADD,KVar (ThreadIdx Y),Var "j")),KVar (ThreadIdx X)),
               Index(Var "in",Binop(ADD,Binop(MUL,Binop(ADD,Var "y",Var "j"),Var "width"),Var "x"))
             );
           ]);
 
         Sync;
-        Assign(Var "x",Binop(ADD,Binop(MUL,Var "blockIdx.y",Var "TILE_DIM"),Var "threadIdx.x"));
-        Assign(Var "y",Binop(ADD,Binop(MUL,Var "blockIdx.x",Var "TILE_DIM"),Var "threadIdx.y"));
+        Assign(Var "x",Binop(ADD,Binop(MUL,KVar (BlockIdx Y),Var "TILE_DIM"),KVar (ThreadIdx X)));
+        Assign(Var "y",Binop(ADD,Binop(MUL,KVar (BlockIdx X),Var "TILE_DIM"),KVar (ThreadIdx Y)));
 
         Loop(
           (DeclareAssign(Integer,"j",Const 0L),
@@ -241,7 +262,7 @@ let primitive_transpose : cuda_program =
           [
             Assign(
               Index(Var "result",Binop(ADD,Binop(MUL,Binop(ADD,Var "y",Var "j"),Var "width"),Var "x")),
-              Index(Index(Var "tile",Var "threadIdx.x"),Binop(ADD,Var "threadIdx.y",Var "j"))
+              Index(Index(Var "tile",KVar (ThreadIdx X)),Binop(ADD,KVar (ThreadIdx Y),Var "j"))
             ); 
           ]);
       ]

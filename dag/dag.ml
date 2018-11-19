@@ -14,7 +14,6 @@ module Vertex_view = struct
     | Binop of Ast.binop
     | Unop of Ast.unop
     | Literal of literal
-    | Parallel_binding of Ast.ident
     | Input of Ast.ident
     [@@deriving sexp]
 end
@@ -92,7 +91,7 @@ let unroll dag key =
   (* Only recursive production is Parallel_block *)
   match view dag key with
   | Parallel_block t -> Some t
-  | Function _ | Binop _ | Unop _ | Literal _ | Parallel_binding _ | Input _ -> None
+  | Function _ | Binop _ | Unop _ | Literal _ | Input _ -> None
 
 type 'a counter = unit -> 'a
 let make_counter ~(seed:'a) ~(next:'a -> 'a) : 'a counter =
@@ -177,41 +176,38 @@ let of_ast : Ast.t -> t =
           let vertex = next_vertex () in
           let view = Vertex_view.Function fun_call.call_name in
           let results = List.map fun_call.call_args ~f:(loop_arg ctx) in
-          `New_vertex (vertex, view, results, `Only_result_predecessors)
-      | Ast.Parallel stmts ->
+          `New_vertex (vertex, view, results, `No_additional_results)
+      | Ast.Parallel parallel ->
           let vertex = next_vertex () in
-          let ctx' = Context.{ ctx with enclosing_parallel_blocks = vertex :: ctx.enclosing_parallel_blocks } in
-          let { Result.vertex = return_vertex; _; } as result = loop_stmts ctx' stmts in
-          let view = Vertex_view.Parallel_block return_vertex in
-
-          (* For a parallel block, the additional predecessors are the vertices used
-           * in the statements that are already in the context.
-           *
-           * Intuitively, these are what must be computed before the parallel block can
-           * be run.
-           *)
-          let additional_predecessors =
-            let ctx_keys = Vertex.Set.of_list (Map.data Context.(ctx.local_vars)) in
-            Map.fold Result.(result.predecessors)
-              ~init:Vertex.Set.empty
-              ~f:(fun ~key:_ ~data -> Set.union (Set.inter (Vertex.Set.of_list data) ctx_keys))
+          let vertex_binding = next_vertex () in
+          let result_expr = loop_expr ctx parallel.parallel_arg in
+          let result_binding = Result.empty_of vertex_binding
+            ~enclosing_parallel_blocks:Context.(ctx.enclosing_parallel_blocks)
+            ~view:(Some (Vertex_view.Input parallel.parallel_ident))
           in
-          `New_vertex (vertex, view, [result], `With_predecessors additional_predecessors)
+          let ctx' = Context.{
+            enclosing_parallel_blocks = vertex :: ctx.enclosing_parallel_blocks;
+            local_vars = Map.add_exn Context.(ctx.local_vars)
+              ~key:parallel.parallel_ident ~data:vertex_binding;
+          } in
+          let { Result.vertex = return_vertex; _; } as result = loop_stmts ctx' parallel.parallel_body in
+          let view = Vertex_view.Parallel_block return_vertex in
+          `New_vertex (vertex, view, [result_expr], `With_additional_results [result; result_binding])
       | Ast.Const i ->
           let vertex = next_vertex () in
           let view = Vertex_view.(Literal (Int32 i)) in
-          `New_vertex (vertex, view, [], `Only_result_predecessors)
+          `New_vertex (vertex, view, [], `No_additional_results)
       | Ast.Binop binop ->
           let vertex = next_vertex () in
           let view = Vertex_view.Binop binop.binary_operator in
           let result1 = loop_expr ctx binop.binary_operand1 in
           let result2 = loop_expr ctx binop.binary_operand2 in
-          `New_vertex (vertex, view, [result1; result2], `Only_result_predecessors)
+          `New_vertex (vertex, view, [result1; result2], `No_additional_results)
       | Ast.Unop unop ->
           let vertex = next_vertex () in
           let view = Vertex_view.Unop unop.unary_operator in
           let result = loop_expr ctx unop.unary_operand in
-          `New_vertex (vertex, view, [result], `Only_result_predecessors)
+          `New_vertex (vertex, view, [result], `No_additional_results)
       | Ast.Variable v ->
           let vertex = Map.find_exn Context.(ctx.local_vars) v in
           `Reused_vertex vertex
@@ -220,23 +216,23 @@ let of_ast : Ast.t -> t =
     (* Take action based on vertex status. *)
     match vertex_info with
     | `Reused_vertex vertex -> Result.empty_of vertex
-    | `New_vertex (vertex, view, results, predecessor_status) ->
+    | `New_vertex (vertex, view, results, result_status) ->
         (* Fold results together. *)
-        let predecessors =
-          begin
-            match predecessor_status with
-            | `Only_result_predecessors -> List.map results ~f:(fun r -> Result.(r.vertex))
-            | `With_predecessors ps -> Set.to_list ps
-          end |> function
-          (* Short circuit: add no binding if the predecessors is empty. *)
-          | [] -> None
-          | xs -> Some xs
+        let predecessors = List.map results ~f:(fun r -> Result.(r.vertex))
+          |> function
+            (* Short circuit: add no binding if the predecessors is empty. *)
+            | [] -> None
+            | xs -> Some xs
+        in
+        let results_to_add = results @ match result_status with
+          | `No_additional_results -> []
+          | `With_additional_results rs -> rs
         in
         let init = Result.empty_of vertex
           ~enclosing_parallel_blocks:Context.(ctx.enclosing_parallel_blocks)
           ~predecessors ~view:(Some view)
         in
-        List.fold_left results ~init ~f:(Result.union_with_bias ~bias:`Left)
+        List.fold_left results_to_add ~init ~f:(Result.union_with_bias ~bias:`Left)
 
   and loop_arg (ctx : Context.t) (arg : Ast.arg) : Result.t = match arg with
     | Ast.Bare_binop binop ->
@@ -251,24 +247,6 @@ let of_ast : Ast.t -> t =
     (* Returns the vertex of the expression involved in the binding or return. *)
     let rec loop_stmt (ctx : Context.t) (stmt : Ast.stmt) : Result.t =
       match stmt with
-      | Ast.Bind bind_stmt ->
-          let expr_result = loop_expr ctx bind_stmt.bind_expr in
-
-          (* Add intermediary vertex expressing parallel bind. *)
-          let bind_vertex = next_vertex () in
-          let view = Vertex_view.Parallel_binding bind_stmt.bind_ident in
-
-          let result =
-            let open Result in
-            empty_of bind_vertex
-              ~enclosing_parallel_blocks:Context.(ctx.enclosing_parallel_blocks)
-              ~view:(Some view)
-              ~predecessors:(Some [expr_result.vertex])
-          in
-
-          (* Left bias so that bind_vertex is taken. *)
-          Result.union_with_bias ~bias:`Left result expr_result
-
       | Ast.Let let_stmt -> loop_expr ctx let_stmt.let_expr
       | Ast.Return expr -> loop_expr ctx expr
     in
@@ -286,8 +264,7 @@ let of_ast : Ast.t -> t =
 
           (* Update ctx with binding *)
           let ctx' = match stmt with
-            | Ast.Let { let_ident = ident }
-            | Ast.Bind { bind_ident = ident } ->
+            | Ast.Let { let_ident = ident } ->
                 Context.{ ctx with
                   local_vars = Map.add_exn ctx.local_vars ~key:ident ~data:Result.(result.vertex)
                 }

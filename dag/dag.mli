@@ -15,7 +15,6 @@ module Vertex_view : sig
     | Binop of Ast.binop
     | Unop of Ast.unop
     | Literal of literal
-    | Parallel_binding of Ast.ident
     | Input of Ast.ident
     [@@deriving sexp]
 end

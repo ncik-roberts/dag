@@ -27,11 +27,6 @@ type context = {
    *)
   direct_predecessors : Vertex.Set.t;
 
-  (* Only vertices to consider evaluate.
-   * None indicates the universe.
-   *)
-  subgraph : Vertex.Set.t option;
-
   (* Vertices already placed into the evaluation order.
    * We add one new vertex to this each iteration of the loop.
    *)
@@ -41,10 +36,9 @@ type context = {
 let any_traversal (dag : Dag.dag) : traversal =
 
   (* How do I evaluate a vertex? *)
-  let rec loop_of_vertex ?(subgraph : Vertex.Set.t option = None) (vertex : Vertex.t) : traversal =
+  let rec loop_of_vertex (vertex : Vertex.t) : traversal =
     loop ~acc:[] {
       direct_predecessors = Vertex.Set.singleton vertex;
-      subgraph;
       evaluated = Vertex.Set.empty;
     }
 
@@ -55,13 +49,9 @@ let any_traversal (dag : Dag.dag) : traversal =
     ) in
     let loop_with (vertex : Vertex.t) (subtraversal : traversal) : traversal =
       let predecessors_minus_vertex = Set.remove ctx.direct_predecessors vertex in
-      let intersect_with_subgraph =
-        Option.value_map ctx.subgraph ~f:Set.inter ~default:Fn.id
-      in
-      let ctx' = { ctx with
+      let ctx' = {
         direct_predecessors =
           Vertex.Set.of_list (Dag.predecessors dag vertex)
-            |> intersect_with_subgraph
             |> Set.union predecessors_minus_vertex;
         evaluated = Set.union ctx.evaluated (Vertex.Set.of_list (vertex :: traversal_to_list subtraversal));
       } in loop ctx' ~acc:(
@@ -71,17 +61,10 @@ let any_traversal (dag : Dag.dag) : traversal =
         in elem :: acc)
     in
     match candidate with
-    | None when Vertex.Set.is_empty ctx.direct_predecessors -> acc
-    | None ->
-        prerr_endline (Sexp.to_string_hum (sexp_of_context ctx));
-        prerr_endline (Sexp.to_string_hum (Vertex.Set.sexp_of_t ctx.direct_predecessors));
-        failwith "Cyclic dependency detected."
+    | None -> acc
     | Some vertex ->
         let subtraversal =
-          Option.value_map (Dag.unroll dag vertex) ~default:[]
-            ~f:(fun return_vertex ->
-              let in_block = Dag.vertices_in_block dag ~parallel_block_vertex:vertex in
-              loop_of_vertex return_vertex ~subgraph:(Some in_block))
+          Option.value_map (Dag.unroll dag vertex) ~default:[] ~f:loop_of_vertex
         in
         loop_with vertex subtraversal
   in

@@ -3,15 +3,13 @@ int dotProduct(int[] v1, int[] v2) {
 }
 
 int[] multiplyMatrixVector(int[][] m, int[] v) {
-  return parallel {
-    int[] row <- m;
+  return parallel (m) { int[] row ->
     return dotProduct(row, v);
   };
 }
 
 int[][] multiplyMatrixMatrix(int[][] m1, int[][] m2) {
-  return parallel {
-    int[] col <- transpose(m2);
+  return parallel (transpose(m2)) { int[] col ->
     return multiplyMatrixVector(m1, col);
   };
 }

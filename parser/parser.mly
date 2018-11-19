@@ -176,12 +176,12 @@ expr :
       { Ast.Binop { binary_operand1; binary_operator; binary_operand2; } }
   | PARALLEL;
     LPAREN;
-    parallel_arg = expr;
-    RPAREN;
-    LBRACE;
     parallel_type = typ;
     parallel_ident = IDENT;
     BIND;
+    parallel_arg = expr;
+    RPAREN;
+    LBRACE;
     parallel_body = stmts;
     RBRACE;
       { Ast.Parallel { parallel_arg; parallel_type; parallel_ident; parallel_body; } }

@@ -5,8 +5,9 @@ let run_on_ast (ast : Ast.t) : unit =
   print_endline "Typechecking succeeded.";
   let dag = Dag.of_ast ast in
   List.iter dag ~f:(fun dag_fun ->
-    print_endline (Sexp.to_string_hum (Dag.sexp_of_dag_fun dag_fun));
-    let traversal = Dag_traversal.any_traversal Dag.(dag_fun.dag_graph) in
+    let inline = Dag.inline Dag.(dag_fun.dag_graph) dag in
+    print_endline (Sexp.to_string_hum (Dag.sexp_of_dag inline));
+    let traversal = Dag_traversal.any_traversal inline in
     print_endline (Sexp.to_string_hum (Dag_traversal.sexp_of_traversal traversal)))
 
 let run_on_file (file : string) : unit =

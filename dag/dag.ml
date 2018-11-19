@@ -313,9 +313,10 @@ let of_ast : Ast.t -> t =
   in
   List.map ~f:of_fun_defn
 
-let renumber_with (dag : dag) (new_number : Vertex.t -> Vertex.t) : dag =
+let renumber_with (dag : dag) ?(remove=Fn.const false) (new_number : Vertex.t -> Vertex.t) : dag =
   let vertex_info_list = Map.to_alist dag.vertex_infos in
-  let vertex_info_list' = List.map vertex_info_list ~f:(fun (k, v) ->
+  let vertex_info_list' = List.filter_map vertex_info_list ~f:(fun (k, v) ->
+    if remove k then None else
     let v' = Vertex_info.{
       successors = Vertex.Set.map ~f:new_number v.successors;
       predecessors = List.map ~f:new_number v.predecessors;
@@ -327,7 +328,7 @@ let renumber_with (dag : dag) (new_number : Vertex.t -> Vertex.t) : dag =
       end;
       enclosing_parallel_blocks = List.map ~f:new_number v.enclosing_parallel_blocks;
       vertices_in_block = Option.map ~f:(Vertex.Set.map ~f:new_number) v.vertices_in_block;
-    } in (new_number k, v'))
+    } in Some (new_number k, v'))
   in
   {
     inputs = List.map ~f:new_number dag.inputs;
@@ -337,6 +338,7 @@ let renumber_with (dag : dag) (new_number : Vertex.t -> Vertex.t) : dag =
 
 let renumber_map (dag : dag) (map : Vertex.t Vertex.Map.t) : dag =
   renumber_with dag (fun k -> Option.value ~default:k (Map.find map k))
+    ~remove:(Map.mem map)
 
 let renumber (dag : dag) : dag =
   let new_number =
@@ -398,7 +400,7 @@ let substitute (source : dag) (vertex : Vertex.t) (target : dag) : dag =
 
   (* Now for the death blow: add everything from source into target. *)
   { target with vertex_infos = Map.merge_skewed target.vertex_infos source.vertex_infos
-      ~combine:(fun ~key -> failwith "Duplicate key in source and target. :(") }
+      ~combine:(fun ~key -> failwithf "Duplicate key `%ld` in source and target. :(" key ()) }
 
 let inline (dag : dag) (ast : t) : dag =
   let ast_map = String.Map.of_alist_exn (List.map ast ~f:(fun d -> (d.dag_name, d.dag_graph))) in
@@ -418,4 +420,4 @@ let inline (dag : dag) (ast : t) : dag =
           let candidates' = Vertex.Set.remove candidates vertex in
           loop visited' candidates' dag
   in
-  loop Vertex.Set.empty (Vertex.Set.singleton dag.return_vertex) dag
+  loop Vertex.Set.empty (Vertex.Set.of_map_keys dag.vertex_infos) dag

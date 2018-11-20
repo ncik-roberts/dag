@@ -6,9 +6,8 @@ let run_on_ast (ast : Ast.t) : unit =
   let dag = Dag.of_ast ast in
   List.iter dag ~f:(fun dag_fun ->
     let inline = Dag.inline Dag.(dag_fun.dag_graph) dag in
-    print_endline (Sexp.to_string_hum (Dag.sexp_of_dag inline));
-    let traversal = Dag_traversal.any_traversal inline in
-    print_endline (Sexp.to_string_hum (Dag_traversal.sexp_of_traversal traversal)))
+    let traversal = Dag_traversal.all_traversals inline in
+    print_endline (Sexp.to_string_hum (List.sexp_of_t Dag_traversal.sexp_of_traversal traversal)))
 
 let run_on_file (file : string) : unit =
   match Sys.file_exists file with

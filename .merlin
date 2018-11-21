@@ -1,4 +1,8 @@
 S top
 S parser
+S dag
+S lib
+S codegen
 B _build/**
 PKG core
+PKG ppx_jane

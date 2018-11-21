@@ -1,9 +1,9 @@
-default: top.native
-	mv top.native dagc
+dagc: main.native
+	mv main.native dagc
 
 clean:
 	ocamlbuild -clean
 
 %:
-	ocamlbuild -use-ocamlfind -use-menhir top.native
+	ocamlbuild -use-ocamlfind -use-menhir $*
 

@@ -9,14 +9,14 @@
 
 repl=utop    # your favorite repl
 build=_build # build directory
-packages=( core ) # packages you'd like to load into the repl
+packages=( core, ppx_jane ) # packages you'd like to load into the repl
 
 [ "$#" -eq 1 ] || {
   echo "Usage: $0 FILE"
   exit 1
 }
 
-file=${1%.*} # Remove .ml file extension if necessary
+file=$(basename "${1%.*}") # Remove .ml file extension if necessary
 
 if ! which $repl > /dev/null; then
   echo "utop not found. Run the following command to install:"

@@ -70,6 +70,12 @@ let check_unop (typ : typ) (unop : Ast.unop) : typ =
   then failwith "Invalid unop types."
   else fun_type.return_type
 
+let rec is_at_least_n_dimensional ~n typ = match n, typ with
+  | _, _ when n <= 0 -> false
+  | 1, Array _ -> true
+  | _, Array typ' -> is_at_least_n_dimensional ~n:(n-1) typ'
+  | _ -> false
+
 let check_fun (ctx : t) (fun_name : Ast.call_name) (arg_types : typ list) : typ =
   match fun_name with
   | Ast.Map ->
@@ -78,6 +84,12 @@ let check_fun (ctx : t) (fun_name : Ast.call_name) (arg_types : typ list) : typ 
         | [ Fun fun_type; Array typ; ] when [ typ ] = fun_type.param_types ->
             Array (fun_type.return_type)
         | _ -> failwith "Invalid argument to map."
+      end
+  | Ast.Dim n ->
+      begin
+        match arg_types with
+        | [ typ ] when is_at_least_n_dimensional typ ~n -> Int
+        | _ -> failwith "Invalid argument to length."
       end
   | Ast.Reduce ->
       begin
@@ -91,9 +103,9 @@ let check_fun (ctx : t) (fun_name : Ast.call_name) (arg_types : typ list) : typ 
   | Ast.Zip_with ->
       begin
         match arg_types with
-        | [ Fun fun_type; Array typ1; Array typ2; ]
-            when fun_type.param_types = [ typ1; typ2; ] ->
-              Array (fun_type.return_type)
+        | Fun fun_type :: array_typs
+            when array_typs = List.map fun_type.param_types ~f:(fun t -> Array t)
+            -> Array fun_type.return_type
         | _ -> failwith "Invalid argument to zip_with."
       end
   | Ast.Transpose ->
@@ -150,6 +162,7 @@ let rec check_expr (ctx : t) (ast : Ast.expr) : typ = match ast with
   | Ast.Fun_call fun_call ->
       let arg_types = List.map fun_call.call_args ~f:(function
         | Ast.Bare_binop binop -> Fun (infer_binop binop)
+        | Ast.Bare_unop unop -> Fun (infer_unop unop)
         | Ast.Expr expr -> check_expr ctx expr)
       in
       check_fun ctx fun_call.call_name arg_types

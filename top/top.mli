@@ -3,5 +3,4 @@
  * to compile as the argument.
  *)
 val run_on_ast : Ast.t -> unit
-val run_on_file : string -> unit
-val run : unit -> unit
+val run_on_file : ?verbose:bool -> string -> unit

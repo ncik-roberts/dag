@@ -10,7 +10,7 @@ module Vertex_view = struct
     [@@deriving sexp]
 
   type t =
-    | Parallel_block of Vertex.t (* Return of block. *)
+    | Parallel_block of Vertex.t * Vertex.t (* (Parallel binding, return of block) *)
     | Function of Ast.call_name
     | Binop of Ast.binop
     | Unop of Ast.unop
@@ -91,7 +91,7 @@ let unroll dag key =
   let open Vertex_view in
   (* Only recursive production is Parallel_block *)
   match view dag key with
-  | Parallel_block t -> Some t
+  | Parallel_block (_, t) -> Some t
   | Function _ | Binop _ | Unop _ | Literal _ | Input _ -> None
 
 type 'a counter = unit -> 'a
@@ -192,7 +192,7 @@ let of_ast : Ast.t -> t =
               ~key:parallel.parallel_ident ~data:vertex_binding;
           } in
           let { Result.vertex = return_vertex; _; } as result = loop_stmts ctx' parallel.parallel_body in
-          let view = Vertex_view.Parallel_block return_vertex in
+          let view = Vertex_view.Parallel_block (vertex_binding, return_vertex) in
           `New_vertex (vertex, view, [result_expr], `With_additional_results [result; result_binding])
       | Ast.Const i ->
           let vertex = next_vertex () in
@@ -329,7 +329,7 @@ let renumber_with (dag : dag) ?(remove=Fn.const false) (new_number : Vertex.t ->
       view = begin
         let open Vertex_view in
         match v.view with
-        | Parallel_block vtx -> Parallel_block (new_number vtx)
+        | Parallel_block (vtx1, vtx2) -> Parallel_block (new_number vtx1, new_number vtx2)
         | x -> x
       end;
       enclosing_parallel_blocks = List.map ~f:new_number v.enclosing_parallel_blocks;

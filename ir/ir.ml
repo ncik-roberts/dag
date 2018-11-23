@@ -23,7 +23,7 @@ type operand =
 (** All sorts of statements *)
 type stmt =
   (* All temps here are destinations. *)
-  | Parallel of Temp.t * operand * stmt list
+  | Parallel of Temp.t * operand * Temp.t * stmt list
   | Binop of Temp.t * Ast.binop * operand * operand
   | Unop of Temp.t * Ast.unop * operand
   | Fun_call of Temp.t * fun_call * operand list

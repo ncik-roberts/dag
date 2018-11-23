@@ -11,7 +11,7 @@ module Vertex_view : sig
     [@@deriving sexp]
 
   type t =
-    | Parallel_block of Vertex.t (* Return statement *)
+    | Parallel_block of Vertex.t * Vertex.t (* (Parallel binding, Return statement) *)
     | Function of Ast.call_name
     | Binop of Ast.binop
     | Unop of Ast.unop

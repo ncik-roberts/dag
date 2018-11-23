@@ -10,6 +10,10 @@ let run_on_ast (ast : Ast.t) : unit =
   say (fun () -> ["Typechecking succeeded."]);
   let dag = Dag.of_ast ast in
   List.iter dag ~f:(fun dag_fun ->
+    say (fun() -> [
+      "Original dag:";
+      Sexp.to_string_hum (Dag.sexp_of_dag_fun dag_fun);
+    ]);
     let inline = Dag.inline Dag.(dag_fun.dag_graph) dag in
     say (fun () -> [
       "Inlined:";
@@ -24,6 +28,8 @@ let run_on_ast (ast : Ast.t) : unit =
     say (fun () -> [
       "IR:";
       Sexp.to_string_hum (Ir.sexp_of_t ir);
+      "";
+      "";
     ]))
 
 let run_on_file ?(verbose : bool = false) (file : string) : unit =

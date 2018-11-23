@@ -97,11 +97,27 @@ let run (dag : Dag.dag) (traversal : Dag_traversal.traversal) : Ir.t =
             let ctx' = Map.add_exn ctx ~key:v ~data:dest in
             (ctx', stmt))
       end
-    | Dag_traversal.Block _ -> failwith "Hey"
+    | Dag_traversal.Block (v, block) ->
+        let pred = Dag.predecessors dag v |> tuple1_of_list_exn in
+        begin
+          match Dag.view dag v with
+          | Vertex_view.Parallel_block (bound_vertex, _) ->
+            let arg = lookup_exn ctx pred in
+            let block' = convert ctx block in
+            let dest = Temp.next () in
+            let bound_temp = Temp.next () in
+            let stmt = Ir.Parallel (dest, arg, bound_temp, block') in
+            let ctx' = ctx
+              |> Map.add_exn ~key:v ~data:dest
+              |> Map.add_exn ~key:bound_vertex ~data:bound_temp
+            in
+            (ctx', stmt)
+          | _ -> failwithf "Unexpected non-parallel vertex `%s`." (Sexp.to_string_hum (Vertex.sexp_of_t v)) ()
+        end
 
   (* Convert group of statements *)
   and convert (ctx : context) (t : Dag_traversal.traversal) : Ir.stmt list =
-    List.folding_map traversal ~init:ctx ~f:convert_tree
+    List.folding_map t ~init:ctx ~f:convert_tree
   in
 
   let inputs = Dag.inputs dag in

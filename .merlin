@@ -3,6 +3,7 @@ S parser
 S dag
 S lib
 S codegen
+S ir
 B _build/**
 PKG core
 PKG ppx_jane

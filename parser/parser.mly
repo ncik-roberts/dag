@@ -164,7 +164,14 @@ expr :
           | "transpose" -> Ast.Transpose
           | "map" -> Ast.Map
           | "zipWith" -> Ast.Zip_with
-          | _ -> Ast.Fun_ident call_ident
+          | s ->
+            let open Core in
+            let dim =
+              if String.is_prefix s ~prefix:"dim"
+                then int_of_string_opt (String.suffix s (String.length "dim"))
+                else None
+            in Option.value_map dim ~f:(fun n -> Ast.Dim n)
+                  ~default:(Ast.Fun_ident call_ident)
         in Ast.Fun_call { call_name; call_args; } }
   | unary_operator = unop;
     unary_operand = expr;

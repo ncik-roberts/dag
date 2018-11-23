@@ -6,6 +6,7 @@ module Vertex_view = struct
   type literal =
     | Int32 of int32
     | Bare_binop of Ast.binop
+    | Bare_unop of Ast.unop
     [@@deriving sexp]
 
   type t =
@@ -238,6 +239,11 @@ let of_ast : Ast.t -> t =
     | Ast.Bare_binop binop ->
         let vertex = next_vertex () in
         let view = Vertex_view.(Literal (Bare_binop binop)) in
+        Result.empty_of vertex ~view:(Some view)
+          ~enclosing_parallel_blocks:Context.(ctx.enclosing_parallel_blocks)
+    | Ast.Bare_unop unop ->
+        let vertex = next_vertex () in
+        let view = Vertex_view.(Literal (Bare_unop unop)) in
         Result.empty_of vertex ~view:(Some view)
           ~enclosing_parallel_blocks:Context.(ctx.enclosing_parallel_blocks)
     | Ast.Expr expr -> loop_expr ctx expr

@@ -37,6 +37,7 @@ type stmt =
 and arg =
   | Expr of expr
   | Bare_binop of binop
+  | Bare_unop of unop
   [@@deriving sexp]
 
 and call_name =
@@ -44,6 +45,7 @@ and call_name =
   | Map
   | Transpose
   | Zip_with
+  | Dim of int
   | Fun_ident of ident
   [@@deriving sexp]
 

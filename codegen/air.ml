@@ -2,19 +2,10 @@ open Core
 
 (** Abstract IR *)
 
-type binop =
-  | Add
-  | Sub
-  | Mul
-  | Div
-  | Mod
-
-type unop
-
 module Op = struct
   type t =
-    | Binop of binop
-    | Unop of unop
+    | Binop of Ast.binop
+    | Unop of Ast.unop
     | Fun_ptr of Ast.ident
 end
 
@@ -37,8 +28,8 @@ type par_stmt =
   | Seq of seq_stmt
 
 and seq_stmt =
-  | Binop of Temp.t * binop * operand * operand
-  | Unop of Temp.t * unop * operand
+  | Binop of Temp.t * Ast.binop * operand * operand
+  | Unop of Temp.t * Ast.unop * operand
   | Assign of Temp.t * operand
 
 type param =
@@ -46,7 +37,7 @@ type param =
       param : param;
       length : Temp.t;
     }
-  | Temp_param of Temp.t
+  | Temp_param of Temp.t * Ast.typ
 
 type t = {
   params : param list;

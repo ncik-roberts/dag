@@ -17,6 +17,23 @@ let temp_name t =
 let temp_to_var t = 
   CU.Var (temp_name t)
 
+(* These flatten out any nesting. We're presuming the nd_array struct takes care of it. *)
+let rec typ_name (typ : Ast.typ) = 
+  match typ with 
+  | Ast.Array t -> typ_name t
+  | Ast.Ident t -> (t : string)
+
+let rec trans_typ (typ : Ast.typ) = 
+  match typ with
+  | Ast.Ident t -> 
+    (match t with
+    | "int" -> CU.Integer
+    | "bool" -> CU.Boolean
+    | "float" -> CU.Float
+    | "double" -> CU.Double
+    | _ -> failwith ("AIR -> CUDA : Don't currently supoprt complex type trans."))
+  | Ast.Array t -> trans_typ t
+
 (* Pointer, Lengths of dimensions *)
 type nd_array = Temp.t * (Temp.t list)
 let nd_array_id = "dag_nd_array_t"
@@ -25,13 +42,14 @@ let nd_array_lens = "lens"
 let nd_array_data = "data"
 
 (* Global struct representing a multidimensional array. 
+   Polymorphic - feed it the type to get the decl you want.
    Should probably be declared in every DAG program. s*)
-let dag_array_struct : CU.cuda_gstmt = 
-  CU.StructDecl(nd_array_id,
+let dag_array_struct typ : CU.cuda_gstmt = 
+  CU.StructDecl(nd_array_id^"_"^typ_name typ,
     [
      (CU.Integer,nd_array_dims);
      (CU.Pointer CU.Integer,nd_array_lens);
-     (CU.Pointer CU.Integer,nd_array_data);
+     (CU.Pointer (trans_typ typ),nd_array_data);
     ]
   )
 
@@ -39,7 +57,7 @@ let dag_array_struct : CU.cuda_gstmt =
 let flatten_array p l : nd_array=
   let rec flatten par len acc =
     match par with 
-    | IR.Temp_param t -> (t,List.rev (len::acc))
+    | IR.Temp_param (t,_) -> (t,List.rev (len::acc))
     | IR.Array_param {param = subp; length = subl} -> 
       flatten subp subl (len::acc)
   in
@@ -52,7 +70,7 @@ let trans_params (params : IR.param list) : (CU.cuda_type * CU.cuda_ident) list 
    | IR.Array_param {param = p; length = l} -> 
       let (ptr,_) = flatten_array p l in
       (CU.Pointer (CU.Struct nd_array_id), temp_name ptr)
-   | IR.Temp_param t -> (CU.Integer, temp_name t)
+   | IR.Temp_param (t,typ) -> (trans_typ typ, temp_name t)
    in
    List.map params ~f:(trans_param)
 
@@ -64,13 +82,16 @@ let trans_op =
 
 let trans_binop = 
   function
-  | IR.Add -> CU.ADD
-  | IR.Sub -> CU.SUB
-  | IR.Mul -> CU.MUL
-  | IR.Div -> CU.DIV
-  | IR.Mod -> CU.MOD
+  | Ast.Plus -> CU.ADD
+  | Ast.Minus -> CU.SUB
+  | Ast.Times -> CU.MUL
+  | Ast.Div -> CU.DIV
+  | Ast.Mod -> CU.MOD
 
-let trans_unop op = CU.INCR (* Dummy translation, until it comes down the pipe. *)
+let trans_unop = 
+  function
+  | Ast.Negate -> CU.NEG 
+  | Ast.Logical_not -> CU.NOT
 
 let trans_seq_stmt : IR.seq_stmt -> CU.cuda_stmt = 
   function 
@@ -97,13 +118,13 @@ let trans_par_stmt = function
 let trans_body (body : IR.par_stmt list) : (CU.cuda_stmt) list = 
   body |> List.map ~f:(trans_par_stmt) |> List.concat
 
-let translate (func : IR.t) : CU.cuda_gstmt = 
-  let args = trans_params IR.(func.params) in
-  let body = trans_body IR.(func.body) in 
+let translate (program : IR.t) : CU.cuda_gstmt = 
+  let args = trans_params IR.(program.params) in
+  let body = trans_body IR.(program.body) in 
   CU.(Function {
-    typ = Device; (* Todo: Get this information! *)
+    typ = Host; (* Might make other calls. This isn't those. *)
     ret = Void;
-    name = fn_next ();
+    name = "dag_main";
     args = args;
     body = body;
   })

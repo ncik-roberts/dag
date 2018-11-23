@@ -3,7 +3,7 @@ open Core
 
 type cuda_ident = string
 
-type cuda_type = Integer | Float | Double | Void | Pointer of cuda_type | ConstType of cuda_type | Struct of cuda_ident
+type cuda_type = Integer | Float | Double | Boolean | Void | Pointer of cuda_type | ConstType of cuda_type | Struct of cuda_ident
 
 type cuda_mem_type = Host | Device | Shared
 
@@ -11,7 +11,7 @@ type cuda_struct = cuda_ident * (cuda_type * cuda_ident) list
 
 (* Basic arithmetic. *)
 type binop = ADD | SUB | MUL | DIV | MOD
-type unop = INCR | DECR
+type unop = INCR | DECR | NEG | NOT
 type cmpop = EQ  | NEQ | GTE | LTE | GT | LT
 
 type dim = X | Y | Z
@@ -86,6 +86,7 @@ let rec fmt_typ = function
   | Integer -> "int"
   | Float -> "float"
   | Double -> "double"
+  | Boolean -> "bool"
   | Void -> "void"
   | ConstType t -> "const "^(fmt_typ t)
   | Pointer t -> (fmt_typ t)^"*"
@@ -104,6 +105,8 @@ let fmt_mem_tfr = function
 let fmt_unop = function
   | INCR -> "++"
   | DECR -> "--"
+  | NEG -> "-"
+  | NOT -> "!"
 
 let fmt_binop = function
   | ADD -> "+"
@@ -136,7 +139,9 @@ let rec fmt_expr = function
   | Var v -> v
   | KVar v -> fmt_kvar v
   | Unop (u,e) -> 
-    sprintf "(%s)%s" (fmt_expr e) (fmt_unop u)
+    (match u with 
+    | (INCR|DECR) -> sprintf "(%s)%s" (fmt_expr e) (fmt_unop u)
+    | (NEG | NOT) -> sprintf "%s(%s)" (fmt_unop u) (fmt_expr e))
   | Binop (b,e1,e2) -> 
     sprintf "(%s %s %s)" (fmt_expr e1) (fmt_binop b) (fmt_expr e2)
   | Cmpop (c,e1,e2) ->

@@ -393,7 +393,8 @@ let substitute (source : dag) (vertex : Vertex.t) (target : dag) : dag =
       let target_vertex_infos = Map.update target.vertex_infos pred ~f:(function
         | None -> failwith "Impossible: not found predecessor."
         | Some vertex_info -> Vertex_info.{ vertex_info with
-            successors = Set.union (successors target vertex) vertex_info.successors;
+            successors = Set.remove vertex_info.successors vertex
+              |> Set.union (successors source input);
           })
       in Vertex_info.{ target with vertex_infos = target_vertex_infos })
   in

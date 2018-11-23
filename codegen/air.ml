@@ -10,7 +10,7 @@ module Op = struct
 end
 
 type array_view =
-  | Array of Temp.t
+  | Array of Temp.t * Temp.t  (* Pointer, Size *)
   | Zip_with of Op.t * array_view list
   | Reverse of array_view
   | Transpose of array_view

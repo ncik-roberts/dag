@@ -3,7 +3,12 @@ open Core
 
 type cuda_ident = string
 
-type cuda_type = Integer | Float | Double | Boolean | Void | Pointer of cuda_type | ConstType of cuda_type | Struct of cuda_ident
+type cuda_type = 
+  | Integer | Float | Double | Boolean | Void 
+  | Pointer of cuda_type 
+  | ConstType of cuda_type 
+  | Struct of cuda_ident
+  | Dim of int
 
 type cuda_mem_type = Host | Device | Shared
 
@@ -30,6 +35,7 @@ type cuda_expr =
   | Unop of unop * cuda_expr
   | Binop of binop * cuda_expr * cuda_expr
   | Cmpop of cmpop * cuda_expr * cuda_expr
+  | FnCall of cuda_ident * (cuda_expr list)
   | Address of cuda_expr
   | Deref of cuda_expr
   | Index of cuda_expr * cuda_expr
@@ -64,7 +70,7 @@ and cuda_stmt =
               (* dest, source, size, transfer type *)
   | Transfer of cuda_ident * cuda_expr * cuda_expr * cuda_mem_type
     (* Launch dimension, blocks/thread, kernel, arguments *)
-  | Launch of grid_dim * int * cuda_func * cuda_ident list
+  | Launch of grid_dim * grid_dim * cuda_ident * cuda_expr list
 
   | Free of cuda_ident
   | Sync
@@ -91,6 +97,7 @@ let rec fmt_typ = function
   | ConstType t -> "const "^(fmt_typ t)
   | Pointer t -> (fmt_typ t)^"*"
   | Struct s -> s
+  | Dim i -> "dim"^(string_of_int i)
 
 let fmt_mem_hdr = function
   | Host -> ""
@@ -146,6 +153,8 @@ let rec fmt_expr = function
     sprintf "(%s %s %s)" (fmt_expr e1) (fmt_binop b) (fmt_expr e2)
   | Cmpop (c,e1,e2) ->
     sprintf "(%s %s %s)" (fmt_expr e1) (fmt_cmpop c) (fmt_expr e2)
+  | FnCall (n,args) -> 
+    sprintf "%s%s" (n) (fmt_args (List.map ~f:fmt_expr args))
   | Address e -> sprintf "&(%s)" (fmt_expr e)
   | Index (e,i) -> sprintf "%s[%s]" (fmt_expr e) (fmt_expr i) 
   | Deref e -> sprintf "*(%s)" (fmt_expr e)
@@ -166,7 +175,7 @@ and fmt_stmt n stm =
  | DeclareArray (mem,typ,id,sizes) ->
    let arr_exps = String.concat(List.map sizes ~f:(fun e -> "["^fmt_expr e^"]")) in
    sprintf "%s %s %s %s %s;" sp (fmt_mem_hdr mem) (fmt_typ typ) id arr_exps
- 
+
  | Assign (l,exp) ->
    sprintf "%s %s = %s;" sp (fmt_expr l) (fmt_expr exp)
  
@@ -192,10 +201,10 @@ and fmt_stmt n stm =
    sprintf "%scudaMemcpy(%s,%s,%s,%s);" sp dest 
    (fmt_expr src) (fmt_expr src) (fmt_mem_tfr ttyp)
 
- | Launch ((x,y,z),bt,func,args) -> 
-   let block = sprintf "%sdim3 dimBlock(%s,1,1);\n" sp (string_of_int bt) in
+ | Launch ((x,y,z),(a,b,c),func,args) -> 
+   let block = sprintf "%sdim3 dimBlock(%s,%s,%s);\n" sp (fmt_expr a) (fmt_expr b) (fmt_expr c) in
    let grid = sprintf "%sdim3 dimGrid(%s,%s,%s);\n" sp (fmt_expr x) (fmt_expr y) (fmt_expr z) in
-   let launch = sprintf "%s%s<<<dimGrid,dimBlock>>>%s;" sp (func.name) (fmt_args args)
+   let launch = sprintf "%s%s<<<dimGrid,dimBlock>>>%s;" sp (func) (fmt_args (List.map ~f:fmt_expr args))
    in block^grid^launch
 
  | Sync -> sprintf "%s %s;\n" sp "__syncthreads()"
@@ -222,6 +231,16 @@ let fmt_gstm = function
 
 let print_program (program : cuda_program) = 
   List.map program ~f:(fun f -> prerr_endline (fmt_gstm f))
+
+
+(* Builds the expression for the kernel launch of the transpose primitive *)
+let launch_transpose matrix dev_matrix dev_result = 
+  let rowexp = Binop(DIV,Index(Field(matrix,"lens"),Const 0L),Var "tp_TILE_DIM") in
+  let colexp = Binop(DIV,Index(Field(matrix,"lens"),Const 1L),Var "tp_TILE_DIM") in
+  let gridDim = (rowexp,colexp,Const 1L) in
+  let blockDim = (Var "tp_TILE_DIM",Var "tp_BLOCK_ROWS",Const 1L) in
+  Launch (gridDim,blockDim,"transposeCoalesced",[dev_result;dev_matrix])
+
 
 (* IR Representation of the Transpose function from the CUDA documentation. *)
 let primitive_transpose : cuda_program = 

@@ -3,6 +3,8 @@ open Core
 module IR = Air
 module CU = CudaIR
 
+let failwith n = failwith ("AIR -> CUDA : "^n)
+
 (* Unique identifier for functions. s*)
 let fn_name_ctr = ref 0
 let fn_next () = 
@@ -21,7 +23,7 @@ let temp_to_var t =
 let var_to_dev var =
   match var with 
   | CU.Var v -> CU.Var ("d_"^v)
-  | _ -> failwith "AIR -> CUDA : Cannot device a non-variable."
+  | _ -> failwith "Cannot device a non-variable."
 
 (* Convert to cuda constant *)
 let con i = CU.Const (Int64.of_int_exn i)
@@ -40,7 +42,7 @@ let rec trans_typ (typ : Ast.typ) =
     | "bool" -> CU.Boolean
     | "float" -> CU.Float
     | "double" -> CU.Double
-    | _ -> failwith ("AIR -> CUDA : Don't currently support complex type trans."))
+    | _ -> failwith ("Don't currently support complex type trans."))
   | Ast.Array t -> trans_typ t
 
 (* Pointer, Lengths of dimensions *)
@@ -117,74 +119,71 @@ let trans_seq_stmt : IR.seq_stmt -> CU.cuda_stmt =
 let trans_incr_loop_hdr var init limit stride = 
  (CU.Assign(var,init),CU.Cmpop(CU.LT,var,limit),CU.AssignOp(CU.ADD,var,stride))
 
+
 let rec trans_par_stmt = function
   | IR.Par_for (seqs,seq_stms) -> 
       (* This implies either a kernel launch (if we're not in a par block) 
          or an additional level of indexing (if we are) *) []
   | IR.Seq_for ((dest,aview),par_stms) -> 
-      (* This is just a for loop. I think. *) 
-      begin
-      match aview with 
-      | IR.Array (arr,len) -> []
-      | IR.Zip_with (op,subviews) -> []
-      | IR.Reverse (subview) -> []
-      | IR.Transpose (subview) -> []
-        (* This really only makes sense in 2D. We'll assume this was validated... *)
-      end
+      (* This is just a for loop. I think. But how does the loop variable integrate? *)
+      (* Gotta do that continuation passing on the aViews and actually merge things. *) 
+      let lvar = CU.Var "s" in
+      let arrvar = temp_to_var dest in
+      let idxvar = CU.Index(arrvar,lvar) in
+      let init_state = (lvar,dest,aview,idxvar) in
+      let (ins,arr,len) = trans_array_view init_state in
+   
+      let hdr = trans_incr_loop_hdr arrvar (con 0) (temp_to_var len) (con 1) in
+      [CU.Loop(hdr,par_stms |> List.map ~f:trans_par_stmt |> List.concat)]
+
   | IR.Run (t,v) -> 
-      (* Call the queued sequence computation *) []
+      (* Call the queued sequence computation. The other thing does this too, right now. *) 
+      [] (* let (ins,arr,len) = trans_array_view v t in ins *)
+
   | IR.Seq stm -> [trans_seq_stmt stm]
 
-(* Returns:  ([list of processing instrs],array temp, array length) *)
-(* Right now this naively performs the operation. We should squash it. *)
-and trans_array_view arr_view (dest : Temp.t)  = 
-  let vDest = temp_to_var dest in
+(* Returns:  (list of [list of processing per loop run],array temp,array length) *)
+and trans_array_view state : (CU.cuda_stmt list * Temp.t * Temp.t) = 
+  let (loop_var,dest_arr,arr_view,dest_var) = state in
   match arr_view with 
-  | IR.Array (arr,len) -> ([],arr,len)
+  | IR.Array (arr,len) -> 
+      (* Extract and assign to the loop temporary. *)
+      let asgn_instr = CU.Assign(dest_var,CU.Index(temp_to_var arr,loop_var)) in
+      ([asgn_instr],arr,len)
+
   | IR.Zip_with(op,subviews) -> 
-    let var = CU.Var "z" in (* Loop Variable *)
-    let vIndex = CU.Index(vDest,var) in
     (* Inner loop operation function *)
-    let make_op subarrs =
-      begin
-      match op,subarrs with 
-        | IR.Op.Unop u,[s]-> 
-            CU.Assign(vIndex,CU.Unop(trans_unop u, CU.Index(s,var)))
-        | IR.Op.Binop b,[s1;s2] ->
-            let idx1,idx2 = CU.Index(s1,var),CU.Index(s2,var) in
-            CU.Assign(vIndex,CU.Binop(trans_binop b,idx1,idx2))
+    let make_op extracted_temps =
+      (match op,extracted_temps with 
+        | IR.Op.Unop u,[t]-> 
+            CU.Assign(dest_var,CU.Unop(trans_unop u,t))
+        | IR.Op.Binop b,[t1;t2] ->
+            CU.Assign(dest_var,CU.Binop(trans_binop b,t1,t2))
         | IR.Op.Fun_ptr f,zips -> 
-            let zinds = List.map ~f:(fun s -> CU.Index(s,var)) zips in
-            CU.Assign(vIndex,CU.FnCall (f,zinds))
-        | _ -> failwith "AIR -> CUDA : Incorrect arg lengths to ZipWith!"
-      end
+            CU.Assign(dest_var,CU.FnCall (f,zips))
+        | _ -> failwith "Incorrect arg lengths to ZipWith!")
     in
       (* Pipe this into the zip function. *)
-      let trans_list = subviews
-        |> List.map ~f:(fun _ -> Temp.next ())
-        |> List.map2_exn subviews ~f:trans_array_view in
-      let subarrs = List.map trans_list ~f:(fun (_,a,_) -> temp_to_var a) in
-      let previns = trans_list |> List.map ~f:(fun (a,_,_) -> a) |> List.concat in
+      let dests = List.map subviews ~f:(fun _ -> temp_to_var (Temp.next ())) in
+      let trans_list =  List.map dests ~f:(fun d -> trans_array_view (loop_var,dest_arr,arr_view,d)) in
+      let instr = make_op dests in
+      let prev_instrs = trans_list |> List.map ~f:(fun (i,_,_) -> i) |> List.concat in
       let (_,_,lng) = List.nth_exn trans_list 0 in
-      let hdr = trans_incr_loop_hdr var (con 0) (temp_to_var lng) (con 1) in
-      let instrs = [CU.Loop(hdr,[make_op subarrs])] in 
-      (previns @ instrs,dest,lng)
+      (instr :: prev_instrs,dest_arr,lng)
+      
+  | IR.Reverse subview -> (* Flip the indexing strategy. *)
+      let rev_temp = temp_to_var (Temp.next ()) in
+      (* Dummy allocation to extract the length. Sigh. *)
+      let (_,_,len) = trans_array_view (loop_var,dest_arr,subview,rev_temp) in
+      let rev_lvar = CU.Binop(CU.SUB,temp_to_var len,loop_var) in 
+      trans_array_view (rev_lvar,dest_arr,subview,rev_temp)
 
-  | IR.Reverse (subview) -> 
-    let reverse_loop array len = 
-      let (cArr,cLen) = temp_to_var array, temp_to_var len in
-      let var = CU.Var ("r"^(temp_name (Temp.next ()))) in
-      let hdr = trans_incr_loop_hdr (var) (con 0) (cLen) (con 1) in
-      let (fIndex,bIndex) = CU.Index(cArr,var),CU.Index(vDest,CU.Binop(CU.SUB,cLen,var)) in
-      ([CU.Loop(hdr,[CU.Assign(bIndex,fIndex)])],dest,len)
-    in 
-      let (ins,tmp,lng) = trans_array_view subview (Temp.next ())in
-      let (rev_ins,_,lng) = reverse_loop tmp lng in 
-      (ins @ rev_ins,dest,lng)
-
-  (* Due to the implementation, this is slightly different.. *)
-  | IR.Transpose _ ->  failwith "AIR -> CUDA : No Sequential Transpose! Use primitive. "
-
+  | IR.Transpose subview -> (* Not sure this is where we want to do this. *)
+      let dev_dest = var_to_dev (temp_to_var dest_arr) in
+      let (prev_ins,arr,lng) = trans_array_view (loop_var,dest_arr,subview,dest_var) in
+      let dev_arr = var_to_dev (temp_to_var arr) in
+      let ins = CU.launch_transpose (temp_to_var arr) dev_arr dev_dest in
+      (prev_ins @ [ins],dest_arr,lng)
 
 let trans_body (body : IR.par_stmt list) : (CU.cuda_stmt) list = 
   body |> List.map ~f:(trans_par_stmt) |> List.concat

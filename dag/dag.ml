@@ -75,6 +75,20 @@ type dag = {
   inputs : Vertex.t list;
 } [@@deriving sexp]
 
+(* Reproduced from mli file *)
+module type Daglike = sig
+  module Vertex : Utils.Comparable_sexpable
+  type dag
+  val return_vertex : dag -> Vertex.t
+  val predecessors : dag -> Vertex.t -> Vertex.t list
+  val successors : dag -> Vertex.t -> Vertex.Set.t
+  val inputs : dag -> Vertex.t list
+  val view : dag -> Vertex.t -> Vertex_view.t
+  val enclosing_parallel_blocks : dag -> Vertex.t -> Vertex.t list
+  val vertices_in_block : dag -> parallel_block_vertex:Vertex.t -> Vertex.Set.t
+  val unroll : dag -> Vertex.t -> Vertex.t option
+end
+
 let return_vertex dag = dag.return_vertex
 let vertex_info dag = Map.find_exn dag.vertex_infos
 let predecessors dag key = (vertex_info dag key).Vertex_info.predecessors

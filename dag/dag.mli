@@ -20,23 +20,29 @@ module Vertex_view : sig
     [@@deriving sexp]
 end
 
-val return_vertex : dag -> Vertex.t
-val predecessors : dag -> Vertex.t -> Vertex.t list
-val successors : dag -> Vertex.t -> Vertex.Set.t
-val inputs : dag -> Vertex.t list
-val view : dag -> Vertex.t -> Vertex_view.t
+module type Daglike = sig
+  module Vertex : Utils.Comparable_sexpable
+  type dag
+  val return_vertex : dag -> Vertex.t
+  val predecessors : dag -> Vertex.t -> Vertex.t list
+  val successors : dag -> Vertex.t -> Vertex.Set.t
+  val inputs : dag -> Vertex.t list
+  val view : dag -> Vertex.t -> Vertex_view.t
 
-(** Returned in smallest-to-largest order. *)
-val enclosing_parallel_blocks : dag -> Vertex.t -> Vertex.t list
+  (** Returned in smallest-to-largest order. *)
+  val enclosing_parallel_blocks : dag -> Vertex.t -> Vertex.t list
 
-(** Raises invalid argument exception if the vertex is not a parallel block vertex. *)
-val vertices_in_block : dag -> parallel_block_vertex:Vertex.t -> Vertex.Set.t
+  (** Raises invalid argument exception if the vertex is not a parallel block vertex. *)
+  val vertices_in_block : dag -> parallel_block_vertex:Vertex.t -> Vertex.Set.t
 
-(* Does the vertex contain a nested graph? (E.g. a parallel block vertex
- * contains a nested graph.) If so, return the return vertex of that
- * graph. The name `unroll` is customary for recursive types.
- *)
-val unroll : dag -> Vertex.t -> Vertex.t option
+  (* Does the vertex contain a nested graph? (E.g. a parallel block vertex
+   * contains a nested graph.) If so, return the return vertex of that
+   * graph. The name `unroll` is customary for recursive types.
+   *)
+  val unroll : dag -> Vertex.t -> Vertex.t option
+end
+
+include Daglike with module Vertex := Vertex and type dag := dag
 
 (** Function name + graph. *)
 type dag_fun = {

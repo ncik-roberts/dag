@@ -24,7 +24,7 @@ let run_on_ast (ast : Ast.t) : unit =
       "Traversal:";
       Sexp.to_string_hum (Dag_traversal.sexp_of_traversal traversal);
     ]);
-    let ir = Dag_to_ir.run inline traversal in
+    let (ir, temp_dag) = Dag_to_ir.run inline traversal in
     say (fun () -> [
       "IR:";
       Sexp.to_string_hum (Ir.sexp_of_t ir);

@@ -17,7 +17,13 @@ let uncons (xs : 'a list) : ('a * 'a list) option = match xs with
   | [] -> None
   | x :: xs -> Some (x, xs)
 
-let run (dag : Dag.dag) (traversal : Dag_traversal.traversal) : Ir.t =
+let into_dag (dag : Dag.dag) (ctx : context) : Temp_dag.dag =
+  let inverted_ctx = Map.fold ctx ~init:Temp.Map.empty
+    ~f:(fun ~key ~data acc -> Temp.Map.add_exn acc ~data:key ~key:data)
+  in
+  Temp_dag.into_dag (dag, Map.find_exn ctx, Map.find_exn inverted_ctx)
+
+let run (dag : Dag.dag) (traversal : Dag_traversal.traversal) : Ir.t * Temp_dag.dag =
 
   (* Look up, being smart about literals. *)
   let lookup_exn (ctx : context) (key : Vertex.t) : Ir.operand =
@@ -101,30 +107,29 @@ let run (dag : Dag.dag) (traversal : Dag_traversal.traversal) : Ir.t =
         let pred = Dag.predecessors dag v |> tuple1_of_list_exn in
         begin
           match Dag.view dag v with
-          | Vertex_view.Parallel_block (bound_vertex, _) ->
+          | Vertex_view.Parallel_block (bound_vertex, return_vertex) ->
             let arg = lookup_exn ctx pred in
-            let block' = convert ctx block in
-            let dest = Temp.next () in
             let bound_temp = Temp.next () in
-            let stmt = Ir.Parallel (dest, arg, bound_temp, block') in
-            let ctx' = ctx
-              |> Map.add_exn ~key:v ~data:dest
-              |> Map.add_exn ~key:bound_vertex ~data:bound_temp
-            in
-            (ctx', stmt)
+            let ctx = Map.add_exn ctx ~key:bound_vertex ~data:bound_temp in
+            let (ctx, block) = convert ctx block ~return:return_vertex in
+            let dest = Temp.next () in
+            let stmt = Ir.Parallel (dest, arg, bound_temp, block) in
+            let ctx = Map.add_exn ctx ~key:v ~data:dest in
+            (ctx, stmt)
           | _ -> failwithf "Unexpected non-parallel vertex `%s`." (Sexp.to_string_hum (Vertex.sexp_of_t v)) ()
         end
 
   (* Convert group of statements *)
-  and convert (ctx : context) (t : Dag_traversal.traversal) : Ir.stmt list =
-    List.folding_map t ~init:ctx ~f:convert_tree
+  and convert (ctx : context) (t : Dag_traversal.traversal) ~(return : Vertex.t) : context * Ir.stmt list =
+    let (ctx', init) = List.fold_map t ~init:ctx ~f:convert_tree in
+    let last = lookup_exn ctx' return in
+    (ctx', init @ [Ir.Return last])
   in
 
   let inputs = Dag.inputs dag in
   let params = List.map ~f:(fun _ -> Temp.next ()) inputs in
   let init_ctx = Vertex.Map.of_alist_exn (List.zip_exn inputs params) in
-  Ir.{
-    params = params;
-    body = convert init_ctx traversal;
-  }
+  let (final_ctx, body) = convert init_ctx traversal ~return:(Dag.return_vertex dag) in
+  let ir = Ir.{ params; body; } in
+  (ir, into_dag dag final_ctx)
 

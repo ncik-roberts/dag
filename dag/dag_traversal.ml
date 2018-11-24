@@ -1,6 +1,7 @@
 open Core
 
 module Vertex = Dag.Vertex
+module Vertex_view = Dag.Vertex_view
 
 (** Topological sort of dag. *)
 type traversal_tree =
@@ -36,8 +37,10 @@ type context = {
 let traversals_with_filter (dag : Dag.dag)
     ~(filter : Vertex.t list -> Vertex.t list) : traversal list =
 
-  (* Exclude inputs from traversal. *)
-  let inputs = Vertex.Set.of_list (Dag.inputs dag) in
+  let isn't_input (v : Vertex.t) : bool = match Dag.view dag v with
+    | Vertex_view.Input _ -> false
+    | _ -> true
+  in
 
   (* How do I evaluate a vertex? *)
   let rec loop_of_vertex (vertex : Vertex.t) : traversal list =
@@ -49,14 +52,13 @@ let traversals_with_filter (dag : Dag.dag)
   (* Arbitrarily find a way to evaluate starting from a context. *)
   and loop ~(acc : traversal) (ctx : context) : traversal list =
     let candidates = Set.filter ctx.direct_predecessors ~f:(fun v ->
-      Set.is_subset (Dag.successors dag v) ~of_:ctx.evaluated
+      isn't_input v && Set.is_subset (Dag.successors dag v) ~of_:ctx.evaluated
     ) in
     let loop_with (vertex : Vertex.t) (subtraversals : traversal list) : traversal list =
       let predecessors_minus_vertex = Set.remove ctx.direct_predecessors vertex in
       let direct_predecessors =
         Vertex.Set.of_list (Dag.predecessors dag vertex)
           |> Set.union predecessors_minus_vertex
-          |> Fn.flip Set.diff inputs
       in
       List.concat_map subtraversals ~f:(fun subtraversal ->
         let ctx' = {
@@ -67,7 +69,7 @@ let traversals_with_filter (dag : Dag.dag)
               (Vertex.Set.of_list (vertex :: traversal_to_list subtraversal));
         } in loop ctx' ~acc:(
           let elem = match Dag.view dag vertex with
-            | Dag.Vertex_view.Parallel_block _ -> Block (vertex, subtraversal)
+            | Vertex_view.Parallel_block _ -> Block (vertex, subtraversal)
             | _ -> Just vertex
           in elem :: acc))
     in

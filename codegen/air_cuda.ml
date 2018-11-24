@@ -123,7 +123,20 @@ let trans_incr_loop_hdr var init limit stride =
 let rec trans_par_stmt = function
   | IR.Par_for (seqs,seq_stms) -> 
       (* This implies either a kernel launch (if we're not in a par block) 
-         or an additional level of indexing (if we are) *) []
+         or an additional level of indexing (if we are) *)
+
+      (* Process: 
+         - Allocate an additional pointer for the list of sequences.
+         - Translate the instructions and length.
+         - Allocate all of them on the device.
+         - Place that in the kernel. 
+         - (Todo: adjust the return type to have kernels, or use a mutable ref)
+         - Launch the kernel.
+        *)  
+
+      (* [CU.Loop(hdr,ins @ (List.map ~f:trans_seq_stmt seq_stms))] *)
+      []
+
   | IR.Seq_for ((dest,aview),par_stms) -> 
       (* This is just a for loop. I think. But how does the loop variable integrate? *)
       (* Gotta do that continuation passing on the aViews and actually merge things. *) 
@@ -134,11 +147,10 @@ let rec trans_par_stmt = function
       let (ins,arr,len) = trans_array_view init_state in
    
       let hdr = trans_incr_loop_hdr arrvar (con 0) (temp_to_var len) (con 1) in
-      [CU.Loop(hdr,par_stms |> List.map ~f:trans_par_stmt |> List.concat)]
+      [CU.Loop(hdr,ins @ List.concat (List.map ~f:trans_par_stmt par_stms))]
 
-  | IR.Run (t,v) -> 
+  | IR.Run (t,v) -> []
       (* Call the queued sequence computation. The other thing does this too, right now. *) 
-      [] (* let (ins,arr,len) = trans_array_view v t in ins *)
 
   | IR.Seq stm -> [trans_seq_stmt stm]
 
@@ -170,7 +182,7 @@ and trans_array_view state : (CU.cuda_stmt list * Temp.t * Temp.t) =
       let prev_instrs = trans_list |> List.map ~f:(fun (i,_,_) -> i) |> List.concat in
       let (_,_,lng) = List.nth_exn trans_list 0 in
       (instr :: prev_instrs,dest_arr,lng)
-      
+
   | IR.Reverse subview -> (* Flip the indexing strategy. *)
       let rev_temp = temp_to_var (Temp.next ()) in
       (* Dummy allocation to extract the length. Sigh. *)

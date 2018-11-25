@@ -74,7 +74,7 @@ let run (dag : Dag.dag) (traversal : Dag_traversal.traversal) : Ir.t * Temp_dag.
   (* Convert a single statement *)
   let rec convert_tree (ctx : context) (t : Dag_traversal.traversal_tree) : context * Ir.stmt =
     let make_dest (v : Vertex.t) =
-      if Vertex.equal v ctx.return then Ir.Return else Ir.Dest (Temp.next ())
+      if Vertex.equal v ctx.return then Ir.Dest.T.Return else Ir.Dest.T.Dest (Temp.next ())
     in
 
     match t with
@@ -108,7 +108,7 @@ let run (dag : Dag.dag) (traversal : Dag_traversal.traversal) : Ir.t * Temp_dag.
         in
         Option.value_map dest_stmt_opt ~default:(ctx, Ir.Nop)
           ~f:(fun (dest, stmt) -> match dest with
-            | Ir.Dest data ->
+            | Ir.Dest.T.Dest data ->
                 let ctx' = { ctx with temps = Map.add_exn ctx.temps ~key:v ~data } in
                 (ctx', stmt)
             | _ -> ({ ctx with returned = true }, stmt))
@@ -125,7 +125,7 @@ let run (dag : Dag.dag) (traversal : Dag_traversal.traversal) : Ir.t * Temp_dag.
             let dest = make_dest v in
             let stmt = Ir.Parallel (dest, arg, bound_temp, block) in
             let ctx = match dest with
-              | Ir.Dest data -> { ctx with temps = Map.add_exn ctx.temps ~key:v ~data }
+              | Ir.Dest.T.Dest data -> { ctx with temps = Map.add_exn ctx.temps ~key:v ~data }
               | _ -> { ctx with returned = true; }
             in
             (ctx, stmt)
@@ -137,7 +137,7 @@ let run (dag : Dag.dag) (traversal : Dag_traversal.traversal) : Ir.t * Temp_dag.
     let (ctx', body) = List.fold_map t ~init:{ ctx with return; returned = false; } ~f:convert_tree in
     let body =
       if ctx'.returned then body
-      else body @ Ir.[ Assign (Return, Temp (Map.find_exn ctx'.temps return) ) ]
+      else body @ Ir.[ Assign (Dest.T.Return, Temp (Map.find_exn ctx'.temps return) ) ]
     in
     ({ ctx' with return = ctx.return }, body)
   in

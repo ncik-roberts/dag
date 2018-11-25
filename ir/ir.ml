@@ -20,10 +20,18 @@ type operand =
   | Temp of Temp.t (* This temp is the only source temp *)
   [@@deriving sexp]
 
-type dest =
-  | Return
-  | Dest of Temp.t
-  [@@deriving sexp]
+module Dest = struct
+  module T = struct
+    type t =
+      | Return
+      | Dest of Temp.t
+      [@@deriving sexp, compare]
+  end
+  type dest = T.t [@@deriving sexp]
+  include Comparable.Make (T)
+end
+
+include (Dest : sig type dest = Dest.T.t [@@deriving sexp] end)
 
 (** All sorts of statements *)
 type stmt =

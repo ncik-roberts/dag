@@ -1,5 +1,7 @@
 open Core
 
+module Dest = Ir.Dest.T
+
 type context = {
   (* Keep track of which temps (with at most one successor) correspond
    * to array views.
@@ -48,7 +50,7 @@ let rec to_seq_stmt : Air.par_stmt -> Air.seq_stmt =
     | Air.Parallel (_, [], _) -> failwith "Empty parallel loop."
     | Air.Parallel (dst, [(t, av)], stmt) -> Air.Seq_stmt (Air.For (dst, (t, av), stmt))
     | Air.Parallel (dst, (t, av) :: tavs, stmt) ->
-        Air.Seq_stmt (Air.For (dst, (t, av), to_seq_stmt (Air.Parallel (Ir.Return, tavs, stmt))))
+        Air.Seq_stmt (Air.For (dst, (t, av), to_seq_stmt (Air.Parallel (Dest.Return, tavs, stmt))))
     | Air.Par_stmt stmt -> Air.Seq_stmt (to_seq_stmt' stmt)
     | Air.Seq stmt -> stmt
 
@@ -117,15 +119,15 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
     | Ir.Nop -> [(ctx, nop)]
     | Ir.Assign (dest, src) ->
         let result_opt = match (dest, src) with
-          | (Ir.Dest dest, Ir.Temp src) ->
+          | (Dest.Dest dest, Ir.Temp src) ->
               let array_view_opt = Map.find ctx.array_views src in
               Option.map array_view_opt ~f:(fun array_view ->
                 let ctx' = { array_views = Map.add_exn ctx.array_views ~key:dest ~data:array_view } in
                 [(ctx', nop)])
-          | (Ir.Return, Ir.Temp src) ->
+          | (Dest.Return, Ir.Temp src) ->
               let array_view_opt = Map.find ctx.array_views src in
               Option.map array_view_opt ~f:(fun array_view ->
-                [(ctx, Air.Par_stmt (Air.Run (Ir.Return, array_view)))])
+                [(ctx, Air.Par_stmt (Air.Run (Dest.Return, array_view)))])
           | _ -> None
         in
         Option.value result_opt
@@ -160,8 +162,8 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
         (* Option 1: defer execution of array view. *)
         begin
           match dest with
-          | Ir.Return -> []
-          | Ir.Dest dest ->
+          | Dest.Return -> []
+          | Dest.Dest dest ->
               let array_view = make_array_view fun_call csrcs in
               let ctx' = { array_views = Map.add_exn ctx.array_views ~key:dest ~data:array_view } in
               List.return (ctx', nop)

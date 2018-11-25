@@ -87,8 +87,8 @@ end = struct
     | Dim (i, av) -> Printf.sprintf "dim%d(%s)" i (pp_array_view av)
 
   let pp_dest = function
-    | Ir.Dest t -> Printf.sprintf "%%%d" (Temp.to_int t)
-    | Ir.Return -> "ret"
+    | Ir.Dest.T.Dest t -> Printf.sprintf "%%%d" (Temp.to_int t)
+    | Ir.Dest.T.Return -> "ret"
 
   let rec pp_par_stmt ?(indent="") = function
     | Parallel (dst, tavs, seq_stmt) ->

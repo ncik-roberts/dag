@@ -33,6 +33,9 @@ type result = {
 
   (* You can determine current lvalue during translation. *)
 
-  (* e.g. x <- parallel(y <- ys) { ... }; the key of this map is x. *)
-  kernel_infos : kernel_info Ir.Dest.Map.t;
+  (* e.g. x <- parallel(y <- ys) { ... } with id I; the key of this map is I.
+   * Remember that the air type includes a unique ID for each parallel block.
+   * That's the key.
+   *)
+  kernel_infos : kernel_info Id.Map.t;
 }

@@ -37,8 +37,10 @@ type 'a stmt = (* Type param stands for either par_stmt or seq_stmt *)
 type par_stmt =
   (* The list of (temp, array_view) pairs is like a nested loop.
    * We just need to bring all parallelism out to the top level.
+   * Id.t is the unique id of the parallel block that allows us to
+   * use it as key into a map.
    *)
-  | Parallel of Ir.dest * (Temp.t * array_view) list * seq_stmt
+  | Parallel of Ir.dest * Id.t * (Temp.t * array_view) list * seq_stmt
 
   (* Wrapper for stmt *)
   | Par_stmt of par_stmt stmt (* ---> Par_stmt (Reduce (...))

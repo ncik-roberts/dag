@@ -27,6 +27,7 @@ module M = struct
   let predecessors (dag, into, out) vtx =
     Dag.predecessors dag (out vtx) |> To_temp.list ~convert:into
   let return_vertex (dag, into, out) = Dag.return_vertex dag |> into
+  let vertices (dag, into, out) = Dag.vertices dag |> To_temp.set ~convert:into
 end
 
 let into_dag = Fn.id

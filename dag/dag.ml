@@ -84,6 +84,7 @@ module type Daglike = sig
   val successors : dag -> Vertex.t -> Vertex.Set.t
   val inputs : dag -> Vertex.t list
   val view : dag -> Vertex.t -> Vertex_view.t
+  val vertices : dag -> Vertex.Set.t
   val enclosing_parallel_blocks : dag -> Vertex.t -> Vertex.t list
   val vertices_in_block : dag -> parallel_block_vertex:Vertex.t -> Vertex.Set.t
   val unroll : dag -> Vertex.t -> Vertex.t option
@@ -95,6 +96,7 @@ let predecessors dag key = (vertex_info dag key).Vertex_info.predecessors
 let view dag key = (vertex_info dag key).Vertex_info.view
 let successors dag key = (vertex_info dag key).Vertex_info.successors
 let inputs dag = dag.inputs
+let vertices dag = Vertex.Set.of_map_keys dag.vertex_infos
 let enclosing_parallel_blocks dag key = (vertex_info dag key).Vertex_info.enclosing_parallel_blocks
 let vertices_in_block dag ~parallel_block_vertex:key =
   match (vertex_info dag key).Vertex_info.vertices_in_block with

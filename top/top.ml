@@ -21,7 +21,7 @@ let run_on_ast (ast : Ast.t) (function_names : string list) : unit =
         "Inlined:";
         Sexp.to_string_hum (Dag.sexp_of_dag inline);
       ]);
-      let traversals = [Dag_traversal.any_traversal inline] in
+      let traversals = Dag_traversal.all_traversals inline in
       List.iter traversals ~f:(fun traversal -> say (fun () -> [
         "Traversal:";
         Sexp.to_string_hum (Dag_traversal.sexp_of_traversal traversal);

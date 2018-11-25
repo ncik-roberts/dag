@@ -6,7 +6,7 @@ let command =
   let open Command.Let_syntax in
   let open Command.Param in
   Command.basic
-    ~summary:"Compile from a dag input file to cuda."
+    ~summary:"Compile selected functions from a dag input file to cuda."
     [%map_open
       let filename = anon ("filename" %: string)
       and function_names = anon (Command.Anons.sequence ("function_name" %: string))

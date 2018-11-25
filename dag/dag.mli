@@ -28,6 +28,7 @@ module type Daglike = sig
   val successors : dag -> Vertex.t -> Vertex.Set.t
   val inputs : dag -> Vertex.t list
   val view : dag -> Vertex.t -> Vertex_view.t
+  val vertices : dag -> Vertex.Set.t
 
   (** Returned in smallest-to-largest order. *)
   val enclosing_parallel_blocks : dag -> Vertex.t -> Vertex.t list

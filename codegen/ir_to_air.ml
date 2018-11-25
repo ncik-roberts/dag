@@ -48,8 +48,7 @@ let rec to_seq_stmt : Air.par_stmt -> Air.seq_stmt =
     | Air.Parallel (_, [], _) -> failwith "Empty parallel loop."
     | Air.Parallel (dst, [(t, av)], stmt) -> Air.Seq_stmt (Air.For (dst, (t, av), stmt))
     | Air.Parallel (dst, (t, av) :: tavs, stmt) ->
-        let dst' = Temp.next () in
-        Air.Seq_stmt (Air.For (dst', (t, av), to_seq_stmt (Air.Parallel (dst, tavs, stmt))))
+        Air.Seq_stmt (Air.For (dst, (t, av), to_seq_stmt (Air.Parallel (Ir.Return, tavs, stmt))))
     | Air.Par_stmt stmt -> Air.Seq_stmt (to_seq_stmt' stmt)
     | Air.Seq stmt -> stmt
 
@@ -60,12 +59,11 @@ and to_seq_stmt' : Air.par_stmt Air.stmt -> Air.seq_stmt Air.stmt =
     | Air.For (a, b, c) -> Air.For (a, b, to_seq_stmt c)
     | Air.Run (a, b) -> Air.Run (a, b)
     | Air.Nop -> Air.Nop
-    | Air.Return x -> Air.Return x
 
 (* A program contains many parallel statements. Let's change some of
  * them to sequential statements. *)
 let rec expand (air : Air.par_stmt) : Air.par_stmt list = match air with
-  | Air.Seq _ | Air.Parallel _ | Air.Par_stmt (Air.Nop | Air.Return _) -> List.return air
+  | Air.Seq _ | Air.Parallel _ | Air.Par_stmt Air.Nop  -> List.return air
   | Air.Par_stmt (Air.Reduce _ | Air.Run _ as r) -> Air.[
       Par_stmt r;
       Seq (Seq_stmt (to_seq_stmt' r));
@@ -82,7 +80,7 @@ let rec expand (air : Air.par_stmt) : Air.par_stmt list = match air with
       in List.map (loop [] stmts) ~f:Air.(fun stmts -> Par_stmt (Block stmts))
 
 let rec make_parallel
-  (d1 : Temp.t) (* dest *)
+  (d1 : Ir.dest) (* dest *)
   (av1 : Air.array_view) (* array view *)
   (t1 : Temp.t) (* temp to which each elem of array view is bound *)
   (stmts : Air.par_stmt list) : Air.par_stmt list =
@@ -118,32 +116,20 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
   let rec loop (ctx : context) (stmt : Ir.stmt) : (context * Air.par_stmt) list = match stmt with
     | Ir.Nop -> [(ctx, nop)]
     | Ir.Assign (dest, src) ->
-        let ctx_opt = match src with
-          | Ir.Const _ -> None
-          | Ir.Temp t ->
-              let array_view_opt = Map.find ctx.array_views t in
+        let result_opt = match (dest, src) with
+          | (Ir.Dest dest, Ir.Temp src) ->
+              let array_view_opt = Map.find ctx.array_views src in
               Option.map array_view_opt ~f:(fun array_view ->
-                { array_views = Map.add_exn ctx.array_views ~key:dest ~data:array_view })
+                let ctx' = { array_views = Map.add_exn ctx.array_views ~key:dest ~data:array_view } in
+                [(ctx', nop)])
+          | (Ir.Return, Ir.Temp src) ->
+              let array_view_opt = Map.find ctx.array_views src in
+              Option.map array_view_opt ~f:(fun array_view ->
+                [(ctx, Air.Par_stmt (Air.Run (Ir.Return, array_view)))])
+          | _ -> None
         in
-        Option.value_map ctx_opt
+        Option.value result_opt
           ~default:Air.([(ctx, Seq (Assign (dest, convert_operand src)))])
-          ~f:(fun ctx' -> [(ctx', nop)])
-   | Ir.Return src ->
-       let result = match src with
-        | Ir.Const _ -> None
-        | Ir.Temp t ->
-            let open Option.Monad_infix in
-            Map.find ctx.array_views t >>= fun array_view ->
-            (* TODO: option where we run it sequentially. *)
-            let dest = Temp.next () in
-            Option.return Air.(Par_stmt (Block [
-              Par_stmt (Run (dest, array_view));
-              Par_stmt (Return (Temp dest));
-            ]))
-      in
-      [ Option.value_map result
-          ~default:(ctx, Air.(Par_stmt (Return (convert_operand src))))
-          ~f:(Tuple2.create ctx) ]
   | Ir.Binop (dest, binop, src1, src2) ->
       (* Right now, no binops that operate on array views. *)
       assert (not_in ctx src1);
@@ -170,18 +156,21 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
       (* Canonical srcs (i.e. if it is an array view) *)
       let csrcs = List.map srcs ~f:(canonicalize ctx) in
 
-      [
+      List.concat [
         (* Option 1: defer execution of array view. *)
         begin
-          let array_view = make_array_view fun_call csrcs in
-          let ctx' = { array_views = Map.add_exn ctx.array_views ~key:dest ~data:array_view } in
-          (ctx', nop)
+          match dest with
+          | Ir.Return -> []
+          | Ir.Dest dest ->
+              let array_view = make_array_view fun_call csrcs in
+              let ctx' = { array_views = Map.add_exn ctx.array_views ~key:dest ~data:array_view } in
+              List.return (ctx', nop)
         end;
 
         (* Option 2: run array view right away. *)
         begin
           let array_view = make_array_view fun_call csrcs in
-          (ctx, Air.(Par_stmt (Run (dest, array_view))))
+          List.return (ctx, Air.(Par_stmt (Run (dest, array_view))))
         end;
       ]
   | Ir.Parallel (dest, src, t_src, stmts) ->

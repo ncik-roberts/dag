@@ -49,7 +49,7 @@ let transitive_predecessor_closure (dag : Dag.dag) : Vertex.Set.t Vertex.Map.t =
         if Set.length acc <> Set.length acc' then any_changed := true;
         acc'))
     in
-    if !any_changed then acc else loop acc'
+    if !any_changed then loop acc' else acc
   in loop init
 
 let traversals_with_filter (dag : Dag.dag)
@@ -84,12 +84,7 @@ let traversals_with_filter (dag : Dag.dag)
       in
       List.concat_map subtraversals ~f:(fun (subtraversal, remaining) ->
         let ctx' = {
-          curr_bound_parallel_vertex =
-            begin
-              match Dag.view dag vertex with
-              | Vertex_view.Parallel_block (bd_vtx, _) -> Some bd_vtx
-              | _ -> None
-            end;
+          curr_bound_parallel_vertex = ctx.curr_bound_parallel_vertex;
           direct_predecessors = Set.union direct_predecessors remaining;
           evaluated =
             Set.union
@@ -106,7 +101,13 @@ let traversals_with_filter (dag : Dag.dag)
     | candidate_list ->
         List.concat_map candidate_list ~f:(fun vertex ->
           let subtraversals =
-            Option.value_map (Dag.unroll dag vertex) ~default:[([], Vertex.Set.empty)] ~f:loop_of_vertex
+            Option.value_map (Dag.unroll dag vertex) ~default:[([], Vertex.Set.empty)]
+              ~f:(loop_of_vertex ~curr:(
+                begin
+                  match Dag.view dag vertex with
+                  | Vertex_view.Parallel_block (bd_vtx, _) -> Some bd_vtx
+                  | _ -> None
+                end))
           in
           let results = loop_with vertex subtraversals in
           match ctx.curr_bound_parallel_vertex with

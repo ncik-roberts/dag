@@ -28,9 +28,13 @@ let run_on_ast (ast : Ast.t) : unit =
     say (fun () -> [
       "IR:";
       Sexp.to_string_hum (Ir.sexp_of_t ir);
-      "";
-      "";
+    ]);
+    let airs = Ir_to_air.all ir temp_dag in
+    say (fun () -> List.concat_mapi airs ~f:(fun i air -> [
+      Printf.sprintf "AIR #%d" i;
+      Sexp.to_string_hum (Air.sexp_of_t air);
     ]))
+  )
 
 let run_on_file ?(verbose : bool = false) (file : string) : unit =
   verbosity := verbose;

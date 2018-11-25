@@ -17,23 +17,43 @@ type operand =
 
 (* Statement with either parallel or sequential semantics. *)
 type 'a stmt = (* Type param stands for either par_stmt or seq_stmt *)
+  (* _Sequential_ for loop.
+   * Sort of like a map.
+   *)
   | For of Ir.dest * (Temp.t * array_view) * 'a
+
+  (* Explicitly allocate array_view and put it in memory. *)
   | Run of Ir.dest * array_view
+
+  (* List of statements *)
   | Block of 'a list
+
+  (* dest <- reduce(Operator, operand, array_view) *)
   | Reduce of Ir.dest * Ir.Operator.t * operand * array_view
   | Nop
   [@@deriving sexp]
 
 (** Parallel statement *)
 type par_stmt =
-  (* All temps here are destinations. *)
+  (* The list of (temp, array_view) pairs is like a nested loop.
+   * We just need to bring all parallelism out to the top level.
+   *)
   | Parallel of Ir.dest * (Temp.t * array_view) list * seq_stmt
-  | Par_stmt of par_stmt stmt
+
+  (* Wrapper for stmt *)
+  | Par_stmt of par_stmt stmt (* ---> Par_stmt (Reduce (...))
+                                      Par_stmt (Run (...)) *)
+
+  (* Allows you to have a sequential statement at the top-level of your program. *)
+  (* This does NOT run in parallel. *)
   | Seq of seq_stmt
   [@@deriving sexp]
 
 and seq_stmt =
-  | Seq_stmt of seq_stmt stmt
+
+  (* Wrapper for stmt *)
+  | Seq_stmt of seq_stmt stmt (* --> Seq_stmt (Reduce (...)) *)
+
   | Binop of Ir.dest * Ast.binop * operand * operand
   | Unop of Ir.dest * Ast.unop * operand
   | Assign of Ir.dest * operand

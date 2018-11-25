@@ -50,7 +50,7 @@ module Pretty_print : sig
   val pp_array_view : array_view -> string
   val pp_par_stmt : par_stmt -> string
   val pp_seq_stmt : seq_stmt -> string
-  val pp_stmt : ('a -> string) -> 'a stmt -> string
+  val pp_stmt : prefix:string -> ('a -> string) -> 'a stmt -> string
   val pp_t : t -> string
 end = struct
   let rec pp_array_view = function
@@ -77,11 +77,11 @@ end = struct
           (pp_seq_stmt ~indent:(indent ^ "  ") seq_stmt)
           indent
     | Par_stmt par_stmt ->
-        pp_stmt ~indent (pp_par_stmt ~indent:(indent ^ "  ")) par_stmt
+        pp_stmt ~prefix:"p" ~indent (pp_par_stmt ~indent:(indent ^ "  ")) par_stmt
     | Seq seq_stmt -> pp_seq_stmt ~indent seq_stmt
   and pp_seq_stmt ?(indent="") = function
     | Seq_stmt seq_stmt ->
-        pp_stmt ~indent (pp_seq_stmt ~indent:(indent ^ "  ")) seq_stmt
+        pp_stmt ~prefix:"s" ~indent (pp_seq_stmt ~indent:(indent ^ "  ")) seq_stmt
     | Binop (dst, binop, src1, src2) -> Printf.sprintf "%s%%%d <- %s %s %s" indent (Temp.to_int dst)
         (pp_operand src1)
         (Sexp.to_string_hum (Ast.sexp_of_binop binop))
@@ -91,27 +91,28 @@ end = struct
         (pp_operand src)
     | Assign (dst, src) -> Printf.sprintf "%s%%%d <- %s" indent (Temp.to_int dst)
         (pp_operand src)
-  and pp_stmt : type t. ?indent:string -> (t -> string) -> t stmt -> string =
-    fun ?(indent="") pp -> function
-    | Nop -> indent ^ "nop"
-    | Return op -> indent ^ "return " ^ pp_operand op
+  and pp_stmt : type t. ?indent:string -> prefix:string -> (t -> string) -> t stmt -> string =
+    fun ?(indent="") ~prefix pp -> function
+    | Nop -> indent ^ prefix ^ "nop"
+    | Return op -> indent ^ prefix ^ "return " ^ pp_operand op
     | Block stmts -> String.concat ~sep:"\n" (List.map ~f:pp stmts)
-    | Run (dst, av) -> Printf.sprintf "%s%%%d <- %s" indent (Temp.to_int dst) (pp_array_view av)
+    | Run (dst, av) -> Printf.sprintf "%s%%%d <- %srun(%s)" indent (Temp.to_int dst) prefix (pp_array_view av)
     | For (dst, (t, av), stmt) ->
-        Printf.sprintf "%s%%%d <- for (%%%d <- %s) {\n%s\n%s}" indent (Temp.to_int dst) (Temp.to_int t) (pp_array_view av)
+        Printf.sprintf "%s%%%d <- %sfor (%%%d <- %s) {\n%s\n%s}" indent (Temp.to_int dst) prefix (Temp.to_int t) (pp_array_view av)
         (pp stmt)
         indent
     | Reduce (dst, op, id, av) ->
-        Printf.sprintf "%s%%%d <- reduce(%s, %s, %s)" indent (Temp.to_int dst)
+        Printf.sprintf "%s%%%d <- %sreduce(%s, %s, %s)" indent (Temp.to_int dst) prefix
           (Sexp.to_string_hum (Ir.Operator.sexp_of_t op))
           (pp_operand id)
           (pp_array_view av)
 
   let pp_t { params; body; } =
-    Printf.sprintf "(%s) {\n%s\n}" (String.concat ~sep:", " (List.map params ~f:(fun p -> "%" ^ string_of_int (Temp.to_int p))))
+    Printf.sprintf "(%s) {\n%s\n}"
+      (String.concat ~sep:", " (List.map params ~f:(fun p -> "%" ^ string_of_int (Temp.to_int p))))
       (pp_par_stmt ~indent:"  " body)
 
   let pp_par_stmt = pp_par_stmt ?indent:None
   let pp_seq_stmt = pp_seq_stmt ?indent:None
-  let pp_stmt f stmt = pp_stmt ?indent:None f stmt
+  let pp_stmt ~prefix f stmt = pp_stmt ?indent:None ~prefix f stmt
 end

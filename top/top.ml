@@ -37,7 +37,6 @@ let run_on_ast (ast : Ast.t) (function_names : string list) : unit =
       say (fun () -> List.concat_mapi airs ~f:(fun i air -> [
         Printf.sprintf "AIR #%d" i;
         Air.Pretty_print.pp_t air;
-        Sexp.to_string_hum (Air.sexp_of_t air);
       ]))
     end)
 

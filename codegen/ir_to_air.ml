@@ -60,39 +60,55 @@ and to_seq_stmt' : Air.par_stmt Air.stmt -> Air.seq_stmt Air.stmt =
     | Air.For (a, b, c) -> Air.For (a, b, to_seq_stmt c)
     | Air.Run (a, b) -> Air.Run (a, b)
 
+(* A program contains many parallel statements. Let's change some of
+ * them to sequential statements. *)
+let rec expand (air : Air.par_stmt) : Air.par_stmt list = match air with
+  | Air.Seq _ | Air.Parallel _ -> List.return air
+  | Air.Par_stmt (Air.Reduce _ | Air.Run _ as r) -> Air.[
+      Par_stmt r;
+      Seq (Seq_stmt (to_seq_stmt' r));
+    ]
+  | Air.Par_stmt (Air.For (dst, (t, av), stmt)) ->
+      List.map (expand stmt) ~f:Air.(fun stmt' -> Par_stmt (For (dst, (t, av), stmt')))
+  | Air.Par_stmt (Air.Block stmts) ->
+      let rec loop acc = function
+        | [] -> failwith "Empty block."
+        | [stmt] -> List.map (expand stmt) ~f:(fun stmt' -> List.rev (stmt' :: acc))
+        | stmt :: stmts -> List.concat_map (expand stmt) ~f:(fun stmt' -> loop (stmt' :: acc) stmts)
+      in List.map (loop [] stmts) ~f:Air.(fun stmts -> Par_stmt (Block stmts))
+
+let rec make_parallel
+  (d1 : Temp.t) (* dest *)
+  (av1 : Air.array_view) (* array view *)
+  (t1 : Temp.t) (* temp to which each elem of array view is bound *)
+  (stmts : Air.par_stmt list) : Air.par_stmt list =
+  List.concat_map stmts ~f:(fun stmt -> match stmt with
+    | Air.Parallel (d2, avs, body) -> Air.[
+        (* One option: fold together parallel blocks. *)
+        Parallel (d1, (t1, av1) :: avs, body);
+
+        (* Another option: unparallelize outer loop. *)
+        Par_stmt (For (d1, (t1, av1), stmt));
+      ]
+    | Air.Seq seq_stmt -> Air.[
+        Parallel (d1, [(t1, av1)], seq_stmt);
+        Par_stmt (For (d1, (t1, av1), stmt));
+      ]
+    | Air.Par_stmt (Air.Run (d2, av2)) -> Air.[
+        begin
+          let t2 = Temp.next () in
+          Parallel (d1, [(t1, av1); (t2, av2);], Assign (d2, Temp t2))
+        end;
+        Parallel (d1, [(t1, av1)], Seq_stmt (Run (d2, av2)));
+        Par_stmt (For (d1, (t1, av1), stmt));
+      ]
+    | Air.Par_stmt par_stmt -> Air.[
+        Parallel (d1, [(t1, av1)], Seq_stmt (to_seq_stmt' par_stmt));
+        Par_stmt (For (d1, (t1, av1), stmt));
+      ]
+  )
+
 let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
-
-  let rec make_parallel
-    (d1 : Temp.t) (* dest *)
-    (av1 : Air.array_view) (* array view *)
-    (t1 : Temp.t) (* temp to which each elem of array view is bound *)
-    (stmts : Air.par_stmt list) : Air.par_stmt list =
-    List.concat_map stmts ~f:(fun stmt -> match stmt with
-      | Air.Parallel (d2, avs, body) -> Air.[
-          (* One option: fold together parallel blocks. *)
-          Parallel (d1, (t1, av1) :: avs, body);
-
-          (* Another option: unparallelize outer loop. *)
-          Par_stmt (For (d1, (t1, av1), stmt));
-        ]
-      | Air.Seq seq_stmt -> Air.[
-          Parallel (d1, [(t1, av1)], seq_stmt);
-          Par_stmt (For (d1, (t1, av1), stmt));
-        ]
-      | Air.Par_stmt (Air.Run (d2, av2)) -> Air.[
-          begin
-            let t2 = Temp.next () in
-            Parallel (d1, [(t1, av1); (t2, av2);], Assign (d2, Temp t2))
-          end;
-          Parallel (d1, [(t1, av1)], Seq_stmt (Run (d2, av2)));
-          Par_stmt (For (d1, (t1, av1), stmt));
-        ]
-      | Air.Par_stmt par_stmt -> Air.[
-          Parallel (d1, [(t1, av1)], Seq_stmt (to_seq_stmt' par_stmt));
-          Par_stmt (For (d1, (t1, av1), stmt));
-        ]
-    )
-  in
 
   (* Returned list is the various ways of parallelizing this statement. *)
   let rec loop (ctx : context) (stmt : Ir.stmt) : (context * Air.par_stmt) list = match stmt with
@@ -191,9 +207,16 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
   let init_ctx = { array_views =
     Temp.Map.of_alist_exn (List.map Ir.(ir.params) ~f:(fun t -> (t, Air.Array t)))
   } in
+
   let alternatives = loop_stmts init_ctx Ir.(ir.body) in
+
+  (* Take all possible combinations of sequential/parallel statements *)
+  let alternatives = List.concat_map ~f:expand alternatives in
 
   List.map alternatives ~f:(fun alt ->
     Air.{ params = Ir.(ir.params);
           body = alt;
         })
+
+(* This is... awful. Generate all options and then take the head. *)
+let any (ir : Ir.t) (dag : Temp_dag.dag) : Air.t = List.hd_exn (all ir dag)

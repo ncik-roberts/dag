@@ -9,11 +9,12 @@ let command =
     ~summary:"Compile from a dag input file to cuda."
     [%map_open
       let filename = anon ("filename" %: string)
+      and function_names = anon (Command.Anons.sequence ("function_name" %: string))
       and verbose = flag "verbose" no_arg
         ~doc:"print extra debug information on exception"
       in
       fun () ->
-        try Top.run_on_file ~verbose filename
+        try Top.run_on_file ~verbose filename function_names
         with Failure str as e ->
           if not verbose
             then Printf.fprintf stderr "Error: %s\n" str

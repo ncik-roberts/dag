@@ -7,7 +7,7 @@ type context = {
   array_views : Air.array_view Temp.Map.t;
 }
 
-let nop : Air.par_stmt = Air.(Par_stmt (Block []))
+let nop : Air.par_stmt = Air.Par_stmt Air.Nop
 
 let convert_operand : Ir.operand -> Air.operand =
   function
@@ -59,11 +59,13 @@ and to_seq_stmt' : Air.par_stmt Air.stmt -> Air.seq_stmt Air.stmt =
     | Air.Block xs -> Air.Block (List.map ~f:to_seq_stmt xs)
     | Air.For (a, b, c) -> Air.For (a, b, to_seq_stmt c)
     | Air.Run (a, b) -> Air.Run (a, b)
+    | Air.Nop -> Air.Nop
+    | Air.Return x -> Air.Return x
 
 (* A program contains many parallel statements. Let's change some of
  * them to sequential statements. *)
 let rec expand (air : Air.par_stmt) : Air.par_stmt list = match air with
-  | Air.Seq _ | Air.Parallel _ -> List.return air
+  | Air.Seq _ | Air.Parallel _ | Air.Par_stmt (Air.Nop | Air.Return _) -> List.return air
   | Air.Par_stmt (Air.Reduce _ | Air.Run _ as r) -> Air.[
       Par_stmt r;
       Seq (Seq_stmt (to_seq_stmt' r));
@@ -72,7 +74,9 @@ let rec expand (air : Air.par_stmt) : Air.par_stmt list = match air with
       List.map (expand stmt) ~f:Air.(fun stmt' -> Par_stmt (For (dst, (t, av), stmt')))
   | Air.Par_stmt (Air.Block stmts) ->
       let rec loop acc = function
-        | [] -> failwith "Empty block."
+        | [] ->
+            assert (List.is_empty acc);
+            List.return []
         | [stmt] -> List.map (expand stmt) ~f:(fun stmt' -> List.rev (stmt' :: acc))
         | stmt :: stmts -> List.concat_map (expand stmt) ~f:(fun stmt' -> loop (stmt' :: acc) stmts)
       in List.map (loop [] stmts) ~f:Air.(fun stmts -> Par_stmt (Block stmts))
@@ -125,17 +129,20 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
           ~default:Air.([(ctx, Seq (Assign (dest, convert_operand src)))])
           ~f:(fun ctx' -> [(ctx', nop)])
    | Ir.Return src ->
-       let dest = Temp.next () in
        let result = match src with
         | Ir.Const _ -> None
         | Ir.Temp t ->
             let open Option.Monad_infix in
             Map.find ctx.array_views t >>= fun array_view ->
             (* TODO: option where we run it sequentially. *)
-            Option.return Air.(Par_stmt (Run (dest, array_view)))
+            let dest = Temp.next () in
+            Option.return Air.(Par_stmt (Block [
+              Par_stmt (Run (dest, array_view));
+              Par_stmt (Return (Temp dest));
+            ]))
       in
       [ Option.value_map result
-          ~default:(ctx, Air.(Seq (Assign (dest, convert_operand src))))
+          ~default:(ctx, Air.(Par_stmt (Return (convert_operand src))))
           ~f:(Tuple2.create ctx) ]
   | Ir.Binop (dest, binop, src1, src2) ->
       (* Right now, no binops that operate on array views. *)
@@ -183,7 +190,7 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
         | `Operand _ -> failwith "Invalid argument to a parallel block."
       in
       let stmts' =
-        let ctx' = { array_views = Map.add_exn ctx.array_views ~key:t_src ~data:array_view } in
+        let ctx' = { array_views = Map.add_exn ctx.array_views ~key:t_src ~data:(Air.Array t_src) } in
         loop_stmts ctx' stmts
       in
       let alternatives = make_parallel dest array_view t_src stmts' in
@@ -191,6 +198,7 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
 
   (* List is all possible options *)
   and loop_stmts (ctx : context) (stmts : Ir.stmt list) : Air.par_stmt list =
+    let stmts = List.filter stmts ~f:(function Ir.Nop -> false | _ -> true) in
     match stmts with
     | [stmt] -> List.map ~f:snd (loop ctx stmt)
     | _ ->

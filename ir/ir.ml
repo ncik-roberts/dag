@@ -20,16 +20,27 @@ type operand =
   | Temp of Temp.t (* This temp is the only source temp *)
   [@@deriving sexp]
 
+module Dest = struct
+  module T = struct
+    type t =
+      | Return
+      | Dest of Temp.t
+      [@@deriving sexp, compare]
+  end
+  type dest = T.t [@@deriving sexp]
+  include Comparable.Make (T)
+end
+
+include (Dest : sig type dest = Dest.T.t [@@deriving sexp] end)
+
 (** All sorts of statements *)
 type stmt =
-  (* All temps here are destinations. *)
-  | Parallel of Temp.t * operand * stmt list
-  | Binop of Temp.t * Ast.binop * operand * operand
-  | Unop of Temp.t * Ast.unop * operand
-  | Fun_call of Temp.t * fun_call * operand list
-  | Assign of Temp.t * operand
+  | Parallel of dest * operand * Temp.t * stmt list
+  | Binop of dest * Ast.binop * operand * operand
+  | Unop of dest * Ast.unop * operand
+  | Fun_call of dest * fun_call * operand list
+  | Assign of dest * operand
   | Nop
-  | Return of operand
   [@@deriving sexp]
 
 type t = {

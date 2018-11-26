@@ -13,3 +13,11 @@ int[][] multiplyMatrixMatrix(int[][] m1, int[][] m2) {
     return multiplyMatrixVector(m1, col);
   };
 }
+
+int[][] f(int[][] m1, int[][] m2) {
+  return parallel (int[] row <- m1) {
+    return parallel (int[] col <- transpose(m2)) {
+      return dotProduct(row, col);
+    };
+  };
+}

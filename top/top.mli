@@ -1,6 +1,5 @@
 (* Top level for dag-to-cuda compiler.
- * `run` should be run directly as a program with the DAG program
- * to compile as the argument.
+ * string list denotes function names to compile to an external interface.
  *)
-val run_on_ast : Ast.t -> unit
-val run_on_file : ?verbose:bool -> string -> unit
+val run_on_ast : Ast.t -> string list -> unit
+val run_on_file : ?verbose:bool -> string -> string list -> unit

@@ -4,6 +4,7 @@ S dag
 S lib
 S codegen
 S ir
+S cuda
 B _build/**
 PKG core
 PKG ppx_jane

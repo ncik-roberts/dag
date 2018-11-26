@@ -10,7 +10,7 @@ module Vertex_view = struct
     [@@deriving sexp]
 
   type t =
-    | Parallel_block of Vertex.t (* Return of block. *)
+    | Parallel_block of Vertex.t * Vertex.t (* (Parallel binding, return of block) *)
     | Function of Ast.call_name
     | Binop of Ast.binop
     | Unop of Ast.unop
@@ -75,12 +75,28 @@ type dag = {
   inputs : Vertex.t list;
 } [@@deriving sexp]
 
+(* Reproduced from mli file *)
+module type Daglike = sig
+  module Vertex : Utils.Comparable_sexpable
+  type dag
+  val return_vertex : dag -> Vertex.t
+  val predecessors : dag -> Vertex.t -> Vertex.t list
+  val successors : dag -> Vertex.t -> Vertex.Set.t
+  val inputs : dag -> Vertex.t list
+  val view : dag -> Vertex.t -> Vertex_view.t
+  val vertices : dag -> Vertex.Set.t
+  val enclosing_parallel_blocks : dag -> Vertex.t -> Vertex.t list
+  val vertices_in_block : dag -> parallel_block_vertex:Vertex.t -> Vertex.Set.t
+  val unroll : dag -> Vertex.t -> Vertex.t option
+end
+
 let return_vertex dag = dag.return_vertex
 let vertex_info dag = Map.find_exn dag.vertex_infos
 let predecessors dag key = (vertex_info dag key).Vertex_info.predecessors
 let view dag key = (vertex_info dag key).Vertex_info.view
 let successors dag key = (vertex_info dag key).Vertex_info.successors
 let inputs dag = dag.inputs
+let vertices dag = Vertex.Set.of_map_keys dag.vertex_infos
 let enclosing_parallel_blocks dag key = (vertex_info dag key).Vertex_info.enclosing_parallel_blocks
 let vertices_in_block dag ~parallel_block_vertex:key =
   match (vertex_info dag key).Vertex_info.vertices_in_block with
@@ -91,7 +107,7 @@ let unroll dag key =
   let open Vertex_view in
   (* Only recursive production is Parallel_block *)
   match view dag key with
-  | Parallel_block t -> Some t
+  | Parallel_block (_, t) -> Some t
   | Function _ | Binop _ | Unop _ | Literal _ | Input _ -> None
 
 type 'a counter = unit -> 'a
@@ -192,7 +208,7 @@ let of_ast : Ast.t -> t =
               ~key:parallel.parallel_ident ~data:vertex_binding;
           } in
           let { Result.vertex = return_vertex; _; } as result = loop_stmts ctx' parallel.parallel_body in
-          let view = Vertex_view.Parallel_block return_vertex in
+          let view = Vertex_view.Parallel_block (vertex_binding, return_vertex) in
           `New_vertex (vertex, view, [result_expr], `With_additional_results [result; result_binding])
       | Ast.Const i ->
           let vertex = next_vertex () in
@@ -329,7 +345,7 @@ let renumber_with (dag : dag) ?(remove=Fn.const false) (new_number : Vertex.t ->
       view = begin
         let open Vertex_view in
         match v.view with
-        | Parallel_block vtx -> Parallel_block (new_number vtx)
+        | Parallel_block (vtx1, vtx2) -> Parallel_block (new_number vtx1, new_number vtx2)
         | x -> x
       end;
       enclosing_parallel_blocks = List.map ~f:new_number v.enclosing_parallel_blocks;
@@ -393,7 +409,8 @@ let substitute (source : dag) (vertex : Vertex.t) (target : dag) : dag =
       let target_vertex_infos = Map.update target.vertex_infos pred ~f:(function
         | None -> failwith "Impossible: not found predecessor."
         | Some vertex_info -> Vertex_info.{ vertex_info with
-            successors = Set.union (successors target vertex) vertex_info.successors;
+            successors = Set.remove vertex_info.successors vertex
+              |> Set.union (successors source input);
           })
       in Vertex_info.{ target with vertex_infos = target_vertex_infos })
   in

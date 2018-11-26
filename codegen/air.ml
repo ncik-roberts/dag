@@ -3,7 +3,7 @@ open Core
 (** Abstract IR *)
 
 type array_view =
-  | Array of Temp.t
+  | Array of Temp.t 
   | Zip_with of Ir.Operator.t * array_view list
   | Reverse of array_view
   | Transpose of array_view
@@ -59,7 +59,7 @@ and seq_stmt =
   [@@deriving sexp]
 
 type t = {
-  params : Temp.t list;
+  params : (Temp.t) list;
   body : par_stmt;
 } [@@deriving sexp]
 
@@ -131,7 +131,7 @@ end = struct
 
   let pp_t { params; body; } =
     Printf.sprintf "(%s) {\n%s\n}"
-      (String.concat ~sep:", " (List.map params ~f:(fun p -> "%" ^ string_of_int (Temp.to_int p))))
+      (String.concat ~sep:", " (List.map params ~f:(fun (p) -> "%" ^ string_of_int (Temp.to_int p))))
       (pp_par_stmt ~indent:"  " body)
 
   let pp_par_stmt = pp_par_stmt ?indent:None

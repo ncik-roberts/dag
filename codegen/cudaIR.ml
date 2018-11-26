@@ -74,6 +74,7 @@ and cuda_stmt =
 
   | Free of cuda_ident
   | Sync
+  | Nop
 
 type cuda_gstmt = 
   | Function of cuda_func
@@ -209,6 +210,7 @@ and fmt_stmt n stm =
 
  | Sync -> sprintf "%s %s;\n" sp "__syncthreads()"
  | Free id -> sprintf "%s cudaFree(%s);\n" sp id
+ | Nop -> ""
 
 let fmt_func f =
   let arglist = List.map f.args ~f:(fun (t,id) -> (fmt_typ t)^" "^id) in

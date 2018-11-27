@@ -89,14 +89,15 @@ end = struct
     | Dim (i, av) -> Printf.sprintf "dim%d(%s)" i (pp_array_view av)
 
   let pp_dest = function
-    | Ir.Dest.T.Dest t -> Printf.sprintf "%%%d" (Temp.to_int t)
-    | Ir.Dest.T.Return -> "ret"
+    | Ir.Dest t -> Printf.sprintf "%%%d" (Temp.to_int t)
+    | Ir.Return -> "ret"
 
   let rec pp_par_stmt ?(indent="") = function
-    | Parallel (dst, tavs, seq_stmt) ->
-        Printf.sprintf "%s%s <- parallel(%s) {\n%s\n%s}"
+    | Parallel (dst, id, tavs, seq_stmt) ->
+        Printf.sprintf "%s%s <- parallel[%d](%s) {\n%s\n%s}"
           indent
           (pp_dest dst)
+          (Id.to_int id)
           (String.concat ~sep:","
              (List.map tavs ~f:(fun (t, av) -> Printf.sprintf "%%%d <- %s" (Temp.to_int t) (pp_array_view av))))
           (pp_seq_stmt ~indent:(indent ^ "  ") seq_stmt)

@@ -1,7 +1,5 @@
 open Core
 
-module Dest = Ir.Dest.T
-
 type context = {
   (* Keep track of which temps (with at most one successor) correspond
    * to array views.
@@ -47,10 +45,10 @@ let canonicalize (ctx : context) : Ir.operand -> 'a = function
 
 let rec to_seq_stmt : Air.par_stmt -> Air.seq_stmt =
   function
-    | Air.Parallel (_, [], _) -> failwith "Empty parallel loop."
-    | Air.Parallel (dst, [(t, av)], stmt) -> Air.Seq_stmt (Air.For (dst, (t, av), stmt))
-    | Air.Parallel (dst, (t, av) :: tavs, stmt) ->
-        Air.Seq_stmt (Air.For (dst, (t, av), to_seq_stmt (Air.Parallel (Dest.Return, tavs, stmt))))
+    | Air.Parallel (_, _, [], _) -> failwith "Empty parallel loop."
+    | Air.Parallel (dst, _id, [(t, av)], stmt) -> Air.Seq_stmt (Air.For (dst, (t, av), stmt))
+    | Air.Parallel (dst, id, (t, av) :: tavs, stmt) ->
+        Air.Seq_stmt (Air.For (dst, (t, av), to_seq_stmt (Air.Parallel (Ir.Return, id, tavs, stmt))))
     | Air.Par_stmt stmt -> Air.Seq_stmt (to_seq_stmt' stmt)
     | Air.Seq stmt -> stmt
 
@@ -87,27 +85,27 @@ let rec make_parallel
   (t1 : Temp.t) (* temp to which each elem of array view is bound *)
   (stmts : Air.par_stmt list) : Air.par_stmt list =
   List.concat_map stmts ~f:(fun stmt -> match stmt with
-    | Air.Parallel (d2, avs, body) -> Air.[
+    | Air.Parallel (d2, id, avs, body) -> Air.[
         (* One option: fold together parallel blocks. *)
-        Parallel (d1, (t1, av1) :: avs, body);
+        Parallel (d1, id, (t1, av1) :: avs, body);
 
         (* Another option: unparallelize outer loop. *)
         Par_stmt (For (d1, (t1, av1), stmt));
       ]
     | Air.Seq seq_stmt -> Air.[
-        Parallel (d1, [(t1, av1)], seq_stmt);
+        Parallel (d1, Id.next (), [(t1, av1)], seq_stmt);
         Par_stmt (For (d1, (t1, av1), stmt));
       ]
     | Air.Par_stmt (Air.Run (d2, av2)) -> Air.[
         begin
           let t2 = Temp.next () in
-          Parallel (d1, [(t1, av1); (t2, av2);], Assign (d2, Temp t2))
+          Parallel (d1, Id.next (), [(t1, av1); (t2, av2);], Assign (d2, Temp t2))
         end;
-        Parallel (d1, [(t1, av1)], Seq_stmt (Run (d2, av2)));
+        Parallel (d1, Id.next (), [(t1, av1)], Seq_stmt (Run (d2, av2)));
         Par_stmt (For (d1, (t1, av1), stmt));
       ]
     | Air.Par_stmt par_stmt -> Air.[
-        Parallel (d1, [(t1, av1)], Seq_stmt (to_seq_stmt' par_stmt));
+        Parallel (d1, Id.next (), [(t1, av1)], Seq_stmt (to_seq_stmt' par_stmt));
         Par_stmt (For (d1, (t1, av1), stmt));
       ]
   )
@@ -119,15 +117,15 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
     | Ir.Nop -> [(ctx, nop)]
     | Ir.Assign (dest, src) ->
         let result_opt = match (dest, src) with
-          | (Dest.Dest dest, Ir.Temp src) ->
+          | (Ir.Dest dest, Ir.Temp src) ->
               let array_view_opt = Map.find ctx.array_views src in
               Option.map array_view_opt ~f:(fun array_view ->
                 let ctx' = { array_views = Map.add_exn ctx.array_views ~key:dest ~data:array_view } in
                 [(ctx', nop)])
-          | (Dest.Return, Ir.Temp src) ->
+          | (Ir.Return, Ir.Temp src) ->
               let array_view_opt = Map.find ctx.array_views src in
               Option.map array_view_opt ~f:(fun array_view ->
-                [(ctx, Air.Par_stmt (Air.Run (Dest.Return, array_view)))])
+                [(ctx, Air.Par_stmt (Air.Run (Ir.Return, array_view)))])
           | _ -> None
         in
         Option.value result_opt
@@ -162,8 +160,8 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
         (* Option 1: defer execution of array view. *)
         begin
           match dest with
-          | Dest.Return -> []
-          | Dest.Dest dest ->
+          | Ir.Return -> []
+          | Ir.Dest dest ->
               let array_view = make_array_view fun_call csrcs in
               let ctx' = { array_views = Map.add_exn ctx.array_views ~key:dest ~data:array_view } in
               List.return (ctx', nop)

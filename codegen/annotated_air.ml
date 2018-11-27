@@ -10,12 +10,13 @@ end
 type expr =
   | Expr_temp of Temp.t
   | Expr_mult of expr * expr
+  [@@deriving sexp]
 
 type buffer_info = {
   length : expr; (* Is only allowed to mention variables bound in params. *)
   index : expr -> expr; (* `b.index i` is the expression denoting the ith element of b *)
   typ : Ast.typ;
-}
+} [@@deriving sexp]
 
 type kernel_info = {
   (* Variables we're closing over. *)
@@ -23,7 +24,7 @@ type kernel_info = {
 
   (* This is a submap of buffer_infos. *)
   additional_buffers : buffer_info Temp.Map.t;
-}
+} [@@deriving sexp]
 
 type result = {
   params : Param.t list;
@@ -38,4 +39,4 @@ type result = {
    * That's the key.
    *)
   kernel_infos : kernel_info Id.Map.t;
-}
+} [@@deriving sexp]

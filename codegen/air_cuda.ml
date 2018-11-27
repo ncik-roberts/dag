@@ -1,5 +1,6 @@
 open Core
 
+module Ano = Annotated_air
 module D = Ir.Dest.T
 module CU = CudaIR
 module Op = Ir.Operator
@@ -75,13 +76,14 @@ let dag_array_struct typ : CU.cuda_gstmt =
     ]
   )
 
-(* Extract the length information from the recursive AIR param. *)
 
 (* Translate an AIR parameter list into a list of CUDA fnargs. 
    This requires the actual struct objects to be initialized elsewhere. *)
-let trans_params (params : (Temp.t) list) : (CU.cuda_type * CU.cuda_ident) list = 
-   List.map params ~f:(fun (t) -> (CU.Integer, temp_name t))
-   (* TODO: NEED TYPES *)
+let trans_params (params : (Ano.Param.t) list) : (CU.cuda_type * CU.cuda_ident) list = 
+   List.map params ~f:(fun t -> 
+      match t with  (* TODO: NEED TYPES *)
+      | Ano.Param.Array (t,dims) -> (CU.Pointer (CU.Integer), temp_name t)
+      | Ano.Param.Not_array t -> (CU.Integer, temp_name t))
 
 (* Translate AIR operands into their cuda equivalents. s*)
 let trans_op = 
@@ -108,8 +110,75 @@ let nop = CU.Nop
 let trans_incr_loop_hdr var init limit stride = 
  (CU.Assign(var,init),CU.Cmpop(CU.LT,var,limit),CU.AssignOp(CU.ADD,var,stride))
 
+(* Actually perform the reduction! *)
+let make_reduce op args = 
+  match (op,args) with  
+    | Op.Binop bin,[a;b] -> CU.AssignOp(trans_binop bin,a,b)
+    | Op.Binop _,_ -> failwith "Binary operators have two arguments."
+    | Op.Unop _,_ -> failwith "Cannot reduce with a unary operator."
+    
+(* Initialize a loop body from a given context. *)
+let init_loop context loop_var cur_lval dest = 
+    let loop_var = temp_to_var loop_var in
+    let dest_var = dest_to_var cur_lval dest in 
+    let dest_tmp = dest_to_temp cur_lval dest in
+    let len = con 0 in (* <--- Length goes here *)
+    let hdr = trans_incr_loop_hdr (dest_var) (con 0) (len) (con 1) in
+    (dest_tmp,dest_var,loop_var,hdr)
 
-let rec trans_seq_stmt cur_lval stmt : CU.cuda_stmt list = 
+let rec trans_for_seq continuation (context : Ano.result) (cur_lval : Temp.t) (dest,(loop_var,view),statment) = 
+    let (dest_tmp,dest_var,loop_var,hdr) = init_loop context loop_var cur_lval dest in
+    let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
+    let body = continuation context cur_lval statment in 
+    [CU.Loop(hdr,stms @ body)]  
+and trans_for_par continuation (context : Ano.result) (cur_lval : Temp.t) (dest,(loop_var,view),statment) = 
+    let (dest_tmp,dest_var,loop_var,hdr) = init_loop context loop_var cur_lval dest in
+    let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
+    let body = continuation context cur_lval statment in 
+    [CU.Loop(hdr,stms @ body)]  
+
+
+and trans_run_seq continuation context cur_lval (dest,view) = 
+    let (dest_tmp,dest_var,loop_var,hdr) = init_loop context (Temp.next ()) cur_lval dest in
+    let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
+    [CU.Loop(hdr,stms)]
+and trans_run_par continuation context cur_lval (dest,view) = 
+    let (dest_tmp,dest_var,loop_var,hdr) = init_loop context (Temp.next ()) cur_lval dest in
+    let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
+    [CU.Loop(hdr,stms)]
+
+
+and trans_reduce_seq continuation context cur_lval (dest,op,init,view)  =
+    let (dest_tmp,dest_var,loop_var,hdr) = init_loop context (Temp.next ()) cur_lval dest in
+    let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
+    let asnop = make_reduce op [dest_var;loop_var] in
+    [CU.Assign(dest_var,trans_op init);CU.Loop(hdr,stms@[asnop])]
+and trans_reduce_par continuation context cur_lval (dest,op,init,view)  =
+    let (dest_tmp,dest_var,loop_var,hdr) = init_loop context (Temp.next ()) cur_lval dest in
+    let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
+    let asnop = make_reduce op [dest_var;loop_var] in
+    [CU.Assign(dest_var,trans_op init);CU.Loop(hdr,stms@[asnop])]
+
+
+
+(* Todo: Add length information from the context. *)
+(* Todo: Verify that trans_array_view actually works. *)
+(* These are dispatchers. They are precisely identical save for the fns they call. *)
+and trans_a_stmt_seq context cur_lval = function
+    | Air.For (d,s1,stmt) -> trans_for_seq trans_stmt_seq context cur_lval (d,s1,stmt) 
+    | Air.Run (d,v) -> trans_run_seq trans_stmt_seq context cur_lval (d,v) 
+    | Air.Block s -> List.map ~f:(trans_stmt_seq context cur_lval) s |> List.concat
+    | Air.Reduce (d,o,i,v) -> trans_reduce_seq trans_stmt_seq context cur_lval (d,o,i,v)
+    | Air.Nop -> []
+and trans_a_stmt_par context cur_lval = function
+    | Air.For (d,s1,stmt) -> trans_for_par trans_stmt_par context cur_lval (d,s1,stmt) 
+    | Air.Run (d,v) -> trans_run_par trans_stmt_par context cur_lval (d,v) 
+    | Air.Block s -> List.map ~f:(trans_stmt_par context cur_lval) s |> List.concat
+    | Air.Reduce (d,o,i,v) -> trans_reduce_seq trans_stmt_seq context cur_lval (d,o,i,v)
+    | Air.Nop -> []
+
+
+and trans_stmt_seq (context: Ano.result) cur_lval (stmt : Air.seq_stmt) : CU.cuda_stmt list = 
   match stmt with 
   | Air.Binop (d,op,s1,s2) -> 
       [CU.Assign(dest_to_var cur_lval d,
@@ -119,58 +188,16 @@ let rec trans_seq_stmt cur_lval stmt : CU.cuda_stmt list =
       CU.Unop(trans_unop op,trans_op s))]
   | Air.Assign (d,s) -> 
       [CU.Assign(dest_to_var cur_lval d,trans_op s)]
-  | Air.Seq_stmt stm ->
-    (* Todo: Add length information from the context. *)
-    (* Todo: Verify that trans_array_view actually works. *)
-    match stm with 
-    | Air.For (dest,(loop_var,view),seq_stmt) -> 
-        (* Sequential map. *)
-        let loop_var = temp_to_var loop_var in
-        let dest_var = dest_to_var cur_lval dest in 
-        let dest_tmp = dest_to_temp cur_lval dest in
-        let len = con 0 in (* <--- Length goes here *)
-        let hdr = trans_incr_loop_hdr (dest_var) (con 0) (len) (con 1) in
-        let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
-        let body = trans_seq_stmt cur_lval seq_stmt in 
-        [CU.Loop(hdr,stms @ body)]  
+  | Air.Seq_stmt seq_stm -> 
+      trans_a_stmt_seq context cur_lval seq_stm
 
-    | Air.Run (dest,view) -> 
-        (* Builds a loop and runs it. needs length info. *)
-        let loop_var = temp_to_var (Temp.next ()) in
-        let dest_var = dest_to_var cur_lval dest in 
-        let dest_tmp = dest_to_temp cur_lval dest in
-        let len = con 0 in (* <--- Length goes here *)
-        let hdr = trans_incr_loop_hdr (dest_var) (con 0) (len) (con 1) in
-        let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
-        [CU.Loop(hdr,stms)]
-
-    | Air.Block s -> List.map ~f:(trans_seq_stmt cur_lval) s |> List.concat
-    
-    (* Sequential Reduction, oh boy. *)
-    | Air.Reduce (dest,op,init,view) -> 
-        let loop_var = temp_to_var (Temp.next ()) in
-        let dest_var = dest_to_var cur_lval dest in 
-        let dest_tmp = dest_to_temp cur_lval dest in
-        let len = con 0 in (* <--- Length goes here *)
-        let hdr = trans_incr_loop_hdr (dest_var) (con 0) (len) (con 1) in
-        let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
-        (* Actually perform the reduction! *)
-        let make_reduce op args = 
-        (match (op,args) with  
-         | Op.Binop bin,[a;b] -> CU.AssignOp(trans_binop bin,a,b)
-         | Op.Binop _,_ -> failwith "Binary operators have two arguments."
-         | Op.Unop _,_ -> failwith "Cannot reduce with a unary operator."
-        ) in
-        let asnop = make_reduce op [dest_var;loop_var] in
-       [CU.Assign(dest_var,trans_op init);CU.Loop(hdr,stms@[asnop])]
-
-    | Air.Nop -> []
-
-and trans_stmt_parallel (stmt : (Air.par_stmt Air.stmt)) = 
+and trans_stmt_par (context : Ano.result) cur_lval (stmt : Air.par_stmt) = 
    match stmt with
-  | Air.For (seqs,seq_stms,_) ->
-      (* This implies either a kernel launch (if we're not in a par block) 
-         or an additional level of indexing (if we are) *)
+  | Air.Parallel (seqs,id,lv_temp_list,seq_stm) -> []
+  | Air.Par_stmt par_stm -> (* This doesn't work. Why? *)
+      trans_a_stmt_par context cur_lval par_stm 
+  | Air.Seq seq_stm -> (* Pipe it in. *)
+      trans_stmt_seq context cur_lval seq_stm
 
       (* Process: 
          - Allocate an additional pointer for the list of sequences.
@@ -181,11 +208,6 @@ and trans_stmt_parallel (stmt : (Air.par_stmt Air.stmt)) =
          - Launch the kernel.
         *)  
 
-      (* [CU.Loop(hdr,ins @ (List.map ~f:trans_seq_stmt seq_stms))] *)
-      
-      (* This is just a for loop. I think. But how does the loop variable integrate? *)
-      (* Gotta do that continuation passing on the aViews and actually merge things. *) 
-      nop
       (* let lvar = CU.Var "s" in
       let arrvar = temp_to_var dest in
       let idxvar = CU.Index(arrvar,lvar) in
@@ -195,12 +217,6 @@ and trans_stmt_parallel (stmt : (Air.par_stmt Air.stmt)) =
       let hdr = trans_incr_loop_hdr arrvar (con 0) (temp_to_var len) (con 1) in
       [CU.Loop(hdr,ins @ List.concat (List.map ~f:trans_par_stmt par_stms))] *)
 
-  | Air.Run (dest,view) -> nop
-      (* Actually run a queued sequence comptuation. *) 
-
-  | Air.Block stms -> nop (* [trans_seq_stmt stm] *)
-  | Air.Reduce (dest,op,src,view) -> nop
-  | Air.Nop -> nop
 
 (* Returns:  (list of [list of processing per loop run],array temp,array length) *)
 and trans_array_view state : (CU.cuda_stmt list * Temp.t) = 
@@ -233,7 +249,6 @@ and trans_array_view state : (CU.cuda_stmt list * Temp.t) =
 
   | Air.Reverse subview -> (* Flip the indexing strategy. *)
       (* let rev_temp = temp_to_var (Temp.next ()) in *)
-      (* Dummy allocation to extract the length. Sigh. *)
       ([],Temp.next ())
       (* let (_,_) = trans_array_view (loop_var,dest_arr,subview,rev_temp) in
       let rev_lvar = CU.Binop(CU.SUB,temp_to_var len,loop_var) in 
@@ -246,15 +261,11 @@ and trans_array_view state : (CU.cuda_stmt list * Temp.t) =
       let ins = CU.launch_transpose (temp_to_var arr) dev_arr dev_dest in
       (prev_ins @ [ins],dest_arr)
 
-and trans_par_stmt stmt = 
-  match stmt with 
-  | Air.Parallel (dest,id,n_views,seq_stm) -> []
-  | Air.Par_stmt par_stm -> []
-  | Air.Seq seq_stm -> []
 
-let translate (program : Air.t) : CU.cuda_gstmt = 
-  let args = trans_params Air.(program.params) in
-  let body = trans_par_stmt Air.(program.body) in
+
+let translate (program : Air.t) (context : Ano.result): CU.cuda_gstmt = 
+  let args = trans_params Ano.(context.params) in
+  let body = trans_stmt_par context (Temp.next ()) Air.(program.body) in
   CU.(Function {
     typ = Host; (* Might make other calls. This isn't those. *)
     ret = Void;

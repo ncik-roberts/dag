@@ -26,9 +26,11 @@ module Vertex_info = struct
     view : Vertex_view.t;
     enclosing_parallel_blocks : Vertex.t list;
     vertices_in_block : Vertex.Set.t option; (* Populated only if the view is a parallel block vertex. *)
+    typ : Tc.typ;
   } [@@deriving sexp]
 
   let collect_into_map
+    ~(types : Tc.typ Vertex.Map.t)
     ~(predecessors : Vertex.t list Vertex.Map.t)
     ~(successors : Vertex.Set.t Vertex.Map.t)
     ~(views : Vertex_view.t Vertex.Map.t)
@@ -44,12 +46,14 @@ module Vertex_info = struct
         | None -> failwithf "Unknown vertex `%ld`." key ()
       in
       let e = find enclosing_parallel_blocks ~default:[] ~f:Fn.id in
+      let t = Map.find_exn types key in
       let vtx = find vertices_in_block ~f:Option.some ~default:None in
       { predecessors = p;
         successors = s;
         view = v;
         enclosing_parallel_blocks = e;
         vertices_in_block = vtx;
+        typ = t;
       }
     in
 
@@ -88,10 +92,12 @@ module type Daglike = sig
   val enclosing_parallel_blocks : dag -> Vertex.t -> Vertex.t list
   val vertices_in_block : dag -> parallel_block_vertex:Vertex.t -> Vertex.Set.t
   val unroll : dag -> Vertex.t -> Vertex.t option
+  val type_of : dag -> Vertex.t -> Tc.typ
 end
 
 let return_vertex dag = dag.return_vertex
 let vertex_info dag = Map.find_exn dag.vertex_infos
+let type_of dag key = (vertex_info dag key).Vertex_info.typ
 let predecessors dag key = (vertex_info dag key).Vertex_info.predecessors
 let view dag key = (vertex_info dag key).Vertex_info.view
 let successors dag key = (vertex_info dag key).Vertex_info.successors
@@ -137,6 +143,7 @@ module Result = struct
     predecessors : Vertex.t list Vertex.Map.t;
     enclosing_parallel_blocks : Vertex.t list Vertex.Map.t;
     vertex : Vertex.t;
+    types : Tc.typ Vertex.Map.t;
   } [@@deriving sexp]
 
   (** Return a result for the given vertex, additionally adding singleton
@@ -145,14 +152,17 @@ module Result = struct
     : ?view:Vertex_view.t option
     -> ?predecessors:Vertex.t list option
     -> ?enclosing_parallel_blocks:Vertex.t list
-    -> Vertex.t -> t =
+    -> Vertex.t
+    -> Tc.typ
+    -> t =
     let to_singleton vertex =
       Option.value_map ~f:(Vertex.Map.singleton vertex) ~default:Vertex.Map.empty in
-    fun ?(view=None) ?(predecessors=None) ?(enclosing_parallel_blocks=[]) (vertex : Vertex.t) ->
+    fun ?(view=None) ?(predecessors=None) ?(enclosing_parallel_blocks=[]) (vertex : Vertex.t) (typ : Tc.typ) ->
       let views = to_singleton vertex view in
       let predecessors = to_singleton vertex predecessors in
       let enclosing_parallel_blocks = Vertex.Map.singleton vertex enclosing_parallel_blocks in
-      { views; predecessors; vertex; enclosing_parallel_blocks; }
+      let types = Vertex.Map.singleton vertex typ in
+      { views; predecessors; vertex; enclosing_parallel_blocks; types; }
 
   (**
    * Bias indicates whether to take vertex from left or right argument.
@@ -161,9 +171,12 @@ module Result = struct
    *)
   let union_with_bias : bias:[ `Left | `Right ] -> t -> t -> t =
     let merge_exn = Map.merge_skewed ~combine:(fun ~key -> failwith "Duplicate key.") in
+    let merge_checking_equality = Map.merge_skewed ~combine:(fun ~key v1 v2 ->
+      if v1 <> v2 then failwith "Duplicate, not equal type." else v1) in
     fun ~bias result1 result2 -> {
       views = merge_exn result1.views result2.views;
       predecessors = merge_exn result1.predecessors result2.predecessors;
+      types = merge_checking_equality result1.types result2.types;
       (* These are redundant but that's ok. Just take either result. *)
       enclosing_parallel_blocks =
         Map.merge_skewed ~combine:(fun ~key -> Fn.const)
@@ -184,10 +197,10 @@ let next_vertex = make_counter ~seed:0l ~next:Int32.succ
 
 (** Dag of ast *)
 type t = dag_fun list [@@deriving sexp]
-let of_ast : Ast.t -> t =
+let of_ast : Tc.typ Ast.t -> t =
 
   (* Returns id of expression vertex. *)
-  let rec loop_expr (ctx : Context.t) (expr : Ast.expr) : Result.t =
+  let rec loop_expr (ctx : Context.t) ((typ, expr) : Tc.typ Ast.expr) : Result.t =
     let vertex_info = match expr with
       | Ast.Fun_call fun_call ->
           let vertex = next_vertex () in
@@ -198,7 +211,7 @@ let of_ast : Ast.t -> t =
           let vertex = next_vertex () in
           let vertex_binding = next_vertex () in
           let result_expr = loop_expr ctx parallel.parallel_arg in
-          let result_binding = Result.empty_of vertex_binding
+          let result_binding = Result.empty_of vertex_binding (fst parallel.parallel_type)
             ~enclosing_parallel_blocks:Context.(ctx.enclosing_parallel_blocks)
             ~view:(Some (Vertex_view.Input parallel.parallel_ident))
           in
@@ -232,7 +245,7 @@ let of_ast : Ast.t -> t =
 
     (* Take action based on vertex status. *)
     match vertex_info with
-    | `Reused_vertex vertex -> Result.empty_of vertex
+    | `Reused_vertex vertex -> Result.empty_of vertex typ
     | `New_vertex (vertex, view, results, result_status) ->
         (* Fold results together. *)
         let predecessors = List.map results ~f:(fun r -> Result.(r.vertex))
@@ -245,29 +258,29 @@ let of_ast : Ast.t -> t =
           | `No_additional_results -> []
           | `With_additional_results rs -> rs
         in
-        let init = Result.empty_of vertex
+        let init = Result.empty_of vertex typ
           ~enclosing_parallel_blocks:Context.(ctx.enclosing_parallel_blocks)
           ~predecessors ~view:(Some view)
         in
         List.fold_left results_to_add ~init ~f:(Result.union_with_bias ~bias:`Left)
 
-  and loop_arg (ctx : Context.t) (arg : Ast.arg) : Result.t = match arg with
-    | Ast.Bare_binop binop ->
+  and loop_arg (ctx : Context.t) (arg : Tc.typ Ast.arg) : Result.t = match arg with
+    | Ast.Bare_binop (typ, binop) ->
         let vertex = next_vertex () in
         let view = Vertex_view.(Literal (Bare_binop binop)) in
-        Result.empty_of vertex ~view:(Some view)
+        Result.empty_of vertex typ ~view:(Some view)
           ~enclosing_parallel_blocks:Context.(ctx.enclosing_parallel_blocks)
-    | Ast.Bare_unop unop ->
+    | Ast.Bare_unop (typ, unop) ->
         let vertex = next_vertex () in
         let view = Vertex_view.(Literal (Bare_unop unop)) in
-        Result.empty_of vertex ~view:(Some view)
+        Result.empty_of vertex typ ~view:(Some view)
           ~enclosing_parallel_blocks:Context.(ctx.enclosing_parallel_blocks)
     | Ast.Expr expr -> loop_expr ctx expr
 
   (* The vertex field of the result is the return expression vertex. *)
-  and loop_stmts (ctx : Context.t) (stmts : Ast.stmt list) : Result.t =
+  and loop_stmts (ctx : Context.t) (stmts : Tc.typ Ast.stmt list) : Result.t =
     (* Returns the vertex of the expression involved in the binding or return. *)
-    let rec loop_stmt (ctx : Context.t) (stmt : Ast.stmt) : Result.t =
+    let rec loop_stmt (ctx : Context.t) (stmt : Tc.typ Ast.stmt) : Result.t =
       match stmt with
       | Ast.Let let_stmt -> loop_expr ctx let_stmt.let_expr
       | Ast.Return expr -> loop_expr ctx expr
@@ -299,7 +312,7 @@ let of_ast : Ast.t -> t =
     Option.value_exn return_result
   in
 
-  let of_fun_defn (f : Ast.fun_defn) : dag_fun =
+  let of_fun_defn (f : Tc.typ Ast.fun_defn) : dag_fun =
     let input_names = Ast.(List.map f.fun_params ~f:(fun p -> p.param_ident)) in
     let inputs = List.map input_names ~f:(fun _ -> next_vertex ()) in
     let input_pairs = List.zip_exn input_names inputs in
@@ -313,7 +326,7 @@ let of_ast : Ast.t -> t =
     let result = loop_stmts init_ctx Ast.(f.fun_body) in
     { dag_name = Ast.(f.fun_name);
       dag_graph =
-        let Result.{ predecessors; views; vertex = return_vertex; enclosing_parallel_blocks; } = result in
+        let Result.{ predecessors; views; vertex = return_vertex; enclosing_parallel_blocks; types; } = result in
         (* Add input views. *)
         let views =
           List.fold_left input_pairs ~init:views
@@ -329,6 +342,7 @@ let of_ast : Ast.t -> t =
           ~views
           ~enclosing_parallel_blocks
           ~vertices_in_block
+          ~types
         in
         { vertex_infos; return_vertex; inputs; }
     }
@@ -340,6 +354,7 @@ let renumber_with (dag : dag) ?(remove=Fn.const false) (new_number : Vertex.t ->
   let vertex_info_list' = List.filter_map vertex_info_list ~f:(fun (k, v) ->
     if remove k then None else
     let v' = Vertex_info.{
+      typ = v.typ;
       successors = Vertex.Set.map ~f:new_number v.successors;
       predecessors = List.map ~f:new_number v.predecessors;
       view = begin

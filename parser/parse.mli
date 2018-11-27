@@ -1,2 +1,2 @@
-val parse_file : string -> Ast.t
-val parse : string -> Ast.t
+val parse_file : string -> unit Ast.t
+val parse : string -> unit Ast.t

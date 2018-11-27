@@ -41,6 +41,8 @@ module type Daglike = sig
    * graph. The name `unroll` is customary for recursive types.
    *)
   val unroll : dag -> Vertex.t -> Vertex.t option
+
+  val type_of : dag -> Vertex.t -> Tc.typ
 end
 
 include Daglike with module Vertex := Vertex and type dag := dag
@@ -52,7 +54,7 @@ type dag_fun = {
 } [@@deriving sexp]
 
 type t = dag_fun list [@@deriving sexp]
-val of_ast : Ast.t -> t
+val of_ast : Tc.typ Ast.t -> t
 
 (** Inline all function calls. *)
 val inline : dag -> t -> dag

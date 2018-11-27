@@ -39,7 +39,7 @@
 %left TIMES DIV MOD
 %nonassoc UNARY_MINUS
 
-%type <Ast.fun_defn list> fun_defns
+%type <unit Ast.fun_defn list> fun_defns
 %start fun_defns
 
 %%
@@ -101,7 +101,7 @@ params :
 
 arg :
   | b = binop;
-      { Ast.Bare_binop b }
+      { Ast.Bare_binop ((), b) }
   | e = expr;
       { Ast.Expr e }
 
@@ -151,6 +151,11 @@ stmt :
  **********************************/
 
 expr :
+  | e = _expr;
+      { ((), e) }
+  ;
+
+_expr :
   | i = CONST;
       { Ast.Const i }
   | ident = IDENT;
@@ -218,9 +223,13 @@ binop :
  **********************************/
 
 typ :
+  | t = _typ; { ((), t) }
+  ;
+
+_typ :
   | ident = IDENT;
       { Ast.Ident ident }
-  | t = typ;
+  | t = _typ;
     LBRACKET;
     RBRACKET;
       { Ast.Array t }

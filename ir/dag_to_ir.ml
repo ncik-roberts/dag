@@ -74,7 +74,8 @@ let run (dag : Dag.dag) (traversal : Dag_traversal.traversal) : Ir.t * Temp_dag.
   (* Convert a single statement *)
   let rec convert_tree (ctx : context) (t : Dag_traversal.traversal_tree) : context * Ir.stmt =
     let make_dest (v : Vertex.t) =
-      if Vertex.equal v ctx.return then Ir.Return else Ir.Dest (Temp.next ())
+      let typ = Dag.type_of dag v in
+      if Vertex.equal v ctx.return then Ir.Return typ else Ir.Dest (Temp.next typ ())
     in
 
     match t with
@@ -119,7 +120,7 @@ let run (dag : Dag.dag) (traversal : Dag_traversal.traversal) : Ir.t * Temp_dag.
           match Dag.view dag v with
           | Vertex_view.Parallel_block (bound_vertex, return_vertex) ->
             let arg = lookup_exn ctx pred in
-            let bound_temp = Temp.next () in
+            let bound_temp = Temp.next (Dag.type_of dag bound_vertex) () in
             let ctx = { ctx with temps = Map.add_exn ctx.temps ~key:bound_vertex ~data:bound_temp } in
             let (ctx, block) = convert ctx block ~return:return_vertex in
             let dest = make_dest v in
@@ -137,13 +138,15 @@ let run (dag : Dag.dag) (traversal : Dag_traversal.traversal) : Ir.t * Temp_dag.
     let (ctx', body) = List.fold_map t ~init:{ ctx with return; returned = false; } ~f:convert_tree in
     let body =
       if ctx'.returned then body
-      else body @ Ir.[ Assign (Return, Temp (Map.find_exn ctx'.temps return) ) ]
+      else
+        let temp = Map.find_exn ctx'.temps return in
+        body @ Ir.[ Assign (Return (Temp.to_type temp), Temp temp ) ]
     in
     ({ ctx' with return = ctx.return }, body)
   in
 
   let inputs = Dag.inputs dag in
-  let params = List.map ~f:(fun _ -> Temp.next ()) inputs in
+  let params = List.map ~f:(fun vtx -> Temp.next (Dag.type_of dag vtx) ()) inputs in
   let temps = Vertex.Map.of_alist_exn (List.zip_exn inputs params) in
   let return = Dag.return_vertex dag in
   let (final_ctx, body) = convert { temps; return; returned = false; } traversal ~return in

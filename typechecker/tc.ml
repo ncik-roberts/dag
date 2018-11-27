@@ -1,6 +1,6 @@
 open Core
 
-type ident = string
+type ident = string [@@deriving sexp]
 module IdentMap = String.Map
 
 type typ =
@@ -9,6 +9,7 @@ type typ =
   | Array of typ
   | Pointer of typ
   | Fun of fun_type
+  [@@deriving sexp]
 
 and fun_type = {
   return_type : typ;
@@ -129,22 +130,27 @@ let rec check_type (ctx : t) (ast : Ast.typ) : typ = match ast with
   | Ast.Ident ident -> failwithf "Unknown type `%s`" ident ()
   | Ast.Array ast' -> Array (check_type ctx ast')
 
-let rec check_expr (ctx : t) (ast : Ast.expr) : typ = match ast with
-  | Ast.Const _ -> Int
+let rec check_expr (ctx : t) (ast : unit Ast.expr) : typ Ast.expr = match snd ast with
+  | Ast.Const c -> (Int, Ast.Const c)
   | Ast.Variable ident ->
-      Option.value_exn (IdentMap.find ctx.local_var_ctx ident)
+      let typ = Option.value_exn (IdentMap.find ctx.local_var_ctx ident)
         ~error:(Error.of_exn (Failure (Printf.sprintf "Unbound variable `%s`." ident)))
+      in (typ, Ast.Variable ident)
   | Ast.Binop binop ->
-      let type1 = check_expr ctx binop.binary_operand1 in
-      let type2 = check_expr ctx binop.binary_operand2 in
-      check_binop type1 type2 binop.binary_operator
+      let (type1, _) as res1 = check_expr ctx binop.binary_operand1 in
+      let (type2, _) as res2 = check_expr ctx binop.binary_operand2 in
+      let typ = check_binop type1 type2 binop.binary_operator in
+      (typ, Ast.Binop { binop with binary_operand1 = res1; binary_operand2 = res2; })
   | Ast.Unop unop ->
-      let typ = check_expr ctx unop.unary_operand in
-      check_unop typ unop.unary_operator
+      let (type1, _) as res = check_expr ctx unop.unary_operand in
+      let typ = check_unop type1 unop.unary_operator in
+      (typ, Ast.Unop { unop with unary_operand = res })
   | Ast.Parallel parallel ->
       begin
-        let typ = check_expr ctx parallel.parallel_arg in
-        let given_typ = check_type ctx parallel.parallel_type in
+        let (typ, _) as res = check_expr ctx parallel.parallel_arg in
+        let (given_typ, _) as parallel_type = match parallel.parallel_type with
+          | (), typ -> (check_type ctx typ, typ)
+        in
         begin
           match typ, given_typ with
           | Array t1, t2 when t1 = t2 -> ()
@@ -156,50 +162,64 @@ let rec check_expr (ctx : t) (ast : Ast.expr) : typ = match ast with
           return_type = None;
         } in
         match infer_stmts ctx' parallel.parallel_body with
-        | { return_type = None; _; } -> failwith "Parallel stmts no return."
-        | { return_type = Some typ; _; } -> Array typ
+        | ({ return_type = None; _; }, _) -> failwith "Parallel stmts no return."
+        | ({ return_type = Some typ; _; }, res_stmts) ->
+            (Array typ, Ast.Parallel { parallel with parallel_arg = res; parallel_body = res_stmts; parallel_type; })
       end
   | Ast.Fun_call fun_call ->
-      let arg_types = List.map fun_call.call_args ~f:(function
-        | Ast.Bare_binop binop -> Fun (infer_binop binop)
-        | Ast.Bare_unop unop -> Fun (infer_unop unop)
-        | Ast.Expr expr -> check_expr ctx expr)
+      let (arg_types, args) = List.map fun_call.call_args ~f:(function
+        | Ast.Bare_binop ((), binop) -> let typ = Fun (infer_binop binop) in (typ, Ast.Bare_binop (typ, binop))
+        | Ast.Bare_unop ((), unop) -> let typ = Fun (infer_unop unop) in (typ, Ast.Bare_unop (typ, unop))
+        | Ast.Expr expr -> let (t, e) = check_expr ctx expr in (t, Ast.Expr (t, e)))
+        |> List.unzip
       in
-      check_fun ctx fun_call.call_name arg_types
+      let ret_ty = check_fun ctx fun_call.call_name arg_types in
+      (ret_ty, Ast.Fun_call { fun_call with call_args = args })
 
-and check_stmt (ctx : t) (ast : Ast.stmt) : t =
+and check_stmt (ctx : t) (ast : unit Ast.stmt) : t * typ Ast.stmt =
   if Option.is_some ctx.return_type then failwith "Function already returned.";
   match ast with
   | Ast.Let let_exp ->
-      let typ = check_type ctx let_exp.let_type in
-      let body_type = check_expr ctx let_exp.let_expr in
+      let (typ, _) as let_type = match let_exp.let_type with
+        | (), typ -> (check_type ctx typ, typ)
+      in
+      let (body_type, _) as result = check_expr ctx let_exp.let_expr in
       begin
         if body_type <> typ
           then failwithf "Wrong type annotation on `%s`" let_exp.let_ident ()
       end;
-      { ctx with
+      let ctx' = { ctx with
           local_var_ctx =
             add_with_failure ctx.local_var_ctx
               ~key:let_exp.let_ident ~data:typ
               ~on_duplicate:"Duplicate local variable definition `%s`"; }
-  | Ast.Return exp -> { ctx with return_type = Some (check_expr ctx exp) }
+      in (ctx', Ast.Let { let_exp with let_expr = result; let_type; })
+  | Ast.Return expr ->
+      let (typ, _) as result = check_expr ctx expr in
+      ({ ctx with return_type = Some typ }, Ast.Return result)
 
-and infer_stmts (ctx : t) (ast : Ast.stmt list) : t =
-  List.fold_left ~init:ctx ~f:check_stmt ast
+and infer_stmts (ctx : t) (ast : unit Ast.stmt list) : t * typ Ast.stmt list =
+  List.fold_map ~init:ctx ~f:check_stmt ast
 
-and check_stmts (ctx : t) (ast : Ast.stmt list) (typ : typ) : unit =
-  let ctx' = infer_stmts ctx ast in
+and check_stmts (ctx : t) (ast : unit Ast.stmt list) (typ : typ) : typ Ast.stmt list =
+  let (ctx', result) = infer_stmts ctx ast in
   (* Check return type *)
   match ctx'.return_type with
   | None -> failwith "Statements do not return"
   | Some inferred_type ->
       if typ <> inferred_type
       then failwith "Given return type incompatible with inferred type"
+      else result
 
-let check_fun_defn (ctx : t) (ast : Ast.fun_defn) : t =
+let check_fun_defn (ctx : t) (ast : unit Ast.fun_defn) : t * typ Ast.fun_defn =
   let open Ast in
-  let return_type = check_type ctx ast.fun_ret_type in
-  let param_types = List.map ~f:(fun p -> check_type ctx p.param_type) ast.fun_params in
+  let (return_type, _) as fun_ret_type = match ast.fun_ret_type with
+    | (), return_type -> (check_type ctx return_type, return_type)
+  in
+  let fun_params = List.map ast.fun_params ~f:(fun ({ param_type = ((), param_type) } as r) ->
+    { r with param_type = (check_type ctx param_type, param_type) })
+  in
+  let param_types = List.map fun_params ~f:(fun { param_type } -> fst param_type) in
   let body_ctx =
     let params_with_type =
       List.zip_exn (List.map ~f:(fun p -> p.param_ident) ast.fun_params) param_types
@@ -209,15 +229,16 @@ let check_fun_defn (ctx : t) (ast : Ast.fun_defn) : t =
           List.fold_left params_with_type ~init:ctx.local_var_ctx ~f:(fun map (key, data) ->
             add_with_failure map ~key ~data ~on_duplicate:"Duplicate parameter `%s`") }
   in
-  check_stmts body_ctx ast.fun_body return_type;
+  let result = check_stmts body_ctx ast.fun_body return_type in
   (* Update fun ctx. *)
-  { ctx with
+  let ctx' = { ctx with
       fun_ctx =
         add_with_failure ctx.fun_ctx
           ~key:ast.fun_name ~data:{ return_type; param_types; }
           ~on_duplicate: "Duplicate function definition `%s`"; }
+  in (ctx', { ast with fun_body = result; fun_ret_type; fun_params; })
 
-let check_with (ctx : t) (ast : Ast.t) : unit =
-  ignore (List.fold_left ~f:check_fun_defn ~init:ctx ast : t)
+let check_with (ctx : t) (ast : unit Ast.t) : typ Ast.t =
+  List.folding_map ~f:check_fun_defn ~init:ctx ast
 
-let check (ast : Ast.t) : unit = check_with empty ast
+let check (ast : unit Ast.t) : typ Ast.t = check_with empty ast

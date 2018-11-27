@@ -48,7 +48,11 @@ let rec to_seq_stmt : Air.par_stmt -> Air.seq_stmt =
     | Air.Parallel (_, _, [], _) -> failwith "Empty parallel loop."
     | Air.Parallel (dst, _id, [(t, av)], stmt) -> Air.Seq_stmt (Air.For (dst, (t, av), stmt))
     | Air.Parallel (dst, id, (t, av) :: tavs, stmt) ->
-        Air.Seq_stmt (Air.For (dst, (t, av), to_seq_stmt (Air.Parallel (Ir.Return, id, tavs, stmt))))
+        let typ = match Ir.type_of_dest dst with
+          | Tc.Array typ -> typ
+          | _ -> failwith "Invalid type."
+        in
+        Air.Seq_stmt (Air.For (dst, (t, av), to_seq_stmt (Air.Parallel (Ir.Return typ, id, tavs, stmt))))
     | Air.Par_stmt stmt -> Air.Seq_stmt (to_seq_stmt' stmt)
     | Air.Seq stmt -> stmt
 
@@ -98,7 +102,7 @@ let rec make_parallel
       ]
     | Air.Par_stmt (Air.Run (d2, av2)) -> Air.[
         begin
-          let t2 = Temp.next () in
+          let t2 = Temp.next (Ir.type_of_dest d2) () in
           Parallel (d1, Id.next (), [(t1, av1); (t2, av2);], Assign (d2, Temp t2))
         end;
         Parallel (d1, Id.next (), [(t1, av1)], Seq_stmt (Run (d2, av2)));
@@ -122,10 +126,10 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
               Option.map array_view_opt ~f:(fun array_view ->
                 let ctx' = { array_views = Map.add_exn ctx.array_views ~key:dest ~data:array_view } in
                 [(ctx', nop)])
-          | (Ir.Return, Ir.Temp src) ->
+          | (Ir.Return _ as ret, Ir.Temp src) ->
               let array_view_opt = Map.find ctx.array_views src in
               Option.map array_view_opt ~f:(fun array_view ->
-                [(ctx, Air.Par_stmt (Air.Run (Ir.Return, array_view)))])
+                [(ctx, Air.Par_stmt (Air.Run (ret, array_view)))])
           | _ -> None
         in
         Option.value result_opt
@@ -160,7 +164,7 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
         (* Option 1: defer execution of array view. *)
         begin
           match dest with
-          | Ir.Return -> []
+          | Ir.Return _ -> []
           | Ir.Dest dest ->
               let array_view = make_array_view fun_call csrcs in
               let ctx' = { array_views = Map.add_exn ctx.array_views ~key:dest ~data:array_view } in

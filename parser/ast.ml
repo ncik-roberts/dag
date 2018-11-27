@@ -7,8 +7,8 @@ type typ =
   | Array of typ
   [@@deriving sexp]
 
-type param = {
-  param_type : typ;
+type 'a param = {
+  param_type : 'a * typ;
   param_ident : ident;
 } [@@deriving sexp]
 
@@ -25,19 +25,19 @@ type binop =
   | Mod
   [@@deriving sexp]
 
-type stmt =
+type 'a stmt =
   | Let of {
-      let_type : typ;
+      let_type : 'a * typ;
       let_ident : ident;
-      let_expr : expr;
+      let_expr : 'a expr;
     }
-  | Return of expr
+  | Return of 'a expr
   [@@deriving sexp]
 
-and arg =
-  | Expr of expr
-  | Bare_binop of binop
-  | Bare_unop of unop
+and 'a arg =
+  | Expr of 'a expr
+  | Bare_binop of 'a * binop
+  | Bare_unop of 'a * unop
   [@@deriving sexp]
 
 and call_name =
@@ -49,35 +49,38 @@ and call_name =
   | Fun_ident of ident
   [@@deriving sexp]
 
-and expr =
+and 'a expr = 'a * 'a expr'
+  [@@deriving sexp]
+
+and 'a expr' =
   | Parallel of {
-      parallel_arg : expr;
-      parallel_type : typ;
+      parallel_arg : 'a expr;
+      parallel_type : 'a * typ;
       parallel_ident : ident;
-      parallel_body : stmt list;
+      parallel_body : 'a stmt list;
     }
   | Fun_call of {
       call_name : call_name;
-      call_args : arg list;
+      call_args : 'a arg list;
     }
   | Unop of {
       unary_operator : unop;
-      unary_operand : expr;
+      unary_operand : 'a expr;
     }
   | Binop of {
-      binary_operand1 : expr;
+      binary_operand1 : 'a expr;
       binary_operator : binop;
-      binary_operand2 : expr;
+      binary_operand2 : 'a expr;
     }
   | Const of int32
   | Variable of ident
   [@@deriving sexp]
 
-type fun_defn = {
-  fun_ret_type : typ;
+type 'a fun_defn = {
+  fun_ret_type : 'a * typ;
   fun_name : ident;
-  fun_params : param list;
-  fun_body : stmt list;
+  fun_params : 'a param list;
+  fun_body : 'a stmt list;
 } [@@deriving sexp]
 
-type t = fun_defn list
+type 'a t = 'a fun_defn list

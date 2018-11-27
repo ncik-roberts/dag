@@ -1,4 +1,4 @@
-type ident = string
+type ident = string [@@deriving sexp]
 module IdentMap = Core.String.Map
 
 type typ =
@@ -7,6 +7,7 @@ type typ =
   | Array of typ
   | Pointer of typ
   | Fun of fun_type
+  [@@deriving sexp]
 
 and fun_type = {
   return_type : typ;
@@ -29,5 +30,5 @@ type t = {
 
 val empty : t
 
-val check : Ast.t -> unit
-val check_with : t -> Ast.t -> unit
+val check : unit Ast.t -> typ Ast.t
+val check_with : t -> unit Ast.t -> typ Ast.t

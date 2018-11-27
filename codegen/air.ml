@@ -90,7 +90,7 @@ end = struct
 
   let pp_dest = function
     | Ir.Dest t -> Printf.sprintf "%%%d" (Temp.to_int t)
-    | Ir.Return -> "ret"
+    | Ir.Return _ -> "ret"
 
   let rec pp_par_stmt ?(indent="") = function
     | Parallel (dst, id, tavs, seq_stmt) ->

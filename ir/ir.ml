@@ -21,9 +21,13 @@ type operand =
   [@@deriving sexp]
 
 type dest =
-  | Return
+  | Return of Tc.typ
   | Dest of Temp.t
   [@@deriving sexp]
+
+let type_of_dest : dest -> Tc.typ = function
+  | Return typ -> typ
+  | Dest t -> Temp.to_type t
 
 (** All sorts of statements *)
 type stmt =

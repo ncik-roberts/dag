@@ -5,9 +5,9 @@ let verbosity = ref false
 let say (msgs : unit -> string list) : unit =
   if !verbosity then List.iter ~f:print_endline (msgs ())
 
-let run_on_ast (ast : Ast.t) (function_names : string list) : unit =
+let run_on_ast (ast : unit Ast.t) (function_names : string list) : unit =
   let mem = Set.mem (String.Set.of_list function_names) in
-  Tc.check ast;
+  let ast = Tc.check ast in
   say (fun () -> ["Typechecking succeeded."]);
   let dag = Dag.of_ast ast in
   List.iter dag ~f:(fun dag_fun ->

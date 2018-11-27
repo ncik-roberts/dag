@@ -1,1 +1,1 @@
-let annotate _ = failwith "You can't annotate an IR of that form!"
+let annotate (air : Air.t) : Annotated_air.result = failwith "Augh"

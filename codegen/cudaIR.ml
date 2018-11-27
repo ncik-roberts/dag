@@ -21,7 +21,7 @@ type cmpop = EQ  | NEQ | GTE | LTE | GT | LT
 
 type dim = X | Y | Z
 
-type cuda_variable = 
+type kernel_variable = 
   | BlockIdx  of dim
   | BlockDim  of dim
   | GridDim   of dim
@@ -31,7 +31,7 @@ type cuda_variable =
 type cuda_expr =
   | Const of Int64.t
   | Var of cuda_ident
-  | KVar of cuda_variable
+  | KVar of kernel_variable
   | Unop of unop * cuda_expr
   | Binop of binop * cuda_expr * cuda_expr
   | Cmpop of cmpop * cuda_expr * cuda_expr
@@ -70,7 +70,7 @@ and cuda_stmt =
               (* dest, source, size, transfer type *)
   | Transfer of cuda_ident * cuda_expr * cuda_expr * cuda_mem_type
     (* Launch dimension, blocks/thread, kernel, arguments *)
-  | Launch of grid_dim * grid_dim * cuda_ident * cuda_expr list
+  | Launch of grid_dim * grid_dim * cuda_func * cuda_expr list
 
   | Free of cuda_ident
   | Sync
@@ -205,7 +205,7 @@ and fmt_stmt n stm =
  | Launch ((x,y,z),(a,b,c),func,args) -> 
    let block = sprintf "%sdim3 dimBlock(%s,%s,%s);\n" sp (fmt_expr a) (fmt_expr b) (fmt_expr c) in
    let grid = sprintf "%sdim3 dimGrid(%s,%s,%s);\n" sp (fmt_expr x) (fmt_expr y) (fmt_expr z) in
-   let launch = sprintf "%s%s<<<dimGrid,dimBlock>>>%s;" sp (func) (fmt_args (List.map ~f:fmt_expr args))
+   let launch = sprintf "%s%s<<<dimGrid,dimBlock>>>%s;" sp (func.name) (fmt_args (List.map ~f:fmt_expr args))
    in block^grid^launch
 
  | Sync -> sprintf "%s %s;\n" sp "__syncthreads()"
@@ -234,23 +234,8 @@ let fmt_gstm = function
 let print_program (program : cuda_program) = 
   List.map program ~f:(fun f -> prerr_endline (fmt_gstm f))
 
-
-(* Builds the expression for the kernel launch of the transpose primitive *)
-let launch_transpose matrix dev_matrix dev_result = 
-  let rowexp = Binop(DIV,Index(Field(matrix,"lens"),Const 0L),Var "tp_TILE_DIM") in
-  let colexp = Binop(DIV,Index(Field(matrix,"lens"),Const 1L),Var "tp_TILE_DIM") in
-  let gridDim = (rowexp,colexp,Const 1L) in
-  let blockDim = (Var "tp_TILE_DIM",Var "tp_BLOCK_ROWS",Const 1L) in
-  Launch (gridDim,blockDim,"transposeCoalesced",[dev_result;dev_matrix])
-
-
-(* IR Representation of the Transpose function from the CUDA documentation. *)
-let primitive_transpose : cuda_program = 
-  [
-    Decl(DeclareAssign(ConstType(Integer),"tp_TILE_DIM",Const 32L));
-    Decl(DeclareAssign(ConstType(Integer),"tp_BLOCK_ROWS",Const 8L)); 
-    
-    Function {
+let transpose_kernel : cuda_func = 
+    {
       typ = Device;
       ret = Void;
       name = "transposeCoalesced";
@@ -292,7 +277,21 @@ let primitive_transpose : cuda_program =
             ); 
           ]);
       ]
-    };
+    }
 
-    
+(* Builds the expression for the kernel launch of the transpose primitive *)
+let launch_transpose matrix dev_matrix dev_result = 
+  let rowexp = Binop(DIV,Index(Field(matrix,"lens"),Const 0L),Var "tp_TILE_DIM") in
+  let colexp = Binop(DIV,Index(Field(matrix,"lens"),Const 1L),Var "tp_TILE_DIM") in
+  let gridDim = (rowexp,colexp,Const 1L) in
+  let blockDim = (Var "tp_TILE_DIM",Var "tp_BLOCK_ROWS",Const 1L) in
+  Launch (gridDim,blockDim,transpose_kernel,[dev_result;dev_matrix])
+
+
+(* IR Representation of the Transpose function from the CUDA documentation. *)
+let primitive_transpose : cuda_program = 
+  [
+    Decl(DeclareAssign(ConstType(Integer),"tp_TILE_DIM",Const 32L));
+    Decl(DeclareAssign(ConstType(Integer),"tp_BLOCK_ROWS",Const 8L)); 
+    Function transpose_kernel;
   ]

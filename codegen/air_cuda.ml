@@ -55,7 +55,7 @@ let rec trans_typ (typ : Ast.typ) =
     | "float" -> CU.Float
     | "double" -> CU.Double
     | _ -> failwith ("Don't currently support complex type trans."))
-  | Ast.Array t -> trans_typ t
+  | Ast.Array t -> CU.Pointer (trans_typ t)
 
 (* Pointer, Lengths of dimensions *)
 type nd_array = Temp.t * (Temp.t list)
@@ -123,14 +123,25 @@ let rec trans_len_expr = function
   | Ano.Expr_temp t -> temp_to_var t
   | Ano.Expr_mult (e1,e2) -> CU.Binop(CU.MUL,trans_len_expr e1, trans_len_expr e2) 
 
+let get_length context temp =
+   let buf_info = Map.find Ano.(context.buffer_infos) temp in
+    match buf_info with
+      | Some inf -> trans_len_expr (Ano.(inf.length))
+      | None -> failwith "Couldn't find buffer size (get length)"
+
+(* Used to perform operations with length expressions. *)
+let build_cached_reduce_expr (op : CU.binop) (exprs : CU.cuda_expr list) =
+    let rec reduce_expr exprs = 
+      match exprs with 
+      | [] -> failwith "Cannot bootstrap empty expression."
+      | [expr] -> expr 
+      | ex::xs -> (CU.Binop(op,ex,reduce_expr xs))
+    in
+    reduce_expr exprs
+
 (* Initialize a loop body from a given context. *)
 let init_loop context loop_var cur_lval dest = 
-    let buf_map = Ano.(context.buffer_infos) in
-    let buf_info = Map.find buf_map cur_lval in
-    let len = match buf_info with
-        | Some inf -> trans_len_expr (Ano.(inf.length))
-        | None -> failwith "Couldn't find buffer size (init loop)"
-    in
+    let len = get_length context cur_lval in
     let dest_var = dest_to_var cur_lval dest in 
     let hdr = trans_incr_loop_hdr (dest_var) (con 0) (len) (con 1) in
     (dest_to_temp cur_lval dest,dest_var,temp_to_var loop_var,hdr)
@@ -141,17 +152,17 @@ let rec trans_a_stmt : type a. (Ano.result -> Temp.t -> a -> CU.cuda_stmt list) 
     function
     | Air.For (dest,(loop_var,view),stmt) -> 
         let (dest_tmp,dest_var,loop_var,hdr) = init_loop context loop_var cur_lval dest in
-        let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
+        let stms = trans_array_view context (loop_var,dest_tmp,view) in
         let body = continuation context cur_lval stmt in 
         [CU.Loop(hdr,stms @ body)] 
     | Air.Run (dest,view) -> 
         let (dest_tmp,dest_var,loop_var,hdr) = init_loop context (Temp.next ()) cur_lval dest in
-        let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
+        let stms = trans_array_view context (loop_var,dest_tmp,view) in
         [CU.Loop(hdr,stms)]
     | Air.Block s -> List.map ~f:(continuation context cur_lval) s |> List.concat
     | Air.Reduce (dest,op,init,view) ->
         let (dest_tmp,dest_var,loop_var,hdr) = init_loop context (Temp.next ()) cur_lval dest in
-        let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
+        let stms = trans_array_view context (loop_var,dest_tmp,view) in
         let asnop = make_reduce op [dest_var;loop_var] in
         [CU.Assign(dest_var,trans_op init);CU.Loop(hdr,stms@[asnop])]
     | Air.Nop -> []
@@ -171,41 +182,73 @@ and trans_stmt_seq (context: Ano.result) cur_lval (stmt : Air.seq_stmt) : CU.cud
 
 and trans_stmt_par (context : Ano.result) cur_lval (stmt : Air.par_stmt) = 
    match stmt with
-  | Air.Parallel (seqs,id,lv_temp_list,seq_stm) -> []
-  | Air.Par_stmt par_stm -> (* This doesn't work. Why? *)
+  | Air.Parallel (seqs,id,lv_temp_list,seq_stm) ->
+      let kernel_info = 
+        match Map.find Ano.(context.kernel_infos) id with
+        | Some k_inf -> k_inf
+        | None -> failwith "Failed to find kernel info. (trans_stmt_par)"
+      in
+      let main_bufs = Ano.(context.buffer_infos) in
+      let var_set = Ano.(kernel_info.free_variables) in
+      let ad_bufs = Ano.(kernel_info.additional_buffers) in
+
+      let mk_kernel_buf_arg buf_map tmp = 
+        match Map.find buf_map tmp with 
+        | Some info -> [(trans_typ Ano.(info.typ),temp_to_var tmp);(CU.Integer, trans_len_expr Ano.(info.length))]
+        | None -> failwith "Buffer not found (mk_kernel_buf_arg)"
+      in
+
+      let main_temps = lv_temp_list |> List.map ~f:(fun (temp,_) -> temp) in
+
+      (* - Translate the lengths and free variables. *)
+      (* - Determine the arg list. *)
+      let args = (List.map ~f:(mk_kernel_buf_arg main_bufs) main_temps @
+                 List.map ~f:(mk_kernel_buf_arg ad_bufs) (Map.keys ad_bufs) |> List.concat)
+                 @ List.map ~f:(fun t -> (CU.Integer,temp_to_var t)) (Set.to_list var_set) 
+                 
+      in
+
+        (* Process: 
+         - Allocate what needs to be allocated of them on the device.
+         - Translate the kernel body.
+         - Place the args / body into the kernel.
+         - Launch.
+        *)  
+
+      let kernel_args = [] in
+      
+      let kernel = CU.({
+        typ = Device;
+        ret = Void;
+        name = "K_"^fn_next ();
+        args = kernel_args;
+        body = [];
+      }) in
+
+      (* (Necessary?) Optimisation: Evaluate this before launching kernel. *)
+      let len = main_temps (* Length expression *)
+                |> List.map ~f:(get_length context) 
+                |> (build_cached_reduce_expr CU.MUL)
+      in
+      let gdim = (con 256,con 1,con 1) in
+      let bdim = (len,con 1,con 1) in (* Todo: make this blocks/thrd  *)
+      let params = List.map ~f:(fun (_,a) -> CU.Var a) kernel_args in 
+      [CU.Launch(gdim,bdim,kernel,params)]
+
+  | Air.Par_stmt par_stm -> 
       trans_a_stmt trans_stmt_par context cur_lval par_stm 
   | Air.Seq seq_stm -> (* Pipe it in. *)
       trans_stmt_seq context cur_lval seq_stm
 
-      (* Process: 
-         - Allocate an additional pointer for the list of sequences.
-         - Translate the instructions and length.
-         - Allocate all of them on the device.
-         - Place that in the kernel. 
-         - (Todo: adjust the return type to have kernels, or use a mutable ref)
-         - Launch the kernel.
-        *)  
-
-      (* let lvar = CU.Var "s" in
-      let arrvar = temp_to_var dest in
-      let idxvar = CU.Index(arrvar,lvar) in
-      let init_state = (lvar,dest,aview,idxvar) in
-      let (ins,arr,len) = trans_array_view init_state in
-   
-      let hdr = trans_incr_loop_hdr arrvar (con 0) (temp_to_var len) (con 1) in
-      [CU.Loop(hdr,ins @ List.concat (List.map ~f:trans_par_stmt par_stms))] *)
-
-
 (* Returns:  (list of [list of processing per loop run],array temp,array length) *)
-and trans_array_view state : (CU.cuda_stmt list * Temp.t) = 
-  let (loop_var,dest_arr,arr_view,dest_var) = state in
+and trans_array_view context state : (CU.cuda_stmt list) = 
+  let (loop_var,dest_arr,arr_view) = state in
+  let len = get_length context dest_arr in 
+  let dest_var = CU.Index(temp_to_var dest_arr,loop_var) in
   match arr_view with 
-  | Air.Array (arr) -> 
-      (* We're gonna need a block context! *)
-      (* Extract and assign to the loop temporary. *)
-      (* But really we only want to do this on a run. *)
+  | Air.Array (arr) ->  (* Extract and assign to the loop temporary. *)
       let asgn_instr = CU.Assign(dest_var,CU.Index(temp_to_var arr,loop_var)) in
-      ([asgn_instr],arr)
+      [asgn_instr]
 
   | Air.Zip_with(op,subviews) -> 
     (* Inner loop operation function *)
@@ -218,34 +261,29 @@ and trans_array_view state : (CU.cuda_stmt list * Temp.t) =
         | _ -> failwith "Incorrect arg lengths to ZipWith!")
     in
       (* Pipe this into the zip function. *)
-      let dests = List.map subviews ~f:(fun _ -> temp_to_var (Temp.next ())) in
-      let trans_list =  List.map dests ~f:(fun d -> trans_array_view (loop_var,dest_arr,arr_view,d)) in
-      let instr = make_op dests in
-      let prev_instrs = trans_list |> List.map ~f:(fun (i,_) -> i) |> List.concat in
-      (* let (_,_) = List.nth_exn trans_list 0 in *)
-      (instr :: prev_instrs,dest_arr)
+      let dests = List.map subviews ~f:(fun _ -> (Temp.next ())) in
+      let oper = dests |> List.map ~f:(temp_to_var) |> make_op in
+      let trans_list =  List.map dests ~f:(fun d -> trans_array_view context (loop_var,d,arr_view)) in
+      List.concat trans_list @ [oper]
 
   | Air.Reverse subview -> (* Flip the indexing strategy. *)
-      (* let rev_temp = temp_to_var (Temp.next ()) in *)
-      ([],Temp.next ())
-      (* let (_,_) = trans_array_view (loop_var,dest_arr,subview,rev_temp) in
-      let rev_lvar = CU.Binop(CU.SUB,temp_to_var len,loop_var) in 
-      trans_array_view (rev_lvar,dest_arr,subview,rev_temp) *)
+      let rev_lvar = CU.Binop(CU.SUB,len,loop_var) in 
+      trans_array_view context (rev_lvar,dest_arr,subview)
 
   | Air.Transpose subview -> (* Not sure this is where we want to do this. *)
-      let dev_dest = var_to_dev (temp_to_var dest_arr) in
-      let (prev_ins,arr) = trans_array_view (loop_var,dest_arr,subview,dest_var) in
-      let dev_arr = var_to_dev (temp_to_var arr) in
-      let ins = CU.launch_transpose (temp_to_var arr) dev_arr dev_dest in
-      (prev_ins @ [ins],dest_arr)
+      failwith "We don't support transposing runs. Or maybe we do. But not yet."
 
+      (* let dev_dest = var_to_dev (temp_to_var dest_arr) in
+      let prev_ins = trans_array_view context (loop_var,dest_arr,subview,dest_var) in
+      let ins = CU.launch_transpose (temp_to_var arr) dev_arr dev_dest in
+      prev_ins @ [ins] *)
 
 
 let translate (program : Air.t) (context : Ano.result): CU.cuda_gstmt = 
   let args = trans_params Ano.(context.params) in
   let body = trans_stmt_par context (Temp.next ()) Air.(program.body) in
   CU.(Function {
-    typ = Host; (* Might make other calls. This isn't those. *)
+    typ = Host; (* Main function. *)
     ret = Void;
     name = "dag_main";
     args = args;

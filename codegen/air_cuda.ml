@@ -25,6 +25,11 @@ let dest_to_var lval dest =
   | D.Return -> temp_to_var lval
   | D.Dest t -> temp_to_var t
 
+let dest_to_temp lval dest = 
+  match dest with 
+  | D.Return -> lval
+  | D.Dest t -> t
+
 (* Get the device version of a variable *)
 let var_to_dev var =
   match var with 
@@ -100,29 +105,68 @@ let trans_unop =
 
 let nop = CU.Nop
 
-let rec trans_seq_stmt cur_lval stmt : CU.cuda_stmt = 
-  match stmt with 
-  | Air.Binop (d,op,s1,s2) -> 
-      CU.Assign(dest_to_var cur_lval d,
-      CU.Binop(trans_binop op, trans_op s1, trans_op s2))
-  | Air.Unop (d,op,s) -> 
-      CU.Assign(dest_to_var cur_lval d,
-      CU.Unop(trans_unop op,trans_op s))
-  | Air.Assign (d,s) -> 
-      CU.Assign(dest_to_var cur_lval d,trans_op s)
-  | Air.Seq_stmt stm ->
-    match stm with 
-    | Air.For (_,_,_) -> nop
-    | Air.Run (_,_) -> nop
-    | Air.Block _ -> nop
-    | Air.Reduce (_,_,_,_) -> nop
-    | Air.Nop -> nop
-
 let trans_incr_loop_hdr var init limit stride = 
  (CU.Assign(var,init),CU.Cmpop(CU.LT,var,limit),CU.AssignOp(CU.ADD,var,stride))
 
 
-let rec trans_stmt_parallel (stmt : (Air.par_stmt Air.stmt)) = 
+let rec trans_seq_stmt cur_lval stmt : CU.cuda_stmt list = 
+  match stmt with 
+  | Air.Binop (d,op,s1,s2) -> 
+      [CU.Assign(dest_to_var cur_lval d,
+       CU.Binop(trans_binop op, trans_op s1, trans_op s2))]
+  | Air.Unop (d,op,s) -> 
+      [CU.Assign(dest_to_var cur_lval d,
+      CU.Unop(trans_unop op,trans_op s))]
+  | Air.Assign (d,s) -> 
+      [CU.Assign(dest_to_var cur_lval d,trans_op s)]
+  | Air.Seq_stmt stm ->
+    (* Todo: Add length information from the context. *)
+    (* Todo: Verify that trans_array_view actually works. *)
+    match stm with 
+    | Air.For (dest,(loop_var,view),seq_stmt) -> 
+        (* Sequential map. *)
+        let loop_var = temp_to_var loop_var in
+        let dest_var = dest_to_var cur_lval dest in 
+        let dest_tmp = dest_to_temp cur_lval dest in
+        let len = con 0 in (* <--- Length goes here *)
+        let hdr = trans_incr_loop_hdr (dest_var) (con 0) (len) (con 1) in
+        let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
+        let body = trans_seq_stmt cur_lval seq_stmt in 
+        [CU.Loop(hdr,stms @ body)]  
+
+    | Air.Run (dest,view) -> 
+        (* Builds a loop and runs it. needs length info. *)
+        let loop_var = temp_to_var (Temp.next ()) in
+        let dest_var = dest_to_var cur_lval dest in 
+        let dest_tmp = dest_to_temp cur_lval dest in
+        let len = con 0 in (* <--- Length goes here *)
+        let hdr = trans_incr_loop_hdr (dest_var) (con 0) (len) (con 1) in
+        let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
+        [CU.Loop(hdr,stms)]
+
+    | Air.Block s -> List.map ~f:(trans_seq_stmt cur_lval) s |> List.concat
+    
+    (* Sequential Reduction, oh boy. *)
+    | Air.Reduce (dest,op,init,view) -> 
+        let loop_var = temp_to_var (Temp.next ()) in
+        let dest_var = dest_to_var cur_lval dest in 
+        let dest_tmp = dest_to_temp cur_lval dest in
+        let len = con 0 in (* <--- Length goes here *)
+        let hdr = trans_incr_loop_hdr (dest_var) (con 0) (len) (con 1) in
+        let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
+        (* Actually perform the reduction! *)
+        let make_reduce op args = 
+        (match (op,args) with  
+         | Op.Binop bin,[a;b] -> CU.AssignOp(trans_binop bin,a,b)
+         | Op.Binop _,_ -> failwith "Binary operators have two arguments."
+         | Op.Unop _,_ -> failwith "Cannot reduce with a unary operator."
+        ) in
+        let asnop = make_reduce op [dest_var;loop_var] in
+       [CU.Assign(dest_var,trans_op init);CU.Loop(hdr,stms@[asnop])]
+
+    | Air.Nop -> []
+
+and trans_stmt_parallel (stmt : (Air.par_stmt Air.stmt)) = 
    match stmt with
   | Air.For (seqs,seq_stms,_) ->
       (* This implies either a kernel launch (if we're not in a par block) 
@@ -177,8 +221,6 @@ and trans_array_view state : (CU.cuda_stmt list * Temp.t) =
             CU.Assign(dest_var,CU.Unop(trans_unop u,t))
         | Op.Binop b,[t1;t2] ->
             CU.Assign(dest_var,CU.Binop(trans_binop b,t1,t2))
-        (* | Op.Fun_ptr f,zips -> 
-            CU.Assign(dest_var,CU.FnCall (f,zips)) *)
         | _ -> failwith "Incorrect arg lengths to ZipWith!")
     in
       (* Pipe this into the zip function. *)

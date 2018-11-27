@@ -107,6 +107,8 @@ let trans_unop =
 
 let nop = CU.Nop
 
+(* Creates the loop header (initial value, max value, and increment stride)
+ * -> for (var = init;var < limit; var += stride) *)
 let trans_incr_loop_hdr var init limit stride = 
  (CU.Assign(var,init),CU.Cmpop(CU.LT,var,limit),CU.AssignOp(CU.ADD,var,stride))
 
@@ -117,16 +119,22 @@ let make_reduce op args =
     | Op.Binop _,_ -> failwith "Binary operators have two arguments."
     | Op.Unop _,_ -> failwith "Cannot reduce with a unary operator."
     
+let rec trans_len_expr = function
+  | Ano.Expr_temp t -> temp_to_var t
+  | Ano.Expr_mult (e1,e2) -> CU.Binop(CU.MUL,trans_len_expr e1, trans_len_expr e2) 
+
 (* Initialize a loop body from a given context. *)
 let init_loop context loop_var cur_lval dest = 
-    let loop_var = temp_to_var loop_var in
+    let buf_map = Ano.(context.buffer_infos) in
+    let buf_info = Map.find buf_map cur_lval in
+    let len = match buf_info with
+        | Some inf -> trans_len_expr (Ano.(inf.length))
+        | None -> failwith "Couldn't find buffer size (init loop)"
+    in
     let dest_var = dest_to_var cur_lval dest in 
-    let dest_tmp = dest_to_temp cur_lval dest in
-    let len = con 0 in (* <--- Length goes here *)
     let hdr = trans_incr_loop_hdr (dest_var) (con 0) (len) (con 1) in
-    (dest_tmp,dest_var,loop_var,hdr)
+    (dest_to_temp cur_lval dest,dest_var,temp_to_var loop_var,hdr)
 
-(* Todo: Add length information from the context. *)
 (* Todo: Verify that trans_array_view actually works. *)
 let rec trans_a_stmt : type a. (Ano.result -> Temp.t -> a -> CU.cuda_stmt list) -> Ano.result -> Temp.t -> a Air.stmt -> CU.cuda_stmt list = 
     fun continuation context cur_lval -> 

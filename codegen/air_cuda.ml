@@ -126,57 +126,27 @@ let init_loop context loop_var cur_lval dest =
     let hdr = trans_incr_loop_hdr (dest_var) (con 0) (len) (con 1) in
     (dest_tmp,dest_var,loop_var,hdr)
 
-let rec trans_for_seq continuation (context : Ano.result) (cur_lval : Temp.t) (dest,(loop_var,view),statment) = 
-    let (dest_tmp,dest_var,loop_var,hdr) = init_loop context loop_var cur_lval dest in
-    let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
-    let body = continuation context cur_lval statment in 
-    [CU.Loop(hdr,stms @ body)]  
-and trans_for_par continuation (context : Ano.result) (cur_lval : Temp.t) (dest,(loop_var,view),statment) = 
-    let (dest_tmp,dest_var,loop_var,hdr) = init_loop context loop_var cur_lval dest in
-    let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
-    let body = continuation context cur_lval statment in 
-    [CU.Loop(hdr,stms @ body)]  
-
-
-and trans_run_seq continuation context cur_lval (dest,view) = 
-    let (dest_tmp,dest_var,loop_var,hdr) = init_loop context (Temp.next ()) cur_lval dest in
-    let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
-    [CU.Loop(hdr,stms)]
-and trans_run_par continuation context cur_lval (dest,view) = 
-    let (dest_tmp,dest_var,loop_var,hdr) = init_loop context (Temp.next ()) cur_lval dest in
-    let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
-    [CU.Loop(hdr,stms)]
-
-
-and trans_reduce_seq continuation context cur_lval (dest,op,init,view)  =
-    let (dest_tmp,dest_var,loop_var,hdr) = init_loop context (Temp.next ()) cur_lval dest in
-    let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
-    let asnop = make_reduce op [dest_var;loop_var] in
-    [CU.Assign(dest_var,trans_op init);CU.Loop(hdr,stms@[asnop])]
-and trans_reduce_par continuation context cur_lval (dest,op,init,view)  =
-    let (dest_tmp,dest_var,loop_var,hdr) = init_loop context (Temp.next ()) cur_lval dest in
-    let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
-    let asnop = make_reduce op [dest_var;loop_var] in
-    [CU.Assign(dest_var,trans_op init);CU.Loop(hdr,stms@[asnop])]
-
-
-
 (* Todo: Add length information from the context. *)
 (* Todo: Verify that trans_array_view actually works. *)
-(* These are dispatchers. They are precisely identical save for the fns they call. *)
-and trans_a_stmt_seq context cur_lval = function
-    | Air.For (d,s1,stmt) -> trans_for_seq trans_stmt_seq context cur_lval (d,s1,stmt) 
-    | Air.Run (d,v) -> trans_run_seq trans_stmt_seq context cur_lval (d,v) 
-    | Air.Block s -> List.map ~f:(trans_stmt_seq context cur_lval) s |> List.concat
-    | Air.Reduce (d,o,i,v) -> trans_reduce_seq trans_stmt_seq context cur_lval (d,o,i,v)
+let rec trans_a_stmt : type a. (Ano.result -> Temp.t -> a -> CU.cuda_stmt list) -> Ano.result -> Temp.t -> a Air.stmt -> CU.cuda_stmt list = 
+    fun continuation context cur_lval -> 
+    function
+    | Air.For (dest,(loop_var,view),stmt) -> 
+        let (dest_tmp,dest_var,loop_var,hdr) = init_loop context loop_var cur_lval dest in
+        let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
+        let body = continuation context cur_lval stmt in 
+        [CU.Loop(hdr,stms @ body)] 
+    | Air.Run (dest,view) -> 
+        let (dest_tmp,dest_var,loop_var,hdr) = init_loop context (Temp.next ()) cur_lval dest in
+        let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
+        [CU.Loop(hdr,stms)]
+    | Air.Block s -> List.map ~f:(continuation context cur_lval) s |> List.concat
+    | Air.Reduce (dest,op,init,view) ->
+        let (dest_tmp,dest_var,loop_var,hdr) = init_loop context (Temp.next ()) cur_lval dest in
+        let (stms,_) = trans_array_view (loop_var,dest_tmp,view,dest_var) in
+        let asnop = make_reduce op [dest_var;loop_var] in
+        [CU.Assign(dest_var,trans_op init);CU.Loop(hdr,stms@[asnop])]
     | Air.Nop -> []
-and trans_a_stmt_par context cur_lval = function
-    | Air.For (d,s1,stmt) -> trans_for_par trans_stmt_par context cur_lval (d,s1,stmt) 
-    | Air.Run (d,v) -> trans_run_par trans_stmt_par context cur_lval (d,v) 
-    | Air.Block s -> List.map ~f:(trans_stmt_par context cur_lval) s |> List.concat
-    | Air.Reduce (d,o,i,v) -> trans_reduce_seq trans_stmt_seq context cur_lval (d,o,i,v)
-    | Air.Nop -> []
-
 
 and trans_stmt_seq (context: Ano.result) cur_lval (stmt : Air.seq_stmt) : CU.cuda_stmt list = 
   match stmt with 
@@ -189,13 +159,13 @@ and trans_stmt_seq (context: Ano.result) cur_lval (stmt : Air.seq_stmt) : CU.cud
   | Air.Assign (d,s) -> 
       [CU.Assign(dest_to_var cur_lval d,trans_op s)]
   | Air.Seq_stmt seq_stm -> 
-      trans_a_stmt_seq context cur_lval seq_stm
+      trans_a_stmt trans_stmt_seq context cur_lval seq_stm
 
 and trans_stmt_par (context : Ano.result) cur_lval (stmt : Air.par_stmt) = 
    match stmt with
   | Air.Parallel (seqs,id,lv_temp_list,seq_stm) -> []
   | Air.Par_stmt par_stm -> (* This doesn't work. Why? *)
-      trans_a_stmt_par context cur_lval par_stm 
+      trans_a_stmt trans_stmt_par context cur_lval par_stm 
   | Air.Seq seq_stm -> (* Pipe it in. *)
       trans_stmt_seq context cur_lval seq_stm
 

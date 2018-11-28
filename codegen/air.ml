@@ -44,8 +44,7 @@ type par_stmt =
   (* The list of (temp, array_view) pairs is like a nested loop.
    * We just need to bring all parallelism out to the top level.
    * Id.t is the unique id of the parallel block that allows us to
-   * use it as key into a map.
-   *)
+   * use it as key into a map. *)
   | Parallel of Ir.dest * Id.t * (Temp.t * array_view) list * seq_stmt
 
   (* Wrapper for stmt *)
@@ -58,17 +57,15 @@ type par_stmt =
   [@@deriving sexp]
 
 and seq_stmt =
-
   (* Wrapper for stmt *)
   | Seq_stmt of seq_stmt stmt (* --> Seq_stmt (Reduce (...)) *)
-
   | Binop of Ir.dest * Ast.binop * operand * operand
   | Unop of Ir.dest * Ast.unop * operand
   | Assign of Ir.dest * operand
   [@@deriving sexp]
 
 type t = {
-  params : Temp.t list;
+  params : (Temp.t) list;
   body : par_stmt;
 } [@@deriving sexp]
 
@@ -142,7 +139,7 @@ end = struct
 
   let pp_t { params; body; } =
     Printf.sprintf "(%s) {\n%s\n}"
-      (String.concat ~sep:", " (List.map params ~f:(fun p -> "%" ^ string_of_int (Temp.to_int p))))
+      (String.concat ~sep:", " (List.map params ~f:(fun (p) -> "%" ^ string_of_int (Temp.to_int p))))
       (pp_par_stmt ~indent:"  " body)
 
   let pp_par_stmt = pp_par_stmt ?indent:None

@@ -43,7 +43,15 @@ let lookup_exn (ctx : context) : Temp.t -> A_air.buffer_info =
   let rec canonicalize (t : Temp.t) : Temp.t =
     Option.value_map (Map.find ctx.aliases t) ~default:t ~f:canonicalize
   in
-  Fn.compose (Map.find_exn A_air.(ctx.result.buffer_infos)) canonicalize
+  fun t ->
+    let t' = canonicalize t in
+    match Map.find A_air.(ctx.result.buffer_infos) t' with
+    | None -> failwithf "Not found: %s (canonically %s)\n%s"
+        (Sexp.to_string_hum (Temp.sexp_of_t t))
+        (Sexp.to_string_hum (Temp.sexp_of_t t'))
+        (Sexp.to_string_hum (Temp.Map.sexp_of_t A_air.sexp_of_buffer_info A_air.(ctx.result.buffer_infos)))
+        ()
+    | Some bi -> bi
 
 let annotate_array_view
   (ctx : context)
@@ -119,15 +127,21 @@ and annotate_par_stmt (ctx : context) (stmt : Air.par_stmt) : context =
   match stmt with
   | Air.Parallel (dest, id, tavs, body) ->
       let buffer_infos = List.map tavs ~f:(fun (_, av) -> annotate_array_view ctx av ~variety:A_air.Bound_parallel) in
+      let ctx =
+        { ctx with
+            result =
+              let result = ctx.result in
+              A_air.{ result with
+                buffer_infos = List.fold2_exn tavs buffer_infos ~init:result.buffer_infos
+                  ~f:(fun m (key, _) data -> Map.add_exn m ~key ~data);
+              };
+        }
+      in
       let (kernel_ctx, ctx) = annotate_seq_stmt ctx body in
-      { ctx with
-          result =
-            let result = ctx.result in
-            A_air.{ result with
-              buffer_infos = List.fold2_exn tavs buffer_infos ~init:result.buffer_infos
-                ~f:(fun m (key, _) data -> Map.add_exn m ~key ~data);
-              kernel_infos = Map.add_exn result.kernel_infos ~key:id ~data:(kernel_ctx_to_kernel_info kernel_ctx);
-            };
+      { ctx with result = A_air.
+          { ctx.result with
+              kernel_infos = Map.add_exn ctx.result.kernel_infos ~key:id ~data:(kernel_ctx_to_kernel_info kernel_ctx);
+          }
       }
   | Air.Seq stmt -> snd (annotate_seq_stmt ctx stmt)
   | Air.Par_stmt par_stmt -> annotate_par_stmt_stmt ctx par_stmt
@@ -199,16 +213,16 @@ and annotate_stmt
   | Air.For (dest, (t, av), body) ->
       let defined = defined_of_dest dest in
       let buffer_info = annotate_array_view ctx av ~variety:A_air.Bound_parallel in
+      let ctx = { ctx with result = A_air.
+        { ctx.result with
+            buffer_infos =
+              Map.add_exn ctx.result.buffer_infos ~key:t ~data:buffer_info; };
+      } in
       let (kernel_ctx', ctx) = recur ctx body in
       ({ defined = Set.union defined (Set.union kernel_ctx.defined kernel_ctx'.defined);
          used = Set.union kernel_ctx.used kernel_ctx'.used;
          additional_buffers = Set.union kernel_ctx.additional_buffers kernel_ctx'.additional_buffers;
-       },
-       { ctx with result = A_air.
-           { ctx.result with
-               buffer_infos =
-                 Map.add_exn ctx.result.buffer_infos ~key:t ~data:buffer_info; };
-       })
+       }, ctx)
 
 and annotate_seq_stmt
   ?(kernel_ctx=empty_kernel_ctx)

@@ -33,7 +33,7 @@ module type Daglike = sig
   (** Returned in smallest-to-largest order. *)
   val enclosing_parallel_blocks : dag -> Vertex.t -> Vertex.t list
 
-  (** Raises invalid argument exception if the vertex is not a parallel block vertex. *)
+  (** Returns empty set if the vertex is not a parallel block vertex. *)
   val vertices_in_block : dag -> parallel_block_vertex:Vertex.t -> Vertex.Set.t
 
   (* Does the vertex contain a nested graph? (E.g. a parallel block vertex

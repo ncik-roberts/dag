@@ -106,7 +106,7 @@ let vertices dag = Vertex.Set.of_map_keys dag.vertex_infos
 let enclosing_parallel_blocks dag key = (vertex_info dag key).Vertex_info.enclosing_parallel_blocks
 let vertices_in_block dag ~parallel_block_vertex:key =
   match (vertex_info dag key).Vertex_info.vertices_in_block with
-  | None -> invalid_argf "Not a return vertex: `%ld`." key ()
+  | None -> Vertex.Set.empty
   | Some vs -> vs
 
 let unroll dag key =

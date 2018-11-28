@@ -41,15 +41,23 @@ let transitive_predecessor_closure (dag : Dag.dag) : Vertex.Set.t Vertex.Map.t =
     (Dag.vertices dag |> Set.to_list |> List.map ~f:(fun vtx ->
       (vtx, Vertex.Set.of_list (Dag.predecessors dag vtx))))
   in
-  let rec loop acc =
+  let rec loop m =
     let any_changed = ref false in
-    let acc' = Map.map acc ~f:(fun x ->
-      Set.fold x ~init:x ~f:(fun acc elt ->
+    let m' = Map.mapi m ~f:(fun ~key ~data:x ->
+      let x = Set.fold x ~init:x ~f:(fun acc elt ->
         let acc' = List.fold_left (Dag.predecessors dag elt) ~init:acc ~f:Set.add in
         if Set.length acc <> Set.length acc' then any_changed := true;
-        acc'))
+        acc')
+      in
+      (* Roughly: we wish to add as (transitively closed) predecessors to a parallel block
+       * all predecessors of members of the block that are not themselves in the block.
+       *)
+      let vs = Dag.vertices_in_block dag ~parallel_block_vertex:key in
+      Set.fold vs ~init:x ~f:(fun acc v ->
+        Set.union acc (Set.filter ~f:(Fn.non (Set.mem vs)) (Map.find m v |> Option.value ~default:Vertex.Set.empty)))
+    )
     in
-    if !any_changed then loop acc' else acc
+    if !any_changed then loop m' else m
   in loop init
 
 let traversals_with_filter (dag : Dag.dag)

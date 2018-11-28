@@ -79,13 +79,8 @@ let annotate_array_view
         let length, bis = match avs with
           | hd :: tl ->
               let bi = loop hd in
-              let bi_len = bi.length 0 in
-              let bis = List.map tl ~f:(fun av ->
-                let bi = loop av in
-                if not (Length_expr.equals bi_len (bi.length 0))
-                  then failwith "Unequal lengths in zipwith.";
-                bi)
-              in (bi.length, bi :: bis)
+              let bis = List.map tl ~f:loop in
+              (bi.length, bi :: bis)
           | _ -> failwith "Empty zipwith!"
         in
         let dim = dim typ in

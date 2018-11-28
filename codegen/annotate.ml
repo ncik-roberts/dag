@@ -248,7 +248,7 @@ and annotate_seq_stmt
 
   (kernel_ctx, ctx)
 
-let annotate (air : Air.t) : context =
+let annotate (air : Air.t) : A_air.result =
   let (buffer_infos, params) =
     List.fold_map Air.(air.params) ~init:Temp.Map.empty ~f:(fun ctx p ->
       let typ = Temp.to_type p in
@@ -272,4 +272,4 @@ let annotate (air : Air.t) : context =
       aliases = Temp.Map.empty;
     } in
     let ctx' = annotate_par_stmt ctx Air.(air.body) in
-    ctx'
+    ctx'.result

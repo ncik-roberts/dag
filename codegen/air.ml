@@ -32,7 +32,10 @@ type 'a stmt = (* Type param stands for either par_stmt or seq_stmt *)
   | Block of 'a list
 
   (* dest <- reduce(Operator, operand, array_view) *)
-  | Reduce of Ir.dest * Ir.Operator.t * operand * array_view
+  (* The extra temp is used as a key into the annotated array view
+   * buffer_infos map so that it's easier to translate the reduction.
+   *)
+  | Reduce of Ir.dest * Ir.Operator.t * operand * (Temp.t * array_view)
   | Nop
   [@@deriving sexp]
 
@@ -131,7 +134,7 @@ end = struct
         Printf.sprintf "%s%s <- %sfor (%%%d <- %s) {\n%s\n%s}" indent (pp_dest dst) prefix (Temp.to_int t) (pp_array_view av)
         (pp stmt)
         indent
-    | Reduce (dst, op, id, av) ->
+    | Reduce (dst, op, id, (_, av)) ->
         Printf.sprintf "%s%s <- %sreduce(%s, %s, %s)" indent (pp_dest dst) prefix
           (Sexp.to_string_hum (Ir.Operator.sexp_of_t op))
           (pp_operand id)

@@ -49,8 +49,8 @@ type kernel_info = {
   (* Variables we're closing over. *)
   free_variables : Temp.Set.t;
 
-  (* This is a submap of buffer_infos. *)
-  additional_buffers : buffer_info Temp.Map.t;
+  (* This is a subset of the keys of buffer_infos. *)
+  additional_buffers : Temp.Set.t;
 } [@@deriving sexp]
 
 type result = {

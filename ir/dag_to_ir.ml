@@ -75,7 +75,8 @@ let run (dag : Dag.dag) (traversal : Dag_traversal.traversal) : Ir.t * Temp_dag.
   let rec convert_tree (ctx : context) (t : Dag_traversal.traversal_tree) : context * Ir.stmt =
     let make_dest (v : Vertex.t) =
       let typ = Dag.type_of dag v in
-      if Vertex.equal v ctx.return then Ir.Return typ else Ir.Dest (Temp.next typ ())
+      let t = Temp.next typ () in
+      if Vertex.equal v ctx.return then Ir.Return t else Ir.Dest t
     in
 
     match t with
@@ -140,7 +141,8 @@ let run (dag : Dag.dag) (traversal : Dag_traversal.traversal) : Ir.t * Temp_dag.
       if ctx'.returned then body
       else
         let temp = Map.find_exn ctx'.temps return in
-        body @ Ir.[ Assign (Return (Temp.to_type temp), Temp temp ) ]
+        let return_temp = Temp.next (Temp.to_type temp) () in
+        body @ Ir.[ Assign (Return return_temp, Temp temp ) ]
     in
     ({ ctx' with return = ctx.return }, body)
   in

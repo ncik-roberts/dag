@@ -2,7 +2,10 @@ open Core
 
 (** Abstract IR *)
 
-type array_view =
+type array_view = Tc.typ * array_view'
+  [@@deriving sexp]
+
+and array_view' =
   | Array of Temp.t
   | Zip_with of Ir.Operator.t * array_view list
   | Reverse of array_view
@@ -74,7 +77,9 @@ module Pretty_print : sig
   val pp_stmt : prefix:string -> ('a -> string) -> 'a stmt -> string
   val pp_t : t -> string
 end = struct
-  let rec pp_array_view = function
+
+  let rec pp_array_view (_, av) = pp_array_view' av
+  and pp_array_view' = function
     | Array t -> Printf.sprintf "%%%d" (Temp.to_int t)
     | Zip_with (o, avs) ->
         Printf.sprintf "zip_with(%s, %s)"

@@ -7,15 +7,42 @@ module Param = struct
     [@@deriving sexp]
 end
 
-type expr =
-  | Expr_temp of Temp.t
-  | Expr_mult of expr * expr
-  [@@deriving sexp]
+module Expr = struct
+  type t =
+    | Temp of Temp.t
+    | Call of Ir.Operator.t * t list
+    | Index of t * t
+    | Const of Int32.t
+    [@@deriving sexp]
+end
+
+module Length_expr = struct
+  type t =
+    | Temp of Temp.t
+    | Mult of t * t
+    [@@deriving sexp]
+
+  let rec to_expr : t -> Expr.t = function
+    | Temp t -> Expr.Temp t
+    | Mult (t1, t2) -> Expr.Call (Ir.Operator.Binop Ast.Times, [ to_expr t1; to_expr t2; ])
+
+  let equals : t -> t -> bool =
+    let rec collect_temps (acc : Temp.t list) : t -> Temp.t list =
+      function
+        | Temp t -> t :: acc
+        | Mult (t1, t2) -> collect_temps (collect_temps acc t1) t2
+    in
+    fun t1 t2 ->
+      let canonicalize t = List.sort (collect_temps [] t) ~compare:Temp.compare in
+      List.equal (canonicalize t1) (canonicalize t2) ~equal:Temp.equal
+end
 
 type buffer_info = {
-  length : expr; (* Is only allowed to mention variables bound in params. *)
-  index : expr -> expr; (* `b.index i` is the expression denoting the ith element of b *)
-  typ : Ast.typ;
+  dim : int; (* First argument to length ranges from [0, dim) *)
+  (* Int is the dimension we're looking up. *)
+  length : int -> Length_expr.t; (* Is only allowed to mention variables bound in params. *)
+  index : Expr.t list -> Expr.t; (* `b.index [i; j; k;]` is the expression denoting the b[i][j][k] *)
+  typ : Tc.typ;
 } [@@deriving sexp]
 
 type kernel_info = {

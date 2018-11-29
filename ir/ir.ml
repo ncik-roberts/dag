@@ -42,4 +42,5 @@ type stmt =
 type t = {
   params : Temp.t list;
   body : stmt list;
+  return_type : Tc.typ;
 } [@@deriving sexp]

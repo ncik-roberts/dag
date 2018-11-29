@@ -1,6 +1,7 @@
 open Core
 
 type cuda_ident = string
+  [@@deriving sexp]
 
 type cuda_type =
   | Integer
@@ -12,13 +13,16 @@ type cuda_type =
   | ConstType of cuda_type
   | Struct of cuda_ident
   | Dim of int
+  [@@deriving sexp]
 
 type cuda_mem_type =
   | Host
   | Device
   | Shared
+  [@@deriving sexp]
 
 type cuda_struct = cuda_ident * (cuda_type * cuda_ident) list
+  [@@deriving sexp]
 
 (* Basic arithmetic. *)
 type binop =
@@ -27,11 +31,15 @@ type binop =
   | MUL
   | DIV
   | MOD
+  [@@deriving sexp]
+
 type unop =
   | INCR
   | DECR
   | NEG
   | NOT
+  [@@deriving sexp]
+
 type cmpop =
   | EQ
   | NEQ
@@ -39,17 +47,20 @@ type cmpop =
   | LTE
   | GT
   | LT
+  [@@deriving sexp]
 
 type dim =
   | X
   | Y
   | Z
+  [@@deriving sexp]
 
 type kernel_variable =
   | BlockIdx  of dim
   | BlockDim  of dim
   | GridDim   of dim
   | ThreadIdx of dim
+  [@@deriving sexp]
 
 (* Simple nested expressions. *)
 type cuda_expr =
@@ -64,17 +75,22 @@ type cuda_expr =
   | Deref of cuda_expr
   | Index of cuda_expr * cuda_expr
   | Field of cuda_expr * cuda_ident
+  [@@deriving sexp]
 
 type grid_dim = cuda_expr * cuda_expr * cuda_expr
+  [@@deriving sexp]
+
+type cuda_param = cuda_type * cuda_ident
+  [@@deriving sexp]
 
 (* Represents a funciton definition *)
 type cuda_func = {
   typ : cuda_mem_type;
   ret : cuda_type;
   name : cuda_ident;
-  args : (cuda_type * cuda_ident) list;
+  params : cuda_param list;
   body : cuda_stmt list
-}
+} [@@deriving sexp]
 
 and cuda_stmt =
   | DeclareArray of cuda_mem_type * cuda_type * cuda_ident * (cuda_expr list)
@@ -99,16 +115,16 @@ and cuda_stmt =
   | Free of cuda_ident
   | Sync
   | Nop
+  [@@deriving sexp]
 
 type cuda_gstmt =
   | Function of cuda_func
   | Decl of cuda_stmt
   | StructDecl of cuda_struct
+  [@@deriving sexp]
 
 type t = cuda_gstmt list
-
-let fmt_args args =
-  (List.fold args ~init:"(" ~f:(fun str a -> str^", "^a))^")"
+  [@@deriving sexp]
 
 let str_depth n =
   String.concat (List.map (List.range 0 n) ~f:(fun _ ->"  "))
@@ -128,6 +144,9 @@ let fmt_mem_hdr = function
   | Host -> ""
   | Device -> "__global__"
   | Shared -> "__shared__"
+
+let comma_delineated : string list -> string =
+  Fn.compose (sprintf "(%s)") (String.concat ~sep:", ")
 
 let fmt_mem_tfr = function
   | Host   -> "cudaMemcpyDeviceToHost"
@@ -181,7 +200,7 @@ let rec fmt_expr = function
   | Cmpop (c,e1,e2) ->
     sprintf "(%s %s %s)" (fmt_expr e1) (fmt_cmpop c) (fmt_expr e2)
   | FnCall (n,args) ->
-    sprintf "%s%s" (n) (fmt_args (List.map ~f:fmt_expr args))
+    sprintf "%s%s" (n) (comma_delineated (List.map ~f:fmt_expr args))
   | Address e -> sprintf "&(%s)" (fmt_expr e)
   | Index (e,i) -> sprintf "%s[%s]" (fmt_expr e) (fmt_expr i)
   | Deref e -> sprintf "*(%s)" (fmt_expr e)
@@ -231,7 +250,7 @@ and fmt_stmt n stm =
  | Launch ((x, y, z), (a, b, c), func, args) ->
    let block = sprintf "%sdim3 dimBlock(%s,%s,%s);\n" sp (fmt_expr a) (fmt_expr b) (fmt_expr c) in
    let grid = sprintf "%sdim3 dimGrid(%s,%s,%s);\n" sp (fmt_expr x) (fmt_expr y) (fmt_expr z) in
-   let launch = sprintf "%s%s<<<dimGrid,dimBlock>>>%s;" sp (func.name) (fmt_args (List.map ~f:fmt_expr args))
+   let launch = sprintf "%s%s<<<dimGrid,dimBlock>>>%s;" sp (func.name) (comma_delineated (List.map ~f:fmt_expr args))
    in block ^ grid ^ launch
 
  | Sync -> sprintf "%s %s;\n" sp "__syncthreads()"
@@ -239,9 +258,12 @@ and fmt_stmt n stm =
  | Nop -> ""
 
 let fmt_func f =
-  let arglist = List.map f.args ~f:(fun (t, id) -> fmt_typ t ^ " " ^ id) in
+  let params_str = List.map f.params ~f:(fun (t, id) -> fmt_typ t ^ " " ^ id)
+    |> String.concat ~sep:","
+    |> sprintf "(%s)"
+  in
   let header = sprintf ("%s %s %s%s")
-  (fmt_mem_hdr f.typ) (fmt_typ f.ret) f.name (fmt_args arglist) in
+  (fmt_mem_hdr f.typ) (fmt_typ f.ret) f.name params_str in
   let body = fmt_block 0 f.body in
   "\n" ^ header ^ body ^ "\n"
 
@@ -264,7 +286,7 @@ let transpose_kernel : cuda_func = {
   typ = Device;
   ret = Void;
   name = "transposeCoalesced";
-  args = [(Pointer(Integer),"result");(ConstType(Pointer(Integer)),"in")];
+  params = [ (Pointer Integer, "result"); (ConstType (Pointer Integer), "in"); ];
   body = [
     DeclareAssign (ConstType Integer, "TILE_DIM", Var "tp_TILE_DIM");
     DeclareAssign (ConstType Integer, "BLOCK_ROWS", Var "tp_BLOCK_ROWS");
@@ -305,7 +327,7 @@ let launch_transpose matrix dev_matrix dev_result =
   let colexp = Binop (DIV, Index (Field (matrix, "lens"), Const 1L), Var "tp_TILE_DIM") in
   let gridDim = (rowexp, colexp, Const 1L) in
   let blockDim = (Var "tp_TILE_DIM", Var "tp_BLOCK_ROWS", Const 1L) in
-  Launch (gridDim,blockDim,transpose_kernel,[dev_result;dev_matrix])
+  Launch (gridDim, blockDim, transpose_kernel, [ dev_result; dev_matrix; ])
 
 (* IR Representation of the Transpose function from the CUDA documentation. *)
 let primitive_transpose : t = [

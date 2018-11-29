@@ -45,10 +45,10 @@ let run_on_ast (ast : unit Ast.t) (function_names : string list) : unit =
           Sexp.to_string_hum (Annotated_air.sexp_of_result ann);
         ]);
 
-        let cuda = Cuda_trans.translate air anns in
+        let cuda = Cuda_trans.trans air ann in
         say (fun () -> [
           Printf.sprintf "Cuda:";
-          Sexp.to_string_hum (Cuda_ir.sexp_of_t cuda);
+          Sexp.to_string_hum (Cuda_ir.sexp_of_cuda_gstmt cuda);
         ]);
       ) in
       ignore cudas

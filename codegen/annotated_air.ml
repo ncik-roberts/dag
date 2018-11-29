@@ -78,6 +78,15 @@ type kernel_info = {
 type result = {
   params : Param.t list;
 
+  (* In the case that the return type of the function is an array, we also include
+   * an out_param field in the result. This field, when present, indicates the
+   * buffer where the return value is to be stored. If the field is present,
+   * the following also holds:
+   *   - The field is a member of the param list as an "Array" param.
+   *   - The field is a key into the buffer_infos map.
+   *)
+  out_param : Temp.t option;
+
   (* TODO: May need to eventually know whether a buffer is inside a kernel launch? *)
   buffer_infos : buffer_info Temp.Map.t;
 

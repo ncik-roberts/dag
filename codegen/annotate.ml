@@ -257,28 +257,47 @@ and annotate_seq_stmt
 
   (kernel_ctx, ctx)
 
+let param_of_temp : Temp.t -> A_air.Param.t * A_air.buffer_info option =
+  fun p ->
+    let typ = Temp.to_type p in
+    let (dim, index, f) = build_length_function typ in
+    match dim with
+    | 0 -> (Param.Not_array p, None)
+    | _ -> (Param.Array (p, List.init dim ~f), Some A_air.{
+        length = Fn.compose (fun t -> Length_expr.Temp t) f;
+        index = index (Expr.Temp p);
+        dim;
+        typ;
+        variety = Run_array_view;
+      })
+
 let annotate (air : Air.t) : A_air.result =
   let (buffer_infos, params) =
     List.fold_map Air.(air.params) ~init:Temp.Map.empty ~f:(fun ctx p ->
-      let typ = Temp.to_type p in
-      let (dim, index, f) = build_length_function typ in
-      match dim with
-      | 0 -> (ctx, Param.Not_array p)
-      | _ ->
-          let ctx' = Map.add_exn ctx ~key:p
-            ~data:A_air.{
-              length = Fn.compose (fun t -> Length_expr.Temp t) f;
-              index = index (Expr.Temp p);
-              dim;
-              typ;
-              variety = Run_array_view;
-            }
-          in (ctx', Param.Array (p, List.init dim ~f))
-    )
+      match param_of_temp p with
+      | (p', None) -> (ctx, p')
+      | (p', Some bi) -> (Map.add_exn ctx ~key:p ~data:bi, p'))
     in
-    let ctx = {
-      result = A_air.{ params; buffer_infos; kernel_infos = Id.Map.empty; };
-      aliases = Temp.Map.empty;
-    } in
+
+    (* Whether or not there is an out-buffer as a param depends on whether
+     * the return type is an array. *)
+    let t = Temp.next Air.(air.return_type) () in
+    let result = match param_of_temp t with
+      | (p, Some bi) -> A_air.{
+          params = p :: params;
+          buffer_infos = Map.add_exn buffer_infos ~key:t ~data:bi;
+          kernel_infos = Id.Map.empty;
+          out_param = Some t;
+        }
+
+      (* No need to have a separate parameter at all if the function returns directly. *)
+      | _ -> A_air.{
+        params;
+        buffer_infos;
+        kernel_infos = Id.Map.empty;
+        out_param = None;
+      }
+    in
+    let ctx = { result; aliases = Temp.Map.empty; } in
     let ctx' = annotate_par_stmt ctx Air.(air.body) in
     ctx'.result

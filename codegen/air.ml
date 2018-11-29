@@ -65,7 +65,8 @@ and seq_stmt =
   [@@deriving sexp]
 
 type t = {
-  params : (Temp.t) list;
+  return_type : Tc.typ;
+  params : Temp.t list;
   body : par_stmt;
 } [@@deriving sexp]
 

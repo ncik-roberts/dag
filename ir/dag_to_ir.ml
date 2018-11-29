@@ -152,6 +152,6 @@ let run (dag : Dag.dag) (traversal : Dag_traversal.traversal) : Ir.t * Temp_dag.
   let temps = Vertex.Map.of_alist_exn (List.zip_exn inputs params) in
   let return = Dag.return_vertex dag in
   let (final_ctx, body) = convert { temps; return; returned = false; } traversal ~return in
-  let ir = Ir.{ params; body; } in
+  let ir = Ir.{ params; body; return_type = Dag.type_of dag return } in
   (ir, into_dag dag final_ctx)
 

@@ -1,1 +1,1 @@
-val trans : Air.t -> Annotated_air.result -> Cuda.t
+val trans : Air.t -> Annotated_air.result -> Cuda_ir.t

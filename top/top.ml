@@ -34,7 +34,7 @@ let run_on_ast (ast : unit Ast.t) (function_names : string list) : unit =
         ]);
         Ir_to_air.all ir temp_dag)
       in
-      let anns = List.mapi airs ~f:(fun i air ->
+      let cudas = List.mapi airs ~f:(fun i air ->
         say (fun () -> [
           Printf.sprintf "AIR #%d" i;
           Air.Pretty_print.pp_t air;
@@ -44,8 +44,14 @@ let run_on_ast (ast : unit Ast.t) (function_names : string list) : unit =
         say (fun () -> [
           Sexp.to_string_hum (Annotated_air.sexp_of_result ann);
         ]);
-        ann
-      ) in ignore (anns)
+
+        let cuda = Cuda_trans.translate air anns in
+        say (fun () -> [
+          Printf.sprintf "Cuda:";
+          Sexp.to_string_hum (Cuda_ir.sexp_of_t cuda);
+        ]);
+      ) in
+      ignore cudas
     end)
 
 let run_on_file ?(verbose : bool = false) (file : string) : string list -> unit =

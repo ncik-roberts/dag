@@ -36,12 +36,6 @@ let dest_to_lvalue (ctx : context) (dest : Ir.dest) : CU.cuda_expr =
   | Ir.Return _ -> ctx.lvalue
   | Ir.Dest t -> temp_to_var t
 
-(* Get the device version of a variable *)
-let var_to_dev var =
-  match var with
-  | CU.Var v -> CU.Var ("d_" ^ v)
-  | _ -> failwith "Cannot device a non-variable."
-
 (* These flatten out any nesting. We're presuming the nd_array struct takes care of it. *)
 let rec typ_name (typ : Tc.typ) : string =
   match typ with
@@ -54,25 +48,6 @@ let rec trans_typ (typ : Tc.typ) : CU.cuda_type =
   | Tc.Int -> CU.Integer
   | Tc.Array t -> CU.Pointer (trans_typ t)
   | _ -> failwith "Don't currently support other types"
-
-(* Pointer, Lengths of dimensions *)
-type nd_array = Temp.t * (Temp.t list)
-let nd_array_id = "dag_nd_array_t"
-let nd_array_dims = "dim"
-let nd_array_lens = "lens"
-let nd_array_data = "data"
-
-(* Global struct representing a multidimensional array.
-   Polymorphic - feed it the type to get the decl you want.
-   Should probably be declared in every DAG program. s*)
-let dag_array_struct typ : CU.cuda_gstmt =
-  CU.StructDecl (nd_array_id^"_"^typ_name typ,
-    [
-     (CU.Integer, nd_array_dims);
-     (CU.Pointer CU.Integer, nd_array_lens);
-     (CU.Pointer (trans_typ typ), nd_array_data);
-    ]
-  )
 
 (* Translate an AIR parameter list into a list of CUDA parameters.
  *
@@ -113,8 +88,6 @@ let trans_binop = function
 let trans_unop = function
   | Ast.Negate -> CU.NEG
   | Ast.Logical_not -> CU.NOT
-
-let nop = CU.Nop
 
 (* Creates the loop header (initial value, max value, and increment stride)
  * -> for (var = init;var < limit; var += stride) *)

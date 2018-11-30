@@ -440,7 +440,8 @@ let substitute (source : dag) (vertex : Vertex.t) (target : dag) : dag =
   { target with vertex_infos = Map.merge_skewed target.vertex_infos source.vertex_infos
       ~combine:(fun ~key -> failwithf "Duplicate key `%ld` in source and target. :(" key ()) }
 
-let inline (dag : dag) (ast : t) : dag =
+let inline (dag_fun : dag_fun) (ast : t) : dag_fun =
+  let dag = dag_fun.dag_graph in
   let ast_map = String.Map.of_alist_exn (List.map ast ~f:(fun d -> (d.dag_name, d.dag_graph))) in
   let rec loop (visited : Vertex.Set.t) (candidates : Vertex.Set.t) (dag : dag) : dag =
     match Vertex.Set.choose candidates with
@@ -458,4 +459,4 @@ let inline (dag : dag) (ast : t) : dag =
           let candidates' = Vertex.Set.remove candidates vertex in
           loop visited' candidates' dag
   in
-  loop Vertex.Set.empty (Vertex.Set.of_map_keys dag.vertex_infos) dag
+  { dag_fun with dag_graph = loop Vertex.Set.empty (Vertex.Set.of_map_keys dag.vertex_infos) dag }

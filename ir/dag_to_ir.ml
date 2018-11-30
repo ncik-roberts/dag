@@ -27,7 +27,8 @@ let into_dag (dag : Dag.dag) (ctx : context) : Temp_dag.dag =
   in
   Temp_dag.into_dag (dag, Map.find_exn ctx.temps, Map.find_exn inverted_temps)
 
-let run (dag : Dag.dag) (traversal : Dag_traversal.traversal) : Ir.t * Temp_dag.dag =
+let run (dag_fun : Dag.dag_fun) (traversal : Dag_traversal.traversal) : Ir.t * Temp_dag.dag =
+  let dag = dag_fun.Dag.dag_graph in
 
   (* Look up, being smart about literals. *)
   let lookup_exn (ctx : context) (key : Vertex.t) : Ir.operand =
@@ -152,6 +153,6 @@ let run (dag : Dag.dag) (traversal : Dag_traversal.traversal) : Ir.t * Temp_dag.
   let temps = Vertex.Map.of_alist_exn (List.zip_exn inputs params) in
   let return = Dag.return_vertex dag in
   let (final_ctx, body) = convert { temps; return; returned = false; } traversal ~return in
-  let ir = Ir.{ params; body; return_type = Dag.type_of dag return } in
+  let ir = Ir.{ fn_name = Dag.(dag_fun.dag_name); params; body; return_type = Dag.type_of dag return } in
   (ir, into_dag dag final_ctx)
 

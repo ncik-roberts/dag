@@ -57,4 +57,4 @@ type t = dag_fun list [@@deriving sexp]
 val of_ast : Tc.typ Ast.t -> t
 
 (** Inline all function calls. *)
-val inline : dag -> t -> dag
+val inline : dag_fun -> t -> dag_fun

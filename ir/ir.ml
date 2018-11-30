@@ -47,4 +47,5 @@ type t = {
   params : Temp.t list;
   body : stmt list;
   return_type : Tc.typ;
+  fn_name : string;
 } [@@deriving sexp]

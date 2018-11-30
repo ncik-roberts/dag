@@ -345,7 +345,7 @@ let trans (program : Air.t) (result : Ano.result) : CU.cuda_gstmt =
   CU.(Function {
     typ = Host;
     ret = Void;
-    name = "dag_main";
+    name = "dag_" ^ Air.(program.fn_name);
     params;
     body;
   })

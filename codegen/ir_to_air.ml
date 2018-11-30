@@ -219,6 +219,7 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
     Air.{ params = Ir.(ir.params);
           body = alt;
           return_type = Ir.(ir.return_type);
+          fn_name = Ir.(ir.fn_name);
         })
 
 (* This is... awful. Generate all options and then take the head. *)

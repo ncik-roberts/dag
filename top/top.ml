@@ -16,12 +16,12 @@ let run_on_ast (ast : unit Ast.t) (function_names : string list) : unit =
         "Original dag:";
         Sexp.to_string_hum (Dag.sexp_of_dag_fun dag_fun);
       ]);
-      let inline = Dag.inline Dag.(dag_fun.dag_graph) dag in
+      let inline = Dag.inline dag_fun dag in
       say (fun () -> [
         "Inlined:";
-        Sexp.to_string_hum (Dag.sexp_of_dag inline);
+        Sexp.to_string_hum (Dag.sexp_of_dag_fun inline);
       ]);
-      let traversals = Dag_traversal.all_traversals inline in
+      let traversals = Dag_traversal.all_traversals inline.Dag.dag_graph in
       List.iter traversals ~f:(fun traversal -> say (fun () -> [
         "Traversal:";
         Sexp.to_string_hum (Dag_traversal.sexp_of_traversal traversal);

@@ -68,6 +68,7 @@ type t = {
   return_type : Tc.typ;
   params : Temp.t list;
   body : par_stmt;
+  fn_name : string;
 } [@@deriving sexp]
 
 module Pretty_print : sig

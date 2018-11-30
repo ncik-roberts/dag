@@ -1,0 +1,277 @@
+
+// Needs to interoperate with a C++ struct to make sense of the input data.
+// Alternatively, we have a function that generates one of these from 
+// five arrays (float[] xs, float[] ys, float[] zs, float[] rs, int[] color)
+
+struct circle {
+  float x;
+  float y;
+  float z;
+  float radius;
+  int color;
+}
+
+// Represents one "square" unit that we used to cache circles in our CUDA translation.
+// Used for intersection testing and for resolving which circles must be rendered.
+
+struct square {
+  float top;
+  float bottom;
+  float left;
+  float right;
+  int[] circleIDs;
+}
+
+// "Header Functions" that we assume exist.
+float log(int base,int number);
+
+// Pervasive language primitives.
+float float_of_int(int int_value);
+int int_of_float(float float_value);
+int[] tabulate(int start, int stop, ?int stride);
+int[] enumerate('a[] collection);
+'a index('a[] collection);
+
+// Current this is ported in from the assignment 2 starter code. 
+// It makes use of ternary expressions. We could replace this by implementing 
+// (if then else) syntax, or by providing min() and max() as primitives.
+bool circleIntersectsSquare(circle c, square box)
+{
+    // Clamp circle center to box (finds the closest point on the box)
+    float closestX = (c.x > box.left) ? ((c.x < box.right) ? c.x : box.right) : box.left;
+    float closestY = (c.y > box.bottom) ? ((c.y < box.top) ? x.y : box.top) : box.bottom;
+
+    // Min/Max alternative (this isn't quite equivalent, but it should have the same result)
+    // float closestX = max(min(c.x,box.right),box.left);
+    // float closestY = max(min(c.y,box.top),box.bottom);
+
+    // Is circle radius less than the distance to the closest point on the box?
+    float distX = closestX - circleX;
+    float distY = closestY - circleY;
+
+    return (distX*distX) + (distY*distY) <= circleRadius * circleRadius;
+}
+
+// Stolen from assignment 2 starter code 
+int nextPowerTwo(int n){
+  n = n - 1;
+  n = n | (n >> 1);
+  n = n | (n >> 2);
+  n = n | (n >> 4);
+  n = n | (n >> 8);
+  n = n | (n >> 16);
+  return n + 1;
+}
+
+int numSquaresPerSide(int num_circles)
+  // We also assume (as we did in assignment 2) that the image is sized as a power
+  // of two, and thus dividing the side dimension by the number of squares is sound.
+  // We assume the existence of "log" that finds the log in a base.
+  return nextPowerTwo(float_of_int(log(2,num_circles))); 
+  // Or some other function. Of our choosing. 
+)
+
+// Partition image into squares, with the circleID portion unallocated.
+// Note that this isn't super memory-efficient if we aren't reusing the circle structs.
+// They aren't modifiable other than intialising fields.
+square[][] partitionImage(int width, int height, int num_squares, int num_circles)
+{
+  // We want to perform this sequentially, as in almost all cases the parallel overhead
+  // will be far too high. We encode number of divisions as a byproduct of the length
+  // of the square 2D array, pending us having multiple return types. 
+
+  // Assuming a definition of (exclusive) tabulate something along the lines of:
+  // tabulate (start,stop,?stride) -> [start,start+stride,...,stop-stride] 
+  // Note: this requires some casting from int -> float at some point.
+  int[] xs = tabulate(0,(width/num_squares)));
+  int[] ys = tabulate(0,(height/num_squares)));
+
+  // We use the parallel block to define a map.
+  float fnum = float_of_int(num_squares);
+  square[] xsquares = parallel (width <- xs) {
+    square s;
+    s.left = float_of_int(width) * fnum;
+    s.right = float_of_int(width + 1) * fnum;
+    return s;
+  };
+
+  // We nest parallel maps to "graft" an array implicitly
+  square[][] ysquares = parallel (square <- xsquares) {
+    return parallel (height <- ys) {
+      square.left = float_of_int(height) * fnum;
+      square.right = float_of_int(height + 1) * fnum;
+      return square;
+    };
+  };
+
+  return ysquares;
+}
+
+
+// We parallelise over everything, because we can. GPUs, baby.
+// This function contains a lot of options on how the operation can be performed
+// based off of the existing language primitives and a range of memory efficiency.
+
+// Author's Note: 
+// A lot of this stems from the fact that we need some way to index into a cached
+// array of circle structs with our algorithm, or the performance is going to be 
+// absolutely trashed.
+square[][] scanCircles (square[][] squares, circle[] circles)
+{
+  return parallel(sub_squares <- squares){
+    return parallel(square <- sub_squares){ 
+
+      // Option 1: perform testing and filter in two passes, making the most
+      // use of our current primitives and requiring minimal modifications.
+      bool[] intersections = parallel (circle <- circles){
+        return circleIntersectsSquare(circle,square);
+      };
+
+      // We explicitly allocate an array. Enumerate is the list of indices.
+      // enumerate('a[] collection) : int[] = tabulate (0,dim0(collection));
+      int[] unfiltered_IDs = enumerate(circles);
+
+      // ('a [] * bool [] -> 'a []) "Maps" a filter out of an array of boolans.
+      square.circleIDs = filterWith(unfiltered_IDs,intersections);
+      return square;
+
+      // ---------
+
+      // Option 2: Perform the filter pass first. This requires a special
+      // parallel_filter primitive. The return value of this is a boolean
+      // which defines whether this value is kept or not.
+      // This is also not great with memory efficiency.
+      circle[] filtered_circles = parallel_filter(circle <- circles){
+        return circleIntersectsSquare(circle,square);
+      };
+      square.circleIDs = enumerate(filtered_circles);
+      return square;
+
+      // ----------
+
+      // Option 3: We provide the parallel_filter block, but add a primitive
+      // as a part of parallel and filter blocks which gives the user access
+      // to the current index. Additionally, we have a filter_map construct
+      // that returns a pair of boolean, and an expression to be evaluated
+      // and return if the boolean was true.
+      square.circleIDs = parallel_filter_map(circle <- circles){
+        return (circleIntersectsSquare(circle,square),PARALLEL_INDEX);
+      };
+      return square;
+    };
+  };
+}
+
+
+
+// RGBA colors represented as ints, you know, implicitly.
+int getColor(int x,int offset){
+  return (x >> offset) & 0xFF;
+}
+// Gotta be able to set them, too.
+int setColor(int x,int offset,int color){
+   x = x & (0xFF << offset);
+   return x & (color << offset);
+}
+// Convenience wrappers. 
+int setRed(int x,int red){
+  return setColor(x,24,red);
+}
+int setGreen(int x,int green){
+  return setColor(x,16,green);
+}
+int setBlue(int x,int blue){
+  return setColor(x,8,blue);
+}
+int setAlpha(int x,int alpha){
+  return setColor(x,0,alpha);
+}
+
+// Blends a channel (offset) of two colors with two alpha values.
+int blendColor(float a1,float a2,int color1,int color2,int offset){
+  //@ requires offset in {0,8,16,24};
+  float blend = (a1 * int_of_float(getColor(c1,offset)) +
+                 a2 * int_of_float(getColor(c2,offset)))
+  return int_of_float(blend) & 0xFF;
+}
+
+// Merges two pixels.
+int addPixels(int pixelColor, int newColor)
+{  
+  float alpha = 0.5; // Constants from assignment 2. Modify? 
+  float oneMinusAlpha = 1.0 - alpha;
+
+  int r = blendColor(alpha,oneMinusAlpha,pixelColor,newColor,24);
+  int g = blendColor(alpha,oneMinusAlpha,pixelColor,newColor,16);
+  int b = blendColor(alpha,oneMinusAlpha,pixelColor,newColor,8);
+  int a = alpha + pixelColor & 0xFF; // What information hiding? 
+
+  //Chain it up.
+  return setRed(setGreen(setBlue(setAlpha(pixelColor,a),b),g),r);
+}
+
+// Distance check.
+bool pixelInCircle(circle c, float normX, float normY)
+{
+  float dx = (c.x - normX) * (c.x - normX);
+  float dy = (c.y - normY) * (c.y - normY);
+  return dx*dx + dy*dy <= c.radius * c.radius;
+}
+
+// This relies on a primitive: index(collection,idx) = collection[idx]
+// Is the nesting a little ridiculous? Yes. Yes it is. Fully 4D parallelism.
+int[][][][] renderSquares(square[][] squares, circle[] circles, int num_squares, int width, int height)
+{
+  return parallel (sub_squares <- squares) {
+    return parallel (square <- sub_squares) {
+
+      float fWidth = float_of_int(width);
+      float fHeight = float_of_int(height);
+      int[] xPixels = tabulate(width * square.left, width * square.right,1);
+      int[] yPixels = tabulate(height * square.top, height * square.bottom,1);
+
+      return parallel (y <- yPixels) {
+        return parallel (x <- xPixels) {
+          float normX = float_of_int(x) / fWidth;
+          float normY = float_of_int(y) / fHeight;
+          int[] ix_colors = filter_map (id <- square.circleIDs) {
+            circle c = index(circles,ID);
+            bool ix = pixelInCircle(c,normX,normY);
+            return (ix,c.color)
+          }
+          // Black background comes from here. Would make it 0xFFFFFFFF for white.
+          return reduce(addPixels,0,ix_colors);
+        };
+      };
+    };
+  }; 
+}
+
+// Traverses the block array and creates a copy. 
+int[][] concatPixelSubarrays (int[][][][] pixels, int width, int height)
+{
+  int squareHeight = dim2(pixels);
+  int squareWidth  = dim3(pixels);
+
+  int[] xs = tabulate(0,width);
+  int[] ys = tabulate(0,height);
+  return parallel (y <- ys){
+    return parallel (x <- xs){
+      int i = y / squareHeight;
+      int j = x / squareWidth;
+      int k = y % squareHeight;
+      int l = x % squareWidth;
+      return index(index(index(index(pixels,i),j),k),l);
+    };
+  };
+}
+
+// Wrap it all together and export it to C++!
+// Main function.
+int[][] renderImage(int image_width, int image_height, circle[] circles){
+  int num_squares = numSquaresPerSide(dim0(circles));
+  square[][] squares = partitionImage(image_width,image_height,dim0(circles));
+  square[][] scanned = scanCircles(squares,circles);
+  int[][][][] pixels = renderSquares(squares,circles,num_squares,image_width,image_height);
+  return concatPixelSubarrays(pixels,image_width,image_height);
+}

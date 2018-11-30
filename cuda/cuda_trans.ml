@@ -30,6 +30,8 @@ let temp_name (t : Temp.t) : string =
 (* Put that variable into a CUDA one. *)
 let temp_to_var (t : Temp.t) : CU.cuda_expr = CU.Var (temp_name t)
 
+let next_var () : CU.cuda_expr = temp_to_var (Temp.next Tc.Int ())
+
 (* on_return is the lvalue to use upon encountering a return stmt. *)
 let dest_to_lvalue (ctx : context) (dest : Ir.dest) : CU.cuda_expr =
   match dest with
@@ -43,10 +45,10 @@ let rec typ_name (typ : Tc.typ) : string =
   | Tc.Int -> "int"
   | _ -> failwith "Not supported."
 
-let rec trans_typ (typ : Tc.typ) : CU.cuda_type =
+let rec trans_type (typ : Tc.typ) : CU.cuda_type =
   match typ with
   | Tc.Int -> CU.Integer
-  | Tc.Array t -> CU.Pointer (trans_typ t)
+  | Tc.Array t -> CU.Pointer (trans_type t)
   | _ -> failwith "Don't currently support other types"
 
 (* Translate an AIR parameter list into a list of CUDA parameters.
@@ -65,7 +67,7 @@ let trans_params (params : Ano.Param.t list) : (CU.cuda_type * CU.cuda_ident) li
      (* An array parameter is accompanied by `n` dimension parameters, where n is the
       * dimensionality of the array. *)
      | Ano.Param.Array (t, dims) ->
-         let array_param = (trans_typ (Temp.to_type t), temp_name t) in
+         let array_param = (trans_type (Temp.to_type t), temp_name t) in
          let dim_params = List.map dims ~f:(fun t -> (CU.Integer, temp_name t)) in
          array_param :: dim_params
 
@@ -244,7 +246,6 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
        * additional buffers and free variables to pass to the kernel launch.
        *)
       let args = List.concat [
-        (* TODO: figure out how to pass the returned dest as an arg. *)
         array_view_args;
         Set.to_list Ano.(kernel_info.additional_buffers);
         Set.to_list Ano.(kernel_info.free_variables);
@@ -263,8 +264,32 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       (* We can re-use argument names as parameter names since all the arguments
        * are unique temps (and therefore will have unique parameter names).
        *)
-      let kernel_params = List.map args ~f:(fun t ->
-        (Temp.to_type t |> trans_typ, temp_name t))
+      let output_buffer_param = temp_name (Temp.next (Ir.type_of_dest dest) ()) in
+      let (kernel_params, kernel_args) =
+        (* List of tuples of types, params, and args *)
+        let tpas = List.concat [
+          (* Don't forget to include as a parameter the dest. *)
+          List.return ((trans_type (Ir.type_of_dest dest), output_buffer_param), dest_to_lvalue ctx dest);
+          List.map args ~f:(fun t -> ((trans_type (Temp.to_type t), temp_name t), temp_to_var t));
+        ]
+        in List.unzip tpas
+      in
+
+      (* Total length of all the things we're parallel over. *)
+      let inputs_length =
+        let bound_temps = List.map ~f:fst bound_array_views in
+        bound_temps
+          |> List.map ~f:(get_length ctx)
+          |> build_cached_reduce_expr CU.MUL
+      in
+
+      let gdim = (CU.Const 256L, CU.Const 1L, CU.Const 1L) in
+      let bdim = (inputs_length, CU.Const 1L, CU.Const 1L) in (* Todo: make this blocks/thrd  *)
+      let i_expr =
+        (* blockDim.x * blockIdx.x + threadIdx.x *)
+        (* TODO: change this? *)
+        CU.(Binop (ADD, Binop (MUL, KVar (BlockDim X), KVar (BlockIdx X)),
+                        KVar (ThreadIdx X)))
       in
 
       let kernel = CU.({
@@ -272,22 +297,19 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         ret = Void;
         name = "K_" ^ fn_next ();
         params = kernel_params;
-        body = [];
+        body =
+          begin
+            (* In the body, the user assigns to this guy. *)
+            let i = next_var () in
+            let lvalue = CU.Index (CU.Var output_buffer_param, i) in
+            List.concat [
+              List.return (CU.Assign (i, i_expr));
+              trans_seq_stmt { ctx with lvalue } body;
+            ]
+          end;
       }) in
 
-      (* (Necessary?) Optimisation: Evaluate this before launching kernel. *)
-      (* TODO: Nick, figure this out. *)
-      let len =
-        let bound_temps = List.map ~f:fst bound_array_views in
-        (* Length expression *)
-        bound_temps
-          |> List.map ~f:(get_length ctx)
-          |> build_cached_reduce_expr CU.MUL
-      in
-      let gdim = (CU.Const 256L, CU.Const 1L, CU.Const 1L) in
-      let bdim = (len, CU.Const 1L, CU.Const 1L) in (* Todo: make this blocks/thrd  *)
-      let args = List.map ~f:(fun (_, a) -> CU.Var a) kernel_params in
-      [CU.Launch (gdim, bdim, kernel, args)]
+      [CU.Launch (gdim, bdim, kernel, kernel_args)]
 
 and trans_seq_stmt_stmt ctx stmt = trans_a_stmt trans_seq_stmt ctx stmt
 and trans_par_stmt_stmt ctx stmt = trans_a_stmt trans_par_stmt ctx stmt

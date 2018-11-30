@@ -284,8 +284,8 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       [ d <-- trans_op s ]
   | Air.Primitive (d, s) ->
       [ d <-- trans_prim s]
-  | Air.Struct_Init (d,t,flx) -> 
-      let dest = dest_to_lvalue ctx d in 
+  | Air.Struct_Init (d,t,flx) ->
+      let dest = dest_to_lvalue ctx d in
       [ CU.InitStruct(trans_type t,dest,List.map flx ~f:(fun (n,o) -> (n,trans_op o)))]
   | Air.Seq_stmt seq_stmt ->
 
@@ -516,6 +516,18 @@ let rec extract_kernel_launches : CU.cuda_stmt list -> CU.cuda_func list =
     | CU.Return _ | CU.Sync | CU.Nop | CU.DeclareArray _ | CU.DeclareAssign _ | CU.Assign _
     | CU.AssignOp _ | CU.Cuda_malloc _ | CU.Malloc _ | CU.Free _ | CU.Transfer _ | CU.InitStruct _
     | CU.Expression _ | CU.Memcpy _ -> kernel_launches
+    | CU.Launch (_, _, cuda_func, _) -> cuda_func :: kernel_launches
+    | CU.Loop (_, stmts) -> extract_kernel_launches stmts @ kernel_launches
+    | CU.Condition (_, stmts1, stmts2) ->
+        let gstmts1 = extract_kernel_launches stmts1 in
+        let gstmts2 = extract_kernel_launches stmts2 in
+        gstmts1 @ gstmts2 @ kernel_launches)
+
+let rec extract_kernel_launches : CU.cuda_stmt list -> CU.cuda_func list =
+  List.fold_left ~init:[] ~f:(fun kernel_launches -> function
+    | CU.Sync | CU.Nop | CU.DeclareArray _ | CU.DeclareAssign _ | CU.Assign _
+    | CU.AssignOp _ | CU.Malloc _ | CU.Cuda_malloc _ | CU.Free _ | CU.Transfer _
+    | CU.Expression _ | CU.Memcpy _ | CU.Return _ | CU.InitStruct _ -> kernel_launches
     | CU.Launch (_, _, cuda_func, _) -> cuda_func :: kernel_launches
     | CU.Loop (_, stmts) -> extract_kernel_launches stmts @ kernel_launches
     | CU.Condition (_, stmts1, stmts2) ->

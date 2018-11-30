@@ -15,6 +15,7 @@ and array_view' =
 type operand =
   | Const of Int32.t
   | Temp of Temp.t
+  | Index of Temp.t * Temp.t
   | Dim of int * array_view (* Nth dimension of an array *)
   [@@deriving sexp]
 
@@ -23,7 +24,7 @@ type 'a stmt = (* Type param stands for either par_stmt or seq_stmt *)
   (* _Sequential_ for loop.
    * Sort of like a map.
    *)
-  | For of Ir.dest * (Temp.t * array_view) * 'a
+  | For of Ir.dest * (Temp.t * Temp.t * array_view) * 'a
 
   (* Explicitly allocate array_view and put it in memory. *)
   | Run of Ir.dest * array_view
@@ -45,7 +46,7 @@ type par_stmt =
    * We just need to bring all parallelism out to the top level.
    * Id.t is the unique id of the parallel block that allows us to
    * use it as key into a map. *)
-  | Parallel of Ir.dest * Id.t * (Temp.t * array_view) list * seq_stmt
+  | Parallel of Ir.dest * Id.t * (Temp.t * Temp.t * array_view) list * seq_stmt
 
   (* Wrapper for stmt *)
   | Par_stmt of par_stmt stmt (* ---> Par_stmt (Reduce (...))
@@ -93,6 +94,7 @@ end = struct
   let rec pp_operand = function
     | Const c -> Int32.to_string_hum c
     | Temp t -> Printf.sprintf "%%%d" (Temp.to_int t)
+    | Index (a, i) -> Printf.sprintf "%%%d[%%%d]" (Temp.to_int a) (Temp.to_int i)
     | Dim (i, av) -> Printf.sprintf "dim%d(%s)" i (pp_array_view av)
 
   let pp_dest = function
@@ -106,7 +108,8 @@ end = struct
           (pp_dest dst)
           (Id.to_int id)
           (String.concat ~sep:","
-             (List.map tavs ~f:(fun (t, av) -> Printf.sprintf "%%%d <- %s" (Temp.to_int t) (pp_array_view av))))
+             (List.map tavs ~f:(fun (t, t_idx, av) -> Printf.sprintf "(%%%d, %%%d) <- %s"
+               (Temp.to_int t) (Temp.to_int t_idx) (pp_array_view av))))
           (pp_seq_stmt ~indent:(indent ^ "  ") seq_stmt)
           indent
     | Par_stmt par_stmt ->
@@ -129,8 +132,9 @@ end = struct
     | Nop -> indent ^ prefix ^ "nop"
     | Block stmts -> String.concat ~sep:"\n" (List.map ~f:pp stmts)
     | Run (dst, av) -> Printf.sprintf "%s%s <- %srun(%s)" indent (pp_dest dst) prefix (pp_array_view av)
-    | For (dst, (t, av), stmt) ->
-        Printf.sprintf "%s%s <- %sfor (%%%d <- %s) {\n%s\n%s}" indent (pp_dest dst) prefix (Temp.to_int t) (pp_array_view av)
+    | For (dst, (t, t_idx, av), stmt) ->
+        Printf.sprintf "%s%s <- %sfor ((%%%d, %%%d) <- %s) {\n%s\n%s}" indent (pp_dest dst) prefix
+        (Temp.to_int t) (Temp.to_int t_idx) (pp_array_view av)
         (pp stmt)
         indent
     | Reduce (dst, op, id, (_, av)) ->

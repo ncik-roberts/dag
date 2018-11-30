@@ -63,7 +63,8 @@ type buffer_info = {
 
   (* Is only allowed to mention variables bound in params. *)
   length : Length_expr.t list; (* The dimensions of the buffer_info. *)
-  index : Expr.t list -> Expr.t; (* `b.index [i; j; k;]` is the expression denoting the b[i][j][k] *)
+  index : (Expr.t, Expr.t) Utils.Many_fn.t;
+  (* `b.index [i; j; k;]` is the expression denoting the b[i][j][k] *)
   typ : Tc.typ;
   variety : buffer_info_sum;
 } [@@deriving sexp]

@@ -4,21 +4,15 @@ module A_air = Annotated_air
 module Param = A_air.Param
 module Expr = A_air.Expr
 module Length_expr = A_air.Length_expr
+module Many_fn = Utils.Many_fn
 
 (* returns dim * f *)
-let rec build_length_function : Tc.typ -> int * (Expr.t -> Expr.t list -> Expr.t) * Temp.t list = function
+let rec build_length_function : Tc.typ -> int * (Expr.t -> (Expr.t, Expr.t) Many_fn.t) * Temp.t list = function
   | Tc.Array typ ->
       let (len, index, f) = build_length_function typ in
       let t = Temp.next Tc.Int () in
-      (len + 1,
-          (fun t -> function
-            | e :: es -> index (Expr.Index (t, e)) es
-            | [] -> failwith "Invalid"),
-          t :: f)
-  | _ -> (0, (fun t -> function
-    | [] -> t
-    | _ -> failwith "Invalid."),
-    [])
+      (len + 1, (fun t -> Many_fn.Fun (fun e -> index (Expr.Index (t, e)))), t :: f)
+  | _ -> (0, (fun t -> Many_fn.Result t), [])
 
 let dim : Tc.typ -> int = Fn.compose Tuple3.get1 build_length_function
 
@@ -64,10 +58,10 @@ let annotate_array_view
         let bi = loop av in
         assert (typ = bi.typ);
         { bi with
-            index = (function
-              | expr1 :: expr2 :: exprs ->
-                  bi.index (expr2 :: expr1 :: exprs)
-              | _ -> failwith "Not enough :(");
+            index =
+              let open Many_fn in
+              Fun (fun expr1 -> Fun (fun expr2 ->
+                app_many_exn bi.index [expr1; expr2;]));
         }
     | (typ, Air.Reverse av) ->
         let bi = loop av in
@@ -77,11 +71,12 @@ let annotate_array_view
             [ Length_expr.to_expr (List.hd_exn bi.length); Expr.Const 1l; ]) in
         { bi with
             variety;
-            index = (function
-              | expr :: exprs ->
-                  bi.index
-                    (Expr.Call (Ir.Operator.Binop Ast.Minus, [ n_minus_1; expr; ]) :: exprs)
-              | _ -> failwith "Not enough :(");
+            index =
+              let open Many_fn in
+              Fun (fun expr ->
+                app_exn bi.index
+                  (Expr.Call (Ir.Operator.Binop Ast.Minus, [ n_minus_1; expr; ]))
+                  ~msg:"App_exn reverse")
         }
     | (typ, Air.Zip_with (op, avs)) ->
         let length, bis = match avs with
@@ -97,7 +92,15 @@ let annotate_array_view
           length;
           typ;
           variety;
-          index = (fun expr -> Expr.Call (op, List.map ~f:(fun bi -> bi.index expr) bis));
+          index =
+            let open Many_fn in
+            Fun (fun expr ->
+              let e =
+                let f bi = result_exn ~msg:"result_exn zip_with"
+                  (app_exn ~msg:"app_exn zip_with" bi.index expr)
+                in Expr.Call (op, List.map bis ~f)
+              in
+              Result e);
         }
   in
   loop av
@@ -111,6 +114,7 @@ let used_of_operand (ctx : context) : Air.operand -> Temp.Set.t =
   function
     | Air.Const _ -> Temp.Set.empty
     | Air.Temp t -> Temp.Set.singleton t
+    | Air.Index (t1, t2) -> Temp.Set.of_list [t1; t2;]
     | Air.Dim (n, av) ->
         let bi = annotate_array_view ctx av ~variety:A_air.Run_array_view in
         used_of_length_expr (List.nth_exn A_air.(bi.length) n)
@@ -126,14 +130,15 @@ let rec annotate_par_stmts (ctx : context) (stmts : Air.par_stmt list) : context
 and annotate_par_stmt (ctx : context) (stmt : Air.par_stmt) : context =
   match stmt with
   | Air.Parallel (dest, id, tavs, body) ->
-      let buffer_infos = List.map tavs ~f:(fun (_, av) -> annotate_array_view ctx av ~variety:A_air.Bound_parallel) in
+      let buffer_infos = List.map tavs ~f:(fun (_, _, av) ->
+        annotate_array_view ctx av ~variety:A_air.Bound_parallel) in
       let ctx =
         { ctx with
             result =
               let result = ctx.result in
               A_air.{ result with
                 buffer_infos = List.fold2_exn tavs buffer_infos ~init:result.buffer_infos
-                  ~f:(fun m (key, _) data -> Map.add_exn m ~key ~data);
+                  ~f:(fun m (key, _, _) data -> Map.add_exn m ~key ~data);
               };
         }
       in
@@ -210,8 +215,11 @@ and annotate_stmt
   | Air.Block stmts ->
       List.fold_left stmts ~init:(kernel_ctx, ctx)
         ~f:(fun (k, c) -> recur ~kernel_ctx:k c)
-  | Air.For (dest, (t, av), body) ->
-      let defined = defined_of_dest dest in
+  | Air.For (dest, (t, t_idx, av), body) ->
+      let defined = defined_of_dest dest
+        |> Fn.flip Set.add t
+        |> Fn.flip Set.add t_idx
+      in
       let buffer_info = annotate_array_view ctx av ~variety:A_air.Bound_parallel in
       let ctx = { ctx with result = A_air.
         { ctx.result with

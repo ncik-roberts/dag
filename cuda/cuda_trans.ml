@@ -16,8 +16,12 @@ type context = {
   (* Temps indicating the dimensions of parameters. *)
   dims_of_params : Temp.t list;
 
-  (* Map from bound_vertex temps to their corresponding index variable. *)
-  index_variable_for_parallel_temp : Temp.t Temp.Map.t;
+  (* Map from temps to kind of allocation necessary *)
+  (* If it's not in here, it's just on the host. *)
+  allocation_method :
+    [ `Just_device (* additional_buffers *)
+    | `Host_and_device of Temp.t (* temp is the device temp *)
+    ] Temp.Table.t;
 }
 
 (* Unique identifier for functions. s*)
@@ -152,10 +156,12 @@ let rec trans_expr : Expr.t -> CU.cuda_expr = function
 let rec app_expr f e = Many_fn.compose trans_expr (Many_fn.app_exn ~msg:"app_expr" f e)
 
 (* Find a buffer info's length. *)
-let get_length (ctx : context) (t : Temp.t) : CU.cuda_expr =
+let get_lengths (ctx : context) (t : Temp.t) : CU.cuda_expr list =
   match Map.find Ano.(ctx.result.buffer_infos) t with
-  | Some inf -> trans_len_expr (List.hd_exn Ano.(inf.length))
+  | Some inf -> List.map ~f:trans_len_expr Ano.(inf.length)
   | None -> failwithf "Couldn't find buffer size for `%d`" (Temp.to_int t) ()
+
+let get_length ctx t = List.hd_exn (get_lengths ctx t)
 
 let get_index (ctx : context) (t : Temp.t) : Temp.t -> (Expr.t, CU.cuda_expr) Many_fn.t =
   match Map.find Ano.(ctx.result.buffer_infos) t with
@@ -239,7 +245,7 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       let loop_temp = Temp.next Tc.Int () in
       let hdr = create_loop ~counter:loop_temp ctx dest_temp in
       let body = trans_array_view ctx (dest, loop_temp, index_fn) in
-      [ CU.Loop (hdr, body) ]
+      [ CU.Loop (hdr, [ body ]) ]
 
   (* For reduce, we associate the buffer_info for the view with t. *)
   | Air.Reduce (dest, op, init, (t, _)) ->
@@ -284,19 +290,39 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         | Air.Tabulate (b,e,s) -> Temp.Set.of_list [b;e;s]
         | Air.Array_index (t1, t2) -> Temp.Set.of_list [t1; t2;]
       in
-      let array_view_args =
+
+      let array_view_host_args =
         List.map bound_array_views ~f:(fun (_, _, av) -> temps_in_array_view av)
           |> Temp.Set.union_list
           |> Set.to_list
       in
 
+      let host_args = List.concat [
+        array_view_host_args;
+        Set.to_list Ano.(kernel_info.free_variables);
+      ] in
+
+      let device_args =
+        List.map host_args ~f:(fun host_t ->
+          match Temp.Table.find ctx.allocation_method host_t with
+          | Some `Just_device -> failwith "I don't think this is possible."
+          | Some (`Host_and_device t) -> t
+          | None ->
+              let new_temp = Temp.next (Temp.to_type host_t) () in
+              Temp.Table.add_exn ctx.allocation_method ~key:host_t ~data:(`Host_and_device new_temp);
+              new_temp)
+      in
+
+      (* Mark additional buffers as just-device. *)
+      let additional_buffers = Set.to_list Ano.(kernel_info.additional_buffers) in
+      List.iter additional_buffers ~f:(fun key -> Temp.Table.add_exn ctx.allocation_method ~key ~data:`Just_device);
+
       (* In addition to the array view args, also get the args for the
        * additional buffers and free variables to pass to the kernel launch.
        *)
       let args = List.concat [
-        array_view_args;
-        Set.to_list Ano.(kernel_info.additional_buffers);
-        Set.to_list Ano.(kernel_info.free_variables);
+        device_args;
+        additional_buffers;
 
         (* We also need to pass in the dimensions of the original parameters! :) *)
         ctx.dims_of_params;
@@ -340,8 +366,6 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       (* Ok, so we must split the index_expr into the corresponding indices for each of the
        * bound_temps. *)
       let indices = List.map bound_array_views ~f:Tuple3.get2 in
-      let index_variable_for_parallel_temp =
-        Temp.Map.of_alist_exn (List.zip_exn bound_temps indices) in
 
       let kernel = CU.({
         typ = Device;
@@ -363,38 +387,50 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
                   CU.Assign (acc, CU.Binop (CU.DIV, acc, len));
                 ]
               );
-              trans_seq_stmt { ctx with lvalue; index_variable_for_parallel_temp; } body;
+              trans_seq_stmt { ctx with lvalue; } body;
             ]
           end;
       }) in
 
-      [CU.Launch (gdim, bdim, kernel, kernel_args)]
+      let memcpy tfr = List.map2_exn ~f:(fun dest src ->
+        let typ = Temp.to_type dest in
+        let lengths =
+          try get_lengths ctx dest
+          with _ -> get_lengths ctx src
+        in
+        let len = CU.Binop (CU.MUL, build_cached_reduce_expr CU.MUL lengths, CU.Size_of (trans_type typ)) in
+        CU.Transfer (temp_to_var dest, temp_to_var src, len, tfr)
+      ) in
+
+      List.concat [
+        (* Memcpy the host args into the device args. *)
+        memcpy CU.(Device, Host) device_args host_args;
+        [CU.Launch (gdim, bdim, kernel, kernel_args)];
+        (* Memcpy the device args into the host args. *)
+        memcpy CU.(Host, Device) host_args device_args;
+      ]
 
 and trans_seq_stmt_stmt ctx stmt = trans_a_stmt trans_seq_stmt ctx stmt
 and trans_par_stmt_stmt ctx stmt = trans_a_stmt trans_par_stmt ctx stmt
 
 (* Store array_view in dest using loop_var as the counter variable. *)
-and trans_array_view (ctx : context) (dest, loop_temp, index_fn) : CU.cuda_stmt list =
+and trans_array_view (ctx : context) (dest, loop_temp, index_fn) : CU.cuda_stmt =
   let dest_arr = dest_to_lvalue ctx dest in
   let lvalue = CU.Index (dest_arr, temp_to_var loop_temp) in
 
   (* Ok, we have to case on the type of the destination in order to figure out whether we
    * need to memcpy or if a simple assignment is sufficient. *)
-  let src = Many_fn.result_exn ~msg:"result_exn trans_array_view" (index_fn loop_temp) in
-  match Ir.type_of_dest dest with
-  | Tc.Array (Tc.Array typ) ->
-      let rec loop = function Tc.Array typ -> loop typ | typ -> typ in
-      let innermost_typ = trans_type (loop typ) in
-      let t = Ir.temp_of_dest dest in
-      let non_head_lengths =
-        let buffer_info = Map.find_exn Ano.(ctx.result.buffer_infos) t in
-        let lengths = List.tl_exn Ano.(buffer_info.length) in
-        List.map ~f:trans_len_expr lengths
-      in
-      let size = build_cached_reduce_expr CU.MUL non_head_lengths in
-      [ CU.Memcpy (lvalue, src, CU.(Binop (MUL, Size_of innermost_typ, size))) ]
-  | Tc.Array _ -> [ CU.Assign (lvalue, src) ]
-  | _ -> failwith "No way"
+  let rec loop lvalue = function
+    | Many_fn.Result src -> CU.Assign (lvalue, src)
+    | Many_fn.Fun f ->
+        let t_idx = Temp.next Tc.Int () in
+        (* TODO: do more than one level *)
+        let t = Ir.temp_of_dest dest in
+        let hdr = create_loop ~counter:t_idx ctx t in
+        let i = temp_to_var t_idx in
+        CU.Loop (hdr, [ loop (CU.Index (lvalue, i)) (f (Expr.Temp t_idx)) ])
+  in
+  loop lvalue (index_fn loop_temp)
 
 (* The translated gstmt contains within it kernel launches.
  * These kernel launches actually include the kernel DEFINITION.
@@ -417,7 +453,7 @@ let trans (program : Air.t) (result : Ano.result) : CU.cuda_gstmt =
     dims_of_params = List.concat_map Ano.(result.params) ~f:(function
       | Ano.Param.Array (_, dims) -> dims
       | Ano.Param.Not_array _ -> []);
-    index_variable_for_parallel_temp = Temp.Map.empty;
+    allocation_method = Temp.Table.create ();
   } Air.(program.body) in
   CU.(Function {
     typ = Host;

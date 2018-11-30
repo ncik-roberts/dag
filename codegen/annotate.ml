@@ -54,7 +54,11 @@ let annotate_array_view
   : A_air.buffer_info =
   let open A_air in
 
-  let app index t = Many_fn.app index t ~default:(fun arr -> Expr.Index (arr, t)) in
+  let app index t =
+    match index with
+    | Many_fn.Fun f -> f t
+    | Many_fn.Result arr -> Many_fn.Result (Expr.Index (arr, t))
+  in
 
   let app_many index ts = List.fold_left ts ~init:index ~f:app
   in
@@ -73,7 +77,7 @@ let annotate_array_view
         { dim = bi.dim - 1;
           length = List.tl_exn bi.length;
           filtered_lengths = Option.map ~f:List.tl_exn bi.filtered_lengths;
-          index = Many_fn.app_exn bi.index (Expr.Temp t2);
+          index = app bi.index (Expr.Temp t2);
           typ = (match bi.typ with Tc.Array t -> t | _ -> failwith "No.");
         }
 

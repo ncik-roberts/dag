@@ -507,7 +507,7 @@ and trans_array_view (ctx : context) (dest, loop_temp, index_fn, lengths) : CU.c
 let rec extract_kernel_launches : CU.cuda_stmt list -> CU.cuda_func list =
   List.fold_left ~init:[] ~f:(fun kernel_launches -> function
     | CU.Return _ | CU.Sync | CU.Nop | CU.DeclareArray _ | CU.DeclareAssign _ | CU.Assign _
-    | CU.AssignOp _ | CU.Cuda_malloc _ | CU.Malloc _ | CU.Free _ | CU.Transfer _
+    | CU.AssignOp _ | CU.Cuda_malloc _ | CU.Malloc _ | CU.Free _ | CU.Transfer _ | CU.InitStruct _
     | CU.Expression _ | CU.Memcpy _ -> kernel_launches
     | CU.Launch (_, _, cuda_func, _) -> cuda_func :: kernel_launches
     | CU.Loop (_, stmts) -> extract_kernel_launches stmts @ kernel_launches

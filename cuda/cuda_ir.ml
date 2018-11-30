@@ -231,7 +231,7 @@ let rec fmt_expr = function
   | Address e -> sprintf "&(%s)" (fmt_expr e)
   | Index (e,i) -> sprintf "%s[%s]" (fmt_expr e) (fmt_expr i)
   | Deref e -> sprintf "*(%s)" (fmt_expr e)
-  | Field (s,f) -> sprintf "(%s).%s" (fmt_expr s) f
+  | Field (s, f) -> sprintf "(%s).%s" (fmt_expr s) f
   | Size_of typ -> sprintf "sizeof(%s)" (fmt_typ typ)
 
 let rec fmt_block n block =

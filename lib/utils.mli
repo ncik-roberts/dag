@@ -7,3 +7,5 @@ module type Comparable_sexpable = sig
   include Comparable.S
   include Sexpable.S with type t := t
 end
+
+val merge_list_exn : ('k, 'v, 'cmp) Map.t list -> ('k, 'v, 'cmp) Map.t

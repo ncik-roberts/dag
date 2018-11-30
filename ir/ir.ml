@@ -29,6 +29,10 @@ let type_of_dest : dest -> Tc.typ = function
   | Return t -> Temp.to_type t
   | Dest t -> Temp.to_type t
 
+let temp_of_dest : dest -> Temp.t = function
+  | Return t -> t
+  | Dest t -> t
+
 (** All sorts of statements *)
 type stmt =
   | Parallel of dest * operand * Temp.t * stmt list

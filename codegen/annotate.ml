@@ -6,7 +6,7 @@ module Expr = A_air.Expr
 module Length_expr = A_air.Length_expr
 
 (* returns dim * f *)
-let rec build_length_function : Tc.typ -> int * (Expr.t -> Expr.t list -> Expr.t) * (int -> Temp.t) = function
+let rec build_length_function : Tc.typ -> int * (Expr.t -> Expr.t list -> Expr.t) * Temp.t list = function
   | Tc.Array typ ->
       let (len, index, f) = build_length_function typ in
       let t = Temp.next Tc.Int () in
@@ -14,11 +14,11 @@ let rec build_length_function : Tc.typ -> int * (Expr.t -> Expr.t list -> Expr.t
           (fun t -> function
             | e :: es -> index (Expr.Index (t, e)) es
             | [] -> failwith "Invalid"),
-          function 0 -> t | n -> f (n-1))
+          t :: f)
   | _ -> (0, (fun t -> function
     | [] -> t
     | _ -> failwith "Invalid."),
-    fun _ -> failwith "Invalid dimension.")
+    [])
 
 let dim : Tc.typ -> int = Fn.compose Tuple3.get1 build_length_function
 
@@ -74,7 +74,7 @@ let annotate_array_view
         assert (typ = bi.typ);
         let n_minus_1 = (* n - 1 *)
           Expr.Call (Ir.Operator.Binop Ast.Minus,
-            [ Length_expr.to_expr (bi.length 0); Expr.Const 1l; ]) in
+            [ Length_expr.to_expr (List.hd_exn bi.length); Expr.Const 1l; ]) in
         { bi with
             variety;
             index = (function
@@ -113,7 +113,7 @@ let used_of_operand (ctx : context) : Air.operand -> Temp.Set.t =
     | Air.Temp t -> Temp.Set.singleton t
     | Air.Dim (n, av) ->
         let bi = annotate_array_view ctx av ~variety:A_air.Run_array_view in
-        used_of_length_expr (A_air.(bi.length) n)
+        used_of_length_expr (List.nth_exn A_air.(bi.length) n)
 
 let defined_of_dest : Ir.dest -> Temp.Set.t =
   function
@@ -260,11 +260,11 @@ and annotate_seq_stmt
 let param_of_temp : Temp.t -> A_air.Param.t * A_air.buffer_info option =
   fun p ->
     let typ = Temp.to_type p in
-    let (dim, index, f) = build_length_function typ in
+    let (dim, index, ts) = build_length_function typ in
     match dim with
     | 0 -> (Param.Not_array p, None)
-    | _ -> (Param.Array (p, List.init dim ~f), Some A_air.{
-        length = Fn.compose (fun t -> Length_expr.Temp t) f;
+    | _ -> (Param.Array (p, ts), Some A_air.{
+        length = List.map ~f:(fun t -> Length_expr.Temp t) ts;
         index = index (Expr.Temp p);
         dim;
         typ;

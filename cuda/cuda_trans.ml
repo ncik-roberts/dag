@@ -209,6 +209,13 @@ let app index t = Many_fn.app index t ~default:(fun arr -> Expr.Index (arr, t))
 let rec app_expr ctx f e = Many_fn.compose (trans_expr ctx) (app f e)
 
 let get_length ctx t = List.hd_exn (get_lengths ctx t)
+(* Find a buffer info's length. *)
+let get_lengths (ctx : context) (t : Temp.t) : CU.cuda_expr list =
+  match Map.find Ano.(ctx.result.buffer_infos) t with
+  | Some inf -> List.map ~f:trans_len_expr Ano.(inf.length)
+  | None -> failwithf "Couldn't find buffer size for `%d`" (Temp.to_int t) ()
+
+let get_length ctx t = List.hd_exn (get_lengths ctx t)
 
 let get_index (ctx : context) (t : Temp.t) : Temp.t -> (Expr.t, CU.cuda_expr) Many_fn.t =
   match Map.find Ano.(ctx.result.buffer_infos) t with

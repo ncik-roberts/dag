@@ -7,12 +7,12 @@ module Length_expr = A_air.Length_expr
 module Many_fn = Utils.Many_fn
 
 (* returns dim * f *)
-let rec build_length_function : Tc.typ -> int * (Expr.t -> (Expr.t, Expr.t) Many_fn.t) * Temp.t list = function
+let rec build_length_function : Tc.typ -> int * (Expr.t -> Expr.t -> Expr.t) * Temp.t list = function
   | Tc.Array typ ->
-      let (len, index, f) = build_length_function typ in
+      let (len, _, f) = build_length_function typ in
       let t = Temp.next Tc.Int () in
-      (len + 1, (fun t -> Many_fn.Fun (fun e -> index (Expr.Index (t, e)))), t :: f)
-  | _ -> (0, (fun t -> Many_fn.Result t), [])
+      (len + 1, (fun t e -> Expr.Index (t, e)), t :: f)
+  | _ -> (0, (fun _ -> failwith "No."), [])
 
 let dim : Tc.typ -> int = Fn.compose Tuple3.get1 build_length_function
 
@@ -53,6 +53,16 @@ let annotate_array_view
   (av : Air.array_view)
   : A_air.buffer_info =
   let open A_air in
+
+  let app index t =
+    match index with
+    | Many_fn.Fun f -> f t
+    | Many_fn.Result arr -> Many_fn.Result (Expr.Index (arr, t))
+  in
+
+  let app_many index ts = List.fold_left ts ~init:index ~f:app
+  in
+
   let rec loop : Air.array_view -> buffer_info = function
     | (_, Air.Array t) -> lookup_exn ctx t
     | (_, Air.Array_index (t1, t2)) ->
@@ -71,7 +81,7 @@ let annotate_array_view
             index =
               let open Many_fn in
               Fun (fun expr1 -> Fun (fun expr2 ->
-                app_many_exn bi.index [expr1; expr2;]));
+                app_many bi.index [expr1; expr2;]));
         }
     | (typ, Air.Reverse av) ->
         let bi = loop av in
@@ -81,11 +91,8 @@ let annotate_array_view
             [ Length_expr.to_expr (List.hd_exn bi.length); Expr.Const 1l; ]) in
         { bi with
             index =
-              let open Many_fn in
-              Fun (fun expr ->
-                app_exn bi.index
-                  (Expr.Call (Ir.Operator.Binop Ast.Minus, [ n_minus_1; expr; ]))
-                  ~msg:"App_exn reverse")
+              Many_fn.Fun (fun expr ->
+                app bi.index (Expr.Call (Ir.Operator.Binop Ast.Minus, [ n_minus_1; expr; ])))
         }
     | (typ, Air.Tabulate (b,e,s)) ->
         let bi = loop av in 
@@ -110,8 +117,7 @@ let annotate_array_view
             let open Many_fn in
             Fun (fun expr ->
               let e =
-                let f bi = result_exn ~msg:"result_exn zip_with"
-                  (app_exn ~msg:"app_exn zip_with" bi.index expr)
+                let f bi = result_exn ~msg:"result_exn zip_with" (app bi.index expr)
                 in Expr.Call (op, List.map bis ~f)
               in
               Result e);
@@ -157,7 +163,10 @@ let mk_buffer_info_out_of_temp t kernel_ctx buffer_infos =
         typ = Temp.to_type t;
         dim = 1 + buffer_info.dim;
         length = List.map buffer_infos ~f:(fun bi -> List.hd_exn bi.length) @ buffer_info.length;
-        index = (Tuple3.get2 (build_length_function (Temp.to_type t))) (Expr.Temp t);
+        index = begin
+          let (_, fn, _) = build_length_function (Temp.to_type t) in
+          Many_fn.Fun (fun e -> Many_fn.Result (fn (Expr.Temp t) e))
+        end;
         filtered_lengths = begin
           let chosen = ref false in
           let set_chosen x =
@@ -178,7 +187,10 @@ let mk_buffer_info_out_of_temp t kernel_ctx buffer_infos =
         typ = Temp.to_type t;
         dim = List.length buffer_infos;
         length = List.map buffer_infos ~f:(fun bi -> List.hd_exn bi.length);
-        index = (Tuple3.get2 (build_length_function (Temp.to_type t))) (Expr.Temp t);
+        index = begin
+          let (_, fn, _) = build_length_function (Temp.to_type t) in
+          Many_fn.Fun (fun e -> Many_fn.Result (fn (Expr.Temp t) e))
+        end;
         filtered_lengths = None;
       }
 
@@ -269,7 +281,7 @@ and annotate_stmt
       let my_buffer_info =
         let typ = A_air.(buffer_info1.typ) in
         let (_, index, _) = build_length_function typ in
-        A_air.{ buffer_info1 with index = index (Expr.Temp (Ir.temp_of_dest dest)); }
+        A_air.{ buffer_info1 with index = Many_fn.Fun (fun e -> Many_fn.Result (index (Expr.Temp (Ir.temp_of_dest dest)) e)); }
       in
       ({ kernel_ctx with
            defined = Set.union defined kernel_ctx.defined;
@@ -296,7 +308,7 @@ and annotate_stmt
       let my_buffer_info =
         let typ = Ir.type_of_dest dest in
         let (_, index, _) = build_length_function (Ir.type_of_dest dest) in
-        A_air.{ buffer_info_av with typ; index = index (Expr.Temp (Ir.temp_of_dest dest)); }
+        A_air.{ buffer_info_av with typ; index = Many_fn.Fun (fun e -> Many_fn.Result (index (Expr.Temp (Ir.temp_of_dest dest)) e)); }
       in
       ({ defined = Set.union defined kernel_ctx.defined;
          used = Set.union used kernel_ctx.used;
@@ -423,7 +435,7 @@ let param_of_temp : Temp.t -> A_air.Param.t * A_air.buffer_info option =
     | 0 -> (Param.Not_array p, None)
     | _ -> (Param.Array (p, ts), Some A_air.{
         length = List.map ~f:(fun t -> Length_expr.Temp t) ts;
-        index = index (Expr.Temp p);
+        index = Many_fn.Fun (fun e -> Many_fn.Result (index (Expr.Temp p) e));
         filtered_lengths = None;
         dim;
         typ;

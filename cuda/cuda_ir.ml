@@ -83,6 +83,7 @@ type cuda_expr =
   | Deref of cuda_expr
   | Index of cuda_expr * cuda_expr
   | Field of cuda_expr * cuda_ident
+  | Size_of of cuda_type
   [@@deriving sexp]
 
 type grid_dim = cuda_expr * cuda_expr * cuda_expr
@@ -114,8 +115,10 @@ and cuda_stmt =
   | Condition of cuda_expr * (cuda_stmt list) * (cuda_stmt list)
               (* type, source, size *)
   | Allocate of cuda_type * cuda_ident * cuda_expr
-              (* dest, source, size, transfer type *)
-  | Transfer of cuda_ident * cuda_expr * cuda_expr * cuda_mem_type
+              (* dest, source, size, transfer type (dest, src) *)
+  | Transfer of cuda_expr * cuda_expr * cuda_expr * (cuda_mem_type * cuda_mem_type)
+  (* Not cudaMemcpy; literally just memcpy. *)
+  | Memcpy of cuda_expr * cuda_expr * cuda_expr
     (* Launch dimension, blocks/thread, kernel, arguments *)
   | Launch of grid_dim * grid_dim * cuda_func * cuda_expr list
 
@@ -155,10 +158,13 @@ let fmt_mem_hdr = function
 let comma_delineated : string list -> string =
   Fn.compose (sprintf "(%s)") (String.concat ~sep:", ")
 
-let fmt_mem_tfr = function
-  | Host   -> "cudaMemcpyDeviceToHost"
-  | Device -> "cudaMemcpyHostToDevice"
-  | Shared -> ""
+let fmt_mem_type = function
+  | Host -> "Host"
+  | Device -> "Device"
+  | Shared -> failwith "What??? Why are you doing that???"
+
+let fmt_mem_tfr tfr1 tfr2 =
+  sprintf "cudaMempcy%sTo%s" (fmt_mem_type tfr1) (fmt_mem_type tfr2)
 
 let fmt_unop = function
   | INCR -> "++"
@@ -223,6 +229,7 @@ let rec fmt_expr = function
   | Index (e,i) -> sprintf "%s[%s]" (fmt_expr e) (fmt_expr i)
   | Deref e -> sprintf "*(%s)" (fmt_expr e)
   | Field (s,f) -> sprintf "(%s).%s" (fmt_expr s) f
+  | Size_of typ -> sprintf "sizeof(%s)" (fmt_typ typ)
 
 let rec fmt_block n block =
    let sp = str_depth n in
@@ -271,9 +278,12 @@ and fmt_stmt n stm =
    let malloc = sprintf "%scudaMalloc(&%s,%s);" sp (src) (fmt_expr size) in
    decl ^ malloc
 
+ | Memcpy (dest, src, size) ->
+   sprintf "%smemcpy(%s,%s,%s);" sp (fmt_expr dest) (fmt_expr src) (fmt_expr src)
+
  | Transfer (dest, src, size, ttyp) ->
-   sprintf "%scudaMemcpy(%s,%s,%s,%s);" sp dest
-   (fmt_expr src) (fmt_expr src) (fmt_mem_tfr ttyp)
+   sprintf "%scudaMemcpy(%s,%s,%s,%s);" sp (fmt_expr dest)
+   (fmt_expr src) (fmt_expr src) (Tuple2.uncurry fmt_mem_tfr ttyp)
 
  | Launch ((x, y, z), (a, b, c), func, args) ->
    let block = sprintf "%sdim3 dimBlock(%s,%s,%s);\n" sp (fmt_expr a) (fmt_expr b) (fmt_expr c) in

@@ -329,7 +329,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       let total_length = build_cached_reduce_expr CU.MUL lengths in
 
       let gdim = (CU.IConst 256L, CU.IConst 1L, CU.IConst 1L) in
-      let bdim = (total_length, CU.IConst 1L, CU.IConst 1L) in (* Todo: make this blocks/thrd  *)
+      let bdim = (CU.Binop (CU.DIV, total_length, CU.IConst 256L), CU.IConst 1L, CU.IConst 1L) in (* Todo: make this blocks/thrd  *)
       let index_expr =
         (* blockDim.x * blockIdx.x + threadIdx.x *)
         (* TODO: change this? *)
@@ -377,8 +377,24 @@ and trans_par_stmt_stmt ctx stmt = trans_a_stmt trans_par_stmt ctx stmt
 and trans_array_view (ctx : context) (dest, loop_temp, index_fn) : CU.cuda_stmt list =
   let dest_arr = dest_to_lvalue ctx dest in
   let lvalue = CU.Index (dest_arr, temp_to_var loop_temp) in
-  (* TODO: expand out index_fn loop_temp *)
-  [ CU.Assign (lvalue, Many_fn.result_exn ~msg:"result_exn trans_array_view" (index_fn loop_temp)) ]
+
+  (* Ok, we have to case on the type of the destination in order to figure out whether we
+   * need to memcpy or if a simple assignment is sufficient. *)
+  let src = Many_fn.result_exn ~msg:"result_exn trans_array_view" (index_fn loop_temp) in
+  match Ir.type_of_dest dest with
+  | Tc.Array (Tc.Array typ) ->
+      let rec loop = function Tc.Array typ -> loop typ | typ -> typ in
+      let innermost_typ = trans_type (loop typ) in
+      let t = Ir.temp_of_dest dest in
+      let non_head_lengths =
+        let buffer_info = Map.find_exn Ano.(ctx.result.buffer_infos) t in
+        let lengths = List.tl_exn Ano.(buffer_info.length) in
+        List.map ~f:trans_len_expr lengths
+      in
+      let size = build_cached_reduce_expr CU.MUL non_head_lengths in
+      [ CU.Memcpy (lvalue, src, CU.(Binop (MUL, Size_of innermost_typ, size))) ]
+  | Tc.Array _ -> [ CU.Assign (lvalue, src) ]
+  | _ -> failwith "No way"
 
 (* The translated gstmt contains within it kernel launches.
  * These kernel launches actually include the kernel DEFINITION.

@@ -114,7 +114,9 @@ and cuda_stmt =
               (* if (_) then {_} else {_} *)
   | Condition of cuda_expr * (cuda_stmt list) * (cuda_stmt list)
               (* type, source, size *)
-  | Allocate of cuda_type * cuda_ident * cuda_expr
+  | Cuda_malloc of cuda_type * cuda_ident * cuda_expr
+              (* type, source, size *)
+  | Malloc of cuda_type * cuda_ident * cuda_expr
               (* dest, source, size, transfer type (dest, src) *)
   | Transfer of cuda_expr * cuda_expr * cuda_expr * (cuda_mem_type * cuda_mem_type)
   (* Not cudaMemcpy; literally just memcpy. *)
@@ -273,10 +275,12 @@ and fmt_stmt n stm =
    let guard = sprintf "%sif(%s)\n" sp (fmt_expr c) in
    guard ^ fmt_block n b1 ^ "else" ^ fmt_block n b2
 
- | Allocate (typ, src, size) ->
-   let decl = sprintf "%s%s d_%s\n" sp (fmt_typ typ) (src) in
-   let malloc = sprintf "%scudaMalloc(&%s,%s);" sp (src) (fmt_expr size) in
+ | Cuda_malloc (typ, dest, size) ->
+   let decl = sprintf "%s%s d_%s;\n" sp (fmt_typ typ) (dest) in
+   let malloc = sprintf "%scudaMalloc(&%s,%s);" sp (dest) (fmt_expr size) in
    decl ^ malloc
+
+ | Malloc (typ, dest, size) -> sprintf "%s%s %s = malloc(%s)" sp (fmt_typ typ) (dest) (fmt_expr size)
 
  | Memcpy (dest, src, size) ->
    sprintf "%smemcpy(%s,%s,%s)" sp (fmt_expr dest) (fmt_expr src) (fmt_expr src)
@@ -291,7 +295,7 @@ and fmt_stmt n stm =
    let launch = sprintf "%s%s<<<dimGrid,dimBlock>>>%s" sp name (comma_delineated (List.map ~f:fmt_expr args))
    in block ^ grid ^ launch
 
- | Sync -> sprintf "%s %s;\n" sp "__syncthreads()"
+ | Sync -> sprintf "%s %s\n" sp "__syncthreads()"
  | Free id -> sprintf "%s cudaFree(%s)\n" sp id
  | Nop -> ""
 

@@ -438,7 +438,7 @@ and trans_array_view (ctx : context) (dest, loop_temp, index_fn) : CU.cuda_stmt 
 let rec extract_kernel_launches : CU.cuda_stmt list -> CU.cuda_func list =
   List.fold_left ~init:[] ~f:(fun kernel_launches -> function
     | CU.Sync | CU.Nop | CU.DeclareArray _ | CU.DeclareAssign _ | CU.Assign _
-    | CU.AssignOp _ | CU.Allocate _ | CU.Free _ | CU.Transfer _
+    | CU.AssignOp _ | CU.Cuda_malloc _ | CU.Malloc _ | CU.Free _ | CU.Transfer _
     | CU.Expression _ | CU.Memcpy _ -> kernel_launches
     | CU.Launch (_, _, cuda_func, _) -> cuda_func :: kernel_launches
     | CU.Loop (_, stmts) -> extract_kernel_launches stmts @ kernel_launches
@@ -462,14 +462,38 @@ let trans (program : Air.t) (result : Ano.result) : CU.cuda_gstmt list =
      * to write into. *)
     | None -> Temp.next Tc.Int ()
   in
+  let allocation_method = Temp.Table.create () in
   let body = trans_par_stmt {
     result;
+    allocation_method;
     lvalue = temp_to_var lvalue;
     dims_of_params = List.concat_map Ano.(result.params) ~f:(function
       | Ano.Param.Array (_, dims) -> dims
       | Ano.Param.Not_array _ -> []);
-    allocation_method = Temp.Table.create ();
   } Air.(program.body) in
+
+  (* Malloc on the device and on the host. *)
+  let malloc'ing =
+
+    (* Remove outermost arrays. *)
+    let rec remove_arrays =
+      function Tc.Array typ -> remove_arrays typ | typ -> trans_type typ in
+
+    List.concat_map (Map.to_alist Ano.(result.buffer_infos)) ~f:(fun (t, bi) ->
+      let f t k =
+        let typ = Temp.to_type t in k CU.(
+          trans_type typ,
+          temp_name t,
+          Binop (MUL,
+            build_cached_reduce_expr MUL (List.map ~f:trans_len_expr Ano.(bi.length)),
+            Size_of (remove_arrays typ)))
+      in
+      match Temp.Table.find allocation_method t with
+      | None -> f t (fun (a, b, c) -> [ CU.Malloc (a, b, c) ])
+      | Some `Just_device -> f t (fun (a, b, c) -> [ CU.Cuda_malloc (a, b, c) ])
+      | Some `Host_and_device t' -> f t (fun (a, b, c) -> f t' (fun (a', b', c') -> [ CU.Malloc (a, b, c); CU.Cuda_malloc (a', b', c'); ])))
+  in
+
   let gdecls = extract_kernel_launches body in
   List.concat [
     gdecls;
@@ -478,5 +502,5 @@ let trans (program : Air.t) (result : Ano.result) : CU.cuda_gstmt list =
             ret = Void;
             name = "dag_" ^ Air.(program.fn_name);
             params;
-            body; });
+            body = malloc'ing @ body; });
   ] |> List.map ~f:(fun x -> CU.Function x)

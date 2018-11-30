@@ -129,7 +129,8 @@ let trans_unop = function
 (* Creates the loop header (initial value, max value, and increment stride)
  * -> for (var = init;var < limit; var += stride) *)
 let trans_incr_loop_hdr ~loop_var ~lo ~hi ~stride =
- (CU.Assign (loop_var, lo), CU.Cmpop (CU.LT, loop_var, hi), CU.AssignOp (CU.ADD, loop_var, stride))
+ (CU.DeclareAssign (CU.Integer, loop_var, lo),
+   CU.Cmpop (CU.LT, CU.Var loop_var, hi), CU.AssignOp (CU.ADD, CU.Var loop_var, stride))
 
 (* Actually perform the reduction! *)
 let make_reduce op args =
@@ -173,7 +174,7 @@ let get_index (ctx : context) (t : Temp.t) : Temp.t -> (Expr.t, CU.cuda_expr) Ma
 (* Create a loop that iterates over the buffer t. *)
 let create_loop (ctx : context) ~counter:loop_temp (t : Temp.t) =
   trans_incr_loop_hdr
-    ~loop_var:(temp_to_var loop_temp)
+    ~loop_var:(temp_name loop_temp)
     ~lo:(CU.IConst 0L)
     ~hi:(get_length ctx t)
     ~stride:(CU.IConst 1L)
@@ -249,18 +250,18 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
 
   (* For reduce, we associate the buffer_info for the view with t. *)
   | Air.Reduce (dest, op, init, (t, _)) ->
-      let lvalue = next_var () in
+      let lvalue = Temp.next Tc.Int () in
       let index_fn = get_index ctx t in
       let loop_temp = Temp.next Tc.Int () in
       let hdr = create_loop ~counter:loop_temp ctx t in
       let assign_stmt = make_reduce op
-        [ lvalue;
+        [ temp_to_var lvalue;
           Many_fn.result_exn ~msg:"Reduce result_exn." (index_fn loop_temp);
         ]
       in
-      [ CU.Assign (lvalue, trans_op init);
+      [ CU.DeclareAssign (CU.Integer, temp_name lvalue, trans_op init);
         CU.Loop (hdr, [assign_stmt]);
-        CU.Assign (dest_to_lvalue ctx dest, lvalue);
+        CU.Assign (dest_to_lvalue ctx dest, temp_to_var lvalue);
       ]
   | _ -> trans_seq_stmt_stmt ctx seq_stmt
 
@@ -375,15 +376,17 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         body =
           begin
             (* In the body, the user assigns to this guy. *)
-            let i = next_var () in
-            let acc = next_var () in
+            let i_temp = Temp.next Tc.Int () in
+            let i = temp_to_var i_temp in
+            let acc_temp = Temp.next Tc.Int () in
+            let acc = temp_to_var acc_temp in
             let lvalue = CU.Index (CU.Var output_buffer_param, i) in
             List.concat [
-              [ CU.Assign (i, index_expr);
-                CU.Assign (acc, i);
+              [ CU.DeclareAssign (CU.Integer, temp_name i_temp, index_expr);
+                CU.DeclareAssign (CU.Integer, temp_name acc_temp, i);
               ];
               List.concat_map (List.zip_exn indices lengths) ~f:(fun (idx, len) ->
-                [ CU.Assign (temp_to_var idx, CU.Binop (CU.MOD, acc, len));
+                [ CU.DeclareAssign (CU.Integer, temp_name idx, CU.Binop (CU.MOD, acc, len));
                   CU.Assign (acc, CU.Binop (CU.DIV, acc, len));
                 ]
               );
@@ -432,11 +435,23 @@ and trans_array_view (ctx : context) (dest, loop_temp, index_fn) : CU.cuda_stmt 
   in
   loop lvalue (index_fn loop_temp)
 
+let rec extract_kernel_launches : CU.cuda_stmt list -> CU.cuda_func list =
+  List.fold_left ~init:[] ~f:(fun kernel_launches -> function
+    | CU.Sync | CU.Nop | CU.DeclareArray _ | CU.DeclareAssign _ | CU.Assign _
+    | CU.AssignOp _ | CU.Allocate _ | CU.Free _ | CU.Transfer _
+    | CU.Expression _ | CU.Memcpy _ -> kernel_launches
+    | CU.Launch (_, _, cuda_func, _) -> cuda_func :: kernel_launches
+    | CU.Loop (_, stmts) -> extract_kernel_launches stmts @ kernel_launches
+    | CU.Condition (_, stmts1, stmts2) ->
+        let gstmts1 = extract_kernel_launches stmts1 in
+        let gstmts2 = extract_kernel_launches stmts2 in
+        gstmts1 @ gstmts2 @ kernel_launches)
+
 (* The translated gstmt contains within it kernel launches.
  * These kernel launches actually include the kernel DEFINITION.
  * It's up to a later phase to float all these kernel definitions to the top level.
  *)
-let trans (program : Air.t) (result : Ano.result) : CU.cuda_gstmt =
+let trans (program : Air.t) (result : Ano.result) : CU.cuda_gstmt list =
   let params = trans_params Ano.(result.params) in
   let lvalue = match Ano.(result.out_param) with
     (* When there is an output buffer, this is the lvalue that an Air `return`
@@ -455,10 +470,13 @@ let trans (program : Air.t) (result : Ano.result) : CU.cuda_gstmt =
       | Ano.Param.Not_array _ -> []);
     allocation_method = Temp.Table.create ();
   } Air.(program.body) in
-  CU.(Function {
-    typ = Host;
-    ret = Void;
-    name = "dag_" ^ Air.(program.fn_name);
-    params;
-    body;
-  })
+  let gdecls = extract_kernel_launches body in
+  List.concat [
+    gdecls;
+    List.return
+      CU.({ typ = Host;
+            ret = Void;
+            name = "dag_" ^ Air.(program.fn_name);
+            params;
+            body; });
+  ] |> List.map ~f:(fun x -> CU.Function x)

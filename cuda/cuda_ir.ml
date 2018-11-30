@@ -233,19 +233,19 @@ let rec fmt_expr = function
 
 let rec fmt_block n block =
    let sp = str_depth n in
-   let body = List.map block ~f:(fun s -> fmt_stmt (n+1) s^"\n") in
+   let body = List.map block ~f:(fun s -> fmt_stmt (n+1) s^";\n") in
    let body' = String.concat body in
-   "{\n"^body'^sp^"}\n"
+   "{\n"^body'^sp^"}"
 
 and fmt_stmt n stm =
  let sp = str_depth n in
  match stm with
  | DeclareAssign (typ, id, exp) ->
-   sprintf "%s %s %s = %s;" sp (fmt_typ typ) id (fmt_expr exp)
+   sprintf "%s%s %s = %s" sp (fmt_typ typ) id (fmt_expr exp)
 
  | DeclareArray (mem, typ, id, sizes) ->
    let arr_exps = String.concat(List.map sizes ~f:(fun e -> "["^fmt_expr e^"]")) in
-   sprintf "%s %s %s %s %s;" sp (fmt_mem_hdr mem) (fmt_typ typ) id arr_exps
+   sprintf "%s%s %s %s %s" sp (fmt_mem_hdr mem) (fmt_typ typ) id arr_exps
 
 (* Should we model structs as pointers to structs? *)
 (* That would make host/device transfer much more complicated. *)
@@ -258,41 +258,41 @@ and fmt_stmt n stm =
    decl ^ inits ^";"
 
  | Assign (l, exp) ->
-   sprintf "%s %s = %s;" sp (fmt_expr l) (fmt_expr exp)
+   sprintf "%s%s = %s" sp (fmt_expr l) (fmt_expr exp)
 
  | AssignOp (op, l, exp) ->
-   sprintf "%s %s %s=  %s;" sp (fmt_expr l) (fmt_binop op) (fmt_expr exp)
+   sprintf "%s%s %s= %s" sp (fmt_expr l) (fmt_binop op) (fmt_expr exp)
 
- | Expression e -> sp ^ fmt_expr e ^ ";"
+ | Expression e -> sp ^ fmt_expr e
 
  | Loop ((f, e, a), b) ->
-   let guard = sprintf "%s for(%s %s %s)\n" sp (fmt_stmt 0 f) (fmt_expr e) (fmt_stmt 0 a) in
+   let guard = sprintf "%sfor(%s; %s; %s)\n" sp (fmt_stmt 0 f) (fmt_expr e) (fmt_stmt 0 a) in
    guard ^ sp ^ fmt_block n b
 
  | Condition (c, b1, b2) ->
-   let guard = sprintf "%s if(%s)\n" sp (fmt_expr c) in
+   let guard = sprintf "%sif(%s)\n" sp (fmt_expr c) in
    guard ^ fmt_block n b1 ^ "else" ^ fmt_block n b2
 
  | Allocate (typ, src, size) ->
-   let decl = sprintf "%s %s d_%s;\n" sp (fmt_typ typ) (src) in
+   let decl = sprintf "%s%s d_%s\n" sp (fmt_typ typ) (src) in
    let malloc = sprintf "%scudaMalloc(&%s,%s);" sp (src) (fmt_expr size) in
    decl ^ malloc
 
  | Memcpy (dest, src, size) ->
-   sprintf "%smemcpy(%s,%s,%s);" sp (fmt_expr dest) (fmt_expr src) (fmt_expr src)
+   sprintf "%smemcpy(%s,%s,%s)" sp (fmt_expr dest) (fmt_expr src) (fmt_expr src)
 
  | Transfer (dest, src, size, ttyp) ->
-   sprintf "%scudaMemcpy(%s,%s,%s,%s);" sp (fmt_expr dest)
+   sprintf "%scudaMemcpy(%s,%s,%s,%s)" sp (fmt_expr dest)
    (fmt_expr src) (fmt_expr src) (Tuple2.uncurry fmt_mem_tfr ttyp)
 
- | Launch ((x, y, z), (a, b, c), func, args) ->
+ | Launch ((x, y, z), (a, b, c), { name }, args) ->
    let block = sprintf "%sdim3 dimBlock(%s,%s,%s);\n" sp (fmt_expr a) (fmt_expr b) (fmt_expr c) in
    let grid = sprintf "%sdim3 dimGrid(%s,%s,%s);\n" sp (fmt_expr x) (fmt_expr y) (fmt_expr z) in
-   let launch = sprintf "%s%s<<<dimGrid,dimBlock>>>%s;" sp (func.name) (comma_delineated (List.map ~f:fmt_expr args))
+   let launch = sprintf "%s%s<<<dimGrid,dimBlock>>>%s" sp name (comma_delineated (List.map ~f:fmt_expr args))
    in block ^ grid ^ launch
 
  | Sync -> sprintf "%s %s;\n" sp "__syncthreads()"
- | Free id -> sprintf "%s cudaFree(%s);\n" sp id
+ | Free id -> sprintf "%s cudaFree(%s)\n" sp id
  | Nop -> ""
 
 let fmt_func f =
@@ -312,13 +312,13 @@ let fmt_struct (id,fields) =
   let block' = String.concat block ^ "}\n" in
   header ^ block'
 
-let fmt_gstm = function
+let fmt_gstmt = function
   | Function f -> fmt_func f
-  | Decl d -> fmt_stmt 0 d
+  | Decl d -> fmt_stmt 0 d ^ ";"
   | StructDecl (id, fields) -> fmt_struct (id, fields)
 
-let print_program (program : t) : unit =
-  List.iter program ~f:(fun f -> prerr_endline (fmt_gstm f))
+let fmt_gstmts (program : t) : string =
+  List.map ~f:fmt_gstmt program |> String.concat ~sep:"\n"
 
 let transpose_kernel : cuda_func = {
   typ = Device;

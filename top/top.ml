@@ -48,7 +48,7 @@ let run_on_ast (ast : unit Ast.t) (function_names : string list) : unit =
         let cuda = Cuda_trans.trans air ann in
         say (fun () -> [
           Printf.sprintf "Cuda:";
-          Sexp.to_string_hum (Cuda_ir.sexp_of_cuda_gstmt cuda);
+          Cuda_ir.fmt_gstmts cuda;
         ]);
       ) in
       ignore cudas

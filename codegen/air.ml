@@ -7,6 +7,7 @@ type array_view = Tc.typ * array_view'
 
 and array_view' =
   | Array of Temp.t
+  | Array_index of Temp.t * Temp.t
   | Zip_with of Ir.Operator.t * array_view list
   | Reverse of array_view
   | Transpose of array_view
@@ -83,6 +84,7 @@ end = struct
 
   let rec pp_array_view (_, av) = pp_array_view' av
   and pp_array_view' = function
+    | Array_index (t1, t2) -> Printf.sprintf "%%%d[%%%d]" (Temp.to_int t1) (Temp.to_int t2)
     | Array t -> Printf.sprintf "%%%d" (Temp.to_int t)
     | Zip_with (o, avs) ->
         Printf.sprintf "zip_with(%s, %s)"

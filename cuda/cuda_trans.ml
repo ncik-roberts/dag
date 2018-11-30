@@ -246,6 +246,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         | Air.Reverse av -> temps_in_array_view av
         | Air.Array t -> Temp.Set.singleton t
         | Air.Transpose av -> temps_in_array_view av
+        | Air.Array_index (t1, t2) -> Temp.Set.of_list [t1; t2;]
       in
       let array_view_args =
         List.map bound_array_views ~f:(fun (_, _, av) -> temps_in_array_view av)

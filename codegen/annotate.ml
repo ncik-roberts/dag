@@ -50,10 +50,18 @@ let lookup_exn (ctx : context) : Temp.t -> A_air.buffer_info =
 let annotate_array_view
   (ctx : context)
   (av : Air.array_view)
-  ~(variety : A_air.buffer_info_sum) : A_air.buffer_info =
+  : A_air.buffer_info =
   let open A_air in
   let rec loop : Air.array_view -> buffer_info = function
     | (_, Air.Array t) -> lookup_exn ctx t
+    | (_, Air.Array_index (t1, t2)) ->
+        let bi = lookup_exn ctx t1 in
+        { dim = bi.dim - 1;
+          length = List.tl_exn bi.length;
+          index = Many_fn.app_exn bi.index (Expr.Temp t2);
+          typ = (match bi.typ with Tc.Array t -> t | _ -> failwith "No.");
+        }
+
     | (typ, Air.Transpose av) ->
         let bi = loop av in
         assert (typ = bi.typ);
@@ -70,7 +78,6 @@ let annotate_array_view
           Expr.Call (Ir.Operator.Binop Ast.Minus,
             [ Length_expr.to_expr (List.hd_exn bi.length); Expr.Const 1l; ]) in
         { bi with
-            variety;
             index =
               let open Many_fn in
               Fun (fun expr ->
@@ -91,7 +98,6 @@ let annotate_array_view
         { dim;
           length;
           typ;
-          variety;
           index =
             let open Many_fn in
             Fun (fun expr ->
@@ -116,7 +122,7 @@ let used_of_operand (ctx : context) : Air.operand -> Temp.Set.t =
     | Air.Temp t -> Temp.Set.singleton t
     | Air.Index (t1, t2) -> Temp.Set.of_list [t1; t2;]
     | Air.Dim (n, av) ->
-        let bi = annotate_array_view ctx av ~variety:A_air.Run_array_view in
+        let bi = annotate_array_view ctx av in
         used_of_length_expr (List.nth_exn A_air.(bi.length) n)
 
 let defined_of_dest : Ir.dest -> Temp.Set.t =
@@ -131,7 +137,7 @@ and annotate_par_stmt (ctx : context) (stmt : Air.par_stmt) : context =
   match stmt with
   | Air.Parallel (dest, id, tavs, body) ->
       let buffer_infos = List.map tavs ~f:(fun (_, _, av) ->
-        annotate_array_view ctx av ~variety:A_air.Bound_parallel) in
+        annotate_array_view ctx av) in
       let ctx =
         { ctx with
             result =
@@ -176,7 +182,7 @@ and annotate_stmt
         -> kernel_context * context = fun kernel_ctx ctx recur stmt ->
   match stmt with
   | Air.Run (Ir.Return t, av) ->
-      let buffer_info = annotate_array_view ctx av ~variety:A_air.Run_array_view in
+      let buffer_info = annotate_array_view ctx av in
       (kernel_ctx,
        { ctx with result = A_air.
            { ctx.result with
@@ -186,7 +192,7 @@ and annotate_stmt
        })
   | Air.Run (Ir.Dest t, av) ->
       let defined = Temp.Set.singleton t in
-      let buffer_info = annotate_array_view ctx av ~variety:A_air.Run_array_view in
+      let buffer_info = annotate_array_view ctx av in
       ({ kernel_ctx with
            defined = Set.union defined kernel_ctx.defined;
            additional_buffers = Set.add kernel_ctx.additional_buffers t;
@@ -201,7 +207,7 @@ and annotate_stmt
   | Air.Reduce (dest, _, operand, (t, av)) ->
       let defined = defined_of_dest dest in
       let used = used_of_operand ctx operand in
-      let buffer_info = annotate_array_view ctx av ~variety:A_air.Bound_parallel in
+      let buffer_info = annotate_array_view ctx av in
       ({ defined = Set.union defined kernel_ctx.defined;
          used = Set.union used kernel_ctx.used;
          additional_buffers = Set.add kernel_ctx.additional_buffers t;
@@ -220,7 +226,7 @@ and annotate_stmt
         |> Fn.flip Set.add t
         |> Fn.flip Set.add t_idx
       in
-      let buffer_info = annotate_array_view ctx av ~variety:A_air.Bound_parallel in
+      let buffer_info = annotate_array_view ctx av in
       let ctx = { ctx with result = A_air.
         { ctx.result with
             buffer_infos =
@@ -276,7 +282,6 @@ let param_of_temp : Temp.t -> A_air.Param.t * A_air.buffer_info option =
         index = index (Expr.Temp p);
         dim;
         typ;
-        variety = Run_array_view;
       })
 
 let annotate (air : Air.t) : A_air.result =

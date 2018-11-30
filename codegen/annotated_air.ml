@@ -37,27 +37,6 @@ module Length_expr = struct
       List.equal (canonicalize t1) (canonicalize t2) ~equal:Temp.equal
 end
 
-type buffer_info_sum =
-
-  (* Take for example:
-   *
-   *   parallel (t <- ts) { ... }
-   *
-   * The temp mapped to this buffer_info is the temp `t`.
-   * The details of the buffer_info is for the array view `ts`.
-   *)
-  | Bound_parallel
-
-  (* Take for example:
-   *
-   *  t <- run(ts)
-   *
-   * The temp mapped to this buffer_info is the temp `t`.
-   * The details of the buffer_info is for the array view `ts`.
-   *)
-  | Run_array_view
-  [@@deriving sexp]
-
 type buffer_info = {
   dim : int; (* First argument to length ranges from [0, dim) *)
 
@@ -66,7 +45,6 @@ type buffer_info = {
   index : (Expr.t, Expr.t) Utils.Many_fn.t;
   (* `b.index [i; j; k;]` is the expression denoting the b[i][j][k] *)
   typ : Tc.typ;
-  variety : buffer_info_sum;
 } [@@deriving sexp]
 
 type kernel_info = {

@@ -6,7 +6,7 @@ type context = {
    *)
   array_views : Air.array_view Temp.Map.t;
 
-  idx : Temp.t Temp.Map.t;
+  idx : (Temp.t * Temp.t) Temp.Map.t;
 }
 
 let nop : Air.par_stmt = Air.Par_stmt Air.Nop
@@ -17,7 +17,7 @@ let convert_operand : context -> Ir.operand -> Air.operand =
     | Ir.Temp t ->
 
   match Map.find ctx.idx t with
-  | Some t_idx -> Air.Index (t, t_idx)
+  | Some (t_new, t_idx) -> Air.Index (t_new, t_idx)
   | None -> Air.Temp t
 
 (* Check that a temp isn't in the context.
@@ -192,15 +192,18 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
         | `Array_view view -> view
         | `Operand _ -> failwith "Invalid argument to a parallel block."
       in
+      let t_new_src = Temp.next (Tc.Array (Temp.to_type t_src)) () in
       let t_idx = Temp.next Tc.Int () in
       let stmts' =
         let ctx' = {
-          array_views = Map.add_exn ctx.array_views ~key:t_src ~data:(Temp.to_type t_src, Air.Array t_src);
-          idx = Map.add_exn ctx.idx ~key:t_src ~data:t_idx;
+          array_views = Map.add_exn ctx.array_views ~key:t_src ~data:(Temp.to_type t_src,
+            Air.Array_index (t_new_src, t_idx))
+            |> Map.add_exn ~key:t_new_src ~data:(Temp.to_type t_new_src, Air.Array t_new_src);
+          idx = Map.add_exn ctx.idx ~key:t_src ~data:(t_new_src, t_idx);
         } in
         loop_stmts ctx' stmts
       in
-      let alternatives = make_parallel dest array_view t_src t_idx stmts' in
+      let alternatives = make_parallel dest array_view t_new_src t_idx stmts' in
       List.map ~f:(Tuple2.create ctx) alternatives
 
   (* List is all possible options *)

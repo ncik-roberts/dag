@@ -228,8 +228,8 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
   | Air.Seq seq_stm -> trans_seq_stmt ctx seq_stm
 
   (* TODO: Make these actually run in parallel. *)
-  | Air.Par_stmt (Air.Run (a, b)) -> trans_seq_stmt_stmt ctx (Air.Run (a, b))
-  | Air.Par_stmt (Air.Reduce (a, b, c, d)) -> trans_seq_stmt_stmt ctx (Air.Reduce (a, b, c, d))
+  | Air.Par_stmt (Air.Run (a, b)) -> trans_seq_stmt ctx (Air.Seq_stmt (Air.Run (a, b)))
+  | Air.Par_stmt (Air.Reduce (a, b, c, d)) -> trans_seq_stmt ctx (Air.Seq_stmt (Air.Reduce (a, b, c, d)))
   | Air.Par_stmt par_stmt -> trans_par_stmt_stmt ctx par_stmt
 
   | Air.Parallel (dest, id, bound_array_views, body) ->

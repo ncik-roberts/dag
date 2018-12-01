@@ -4,7 +4,7 @@ module Param = struct
   type t =
     | Array of Temp.t * Temp.t list (* Second component is dimensions. First elem of dimensions is length of outermost array. *)
     | Not_array of Temp.t
-    [@@deriving sexp]
+    [@@deriving sexp, compare]
 end
 
 module Expr = struct

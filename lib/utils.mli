@@ -18,6 +18,7 @@ module Many_fn : sig
 
   val result_exn : ?msg:string -> ('a, 'b) t -> 'b
   val app_exn : ?msg:string -> ('a, 'b) t -> 'a -> ('a, 'b) t
+  val app : ('a, 'b) t -> 'a -> default:('b -> 'b) -> ('a, 'b) t
   val app_many_exn : ('a, 'b) t -> 'a list -> ('a, 'b) t
   val lift : ('a -> 'b) -> ('a, 'b) t
   val compose : ('b -> 'c) -> ('a, 'b) t -> ('a, 'c) t

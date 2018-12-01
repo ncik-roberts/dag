@@ -36,6 +36,10 @@ module Many_fn = struct
     | Fun f -> f x
     | Result _ -> failwith msg
 
+  let app f x ~default = match f with
+    | Fun f -> f x
+    | Result y -> Result (default y)
+
   let app_many_exn f xs = List.fold_left xs ~init:f ~f:app_exn
 
   let lift f = Fun (fun x -> Result (f x))

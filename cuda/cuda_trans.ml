@@ -21,6 +21,7 @@ type context = {
   allocation_method :
     [ `Just_device (* additional_buffers *)
     | `Host_and_device of Temp.t (* temp is the device temp *)
+    | `Unallocated
     ] Temp.Table.t;
 }
 
@@ -66,6 +67,10 @@ let rec trans_type (typ : Tc.typ) : CU.cuda_type =
   | Tc.Struct i -> CU.Struct i
   | Tc.Array t -> CU.Pointer (trans_type t)
   | _ -> failwith "Don't currently support other types"
+
+(* Remove outermost arrays. *)
+let rec remove_arrays =
+  function Tc.Array typ -> remove_arrays typ | typ -> trans_type typ
 
 (* Translate an AIR parameter list into a list of CUDA parameters.
  *
@@ -160,7 +165,9 @@ let rec trans_expr : Expr.t -> CU.cuda_expr = function
   | Unop u, [ e1; ] -> CU.Unop (trans_unop u, trans_expr e1)
   | _ -> failwithf "Invalid: %s." (Sexp.to_string_hum (Expr.sexp_of_t e)) ()
 
-let rec app_expr f e = Many_fn.compose trans_expr (Many_fn.app_exn ~msg:"app_expr" f e)
+
+let app index t = Many_fn.app index t ~default:(fun arr -> Expr.Index (arr, t))
+let rec app_expr f e = Many_fn.compose trans_expr (app f e)
 
 (* Find a buffer info's length. *)
 let get_lengths (ctx : context) (t : Temp.t) : CU.cuda_expr list =
@@ -205,6 +212,7 @@ let rec trans_a_stmt : type a. (context -> a -> CU.cuda_stmt list) -> context ->
         (* Iterate over the bound temp (which Annotate stores as having all the
          * information of the view array). *)
         let hdr = create_loop ~counter:t_idx ctx bound_temp in
+        Temp.Table.add_exn ctx.allocation_method ~key:bound_temp ~data:`Unallocated;
 
         let body =
           (* The lvalue for the for body is an index into the destination array. *)
@@ -260,6 +268,7 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       let index_fn = get_index ctx t in
       let loop_temp = Temp.next Tc.Int () in
       let hdr = create_loop ~counter:loop_temp ctx t in
+      Temp.Table.add_exn ctx.allocation_method ~key:t ~data:`Unallocated;
       let assign_stmt = make_reduce op
         [ temp_to_var lvalue;
           Many_fn.result_exn ~msg:"Reduce result_exn." (index_fn loop_temp);
@@ -312,11 +321,11 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       let device_args =
         List.map host_args ~f:(fun host_t ->
           match Temp.Table.find ctx.allocation_method host_t with
-          | Some `Just_device -> failwith "I don't think this is possible."
+          | Some (`Just_device | `Unallocated) -> failwith "I don't think this is possible."
           | Some (`Host_and_device t) -> t
           | None ->
               let new_temp = Temp.next (Temp.to_type host_t) () in
-              Temp.Table.add_exn ctx.allocation_method ~key:host_t ~data:(`Host_and_device new_temp);
+              Temp.Table.set ctx.allocation_method ~key:host_t ~data:(`Host_and_device new_temp);
               new_temp)
       in
 
@@ -335,6 +344,9 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         ctx.dims_of_params;
       ] in
 
+      (* we need this for naming parameters *)
+      let args_with_host_args = List.concat [ host_args; additional_buffers; ctx.dims_of_params; ] in
+
       (* Process:
        - Allocate what needs to be allocated of them on the device.
        - Translate the kernel body.
@@ -351,13 +363,14 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         let tpas = List.concat [
           (* Don't forget to include as a parameter the dest. *)
           List.return ((trans_type (Ir.type_of_dest dest), output_buffer_param), dest_to_lvalue ctx dest);
-          List.map args ~f:(fun t -> ((trans_type (Temp.to_type t), temp_name t), temp_to_var t));
+          List.map2_exn args args_with_host_args ~f:(fun t t' -> ((trans_type (Temp.to_type t), temp_name t'), temp_to_var t));
         ]
         in List.unzip tpas
       in
 
       (* Total length of all the things we're parallel over. *)
       let bound_temps = List.map ~f:Tuple3.get1 bound_array_views in
+      List.iter bound_temps ~f:(fun key -> Temp.Table.add_exn ctx.allocation_method ~key ~data:`Unallocated);
       let lengths = List.map ~f:(get_length ctx) bound_temps in
       let total_length = build_cached_reduce_expr CU.MUL lengths in
 
@@ -407,16 +420,16 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
           try get_lengths ctx dest
           with _ -> get_lengths ctx src
         in
-        let len = CU.Binop (CU.MUL, build_cached_reduce_expr CU.MUL lengths, CU.Size_of (trans_type typ)) in
+        let len = CU.Binop (CU.MUL, build_cached_reduce_expr CU.MUL lengths, CU.Size_of (remove_arrays typ)) in
         CU.Transfer (temp_to_var dest, temp_to_var src, len, tfr)
       ) in
 
       List.concat [
         (* Memcpy the host args into the device args. *)
-        memcpy CU.(Device, Host) device_args host_args;
+        memcpy CU.(Host, Device) device_args host_args;
         [CU.Launch (gdim, bdim, kernel, kernel_args)];
         (* Memcpy the device args into the host args. *)
-        memcpy CU.(Host, Device) host_args device_args;
+        memcpy CU.(Device, Host) host_args device_args;
       ]
 
 and trans_seq_stmt_stmt ctx stmt = trans_a_stmt trans_seq_stmt ctx stmt
@@ -473,10 +486,6 @@ let trans (program : Air.t) (result : Ano.result) : CU.cuda_gstmt list =
   (* Malloc on the device and on the host. *)
   let malloc'ing =
 
-    (* Remove outermost arrays. *)
-    let rec remove_arrays =
-      function Tc.Array typ -> remove_arrays typ | typ -> trans_type typ in
-
     List.concat_map (Map.to_alist Ano.(result.buffer_infos)) ~f:(fun (t, bi) ->
       let f t k =
         let typ = Temp.to_type t in k CU.(
@@ -487,8 +496,17 @@ let trans (program : Air.t) (result : Ano.result) : CU.cuda_gstmt list =
             Size_of (remove_arrays typ)))
       in
       match Temp.Table.find allocation_method t with
-      | None -> []
+      | None when
+          List.exists Ano.(result.params)
+          ~f:(function | (Ano.Param.Array (t', _)) -> Temp.equal t t'
+                       | _ -> false) -> []
+      | Some `Unallocated -> []
+      | None -> f t (fun (a, b, c) -> [ CU.Malloc (a, b, c) ])
       | Some `Just_device -> f t (fun (a, b, c) -> [ CU.Cuda_malloc (a, b, c) ])
+      | Some `Host_and_device t' when
+          List.exists Ano.(result.params)
+          ~f:(function | (Ano.Param.Array (t', _)) -> Temp.equal t t'
+                       | _ -> false) -> f t' (fun (a, b, c) -> [ CU.Cuda_malloc (a, b, c) ])
       | Some `Host_and_device t' -> f t (fun (a, b, c) -> f t' (fun (a', b', c') -> [ CU.Malloc (a, b, c); CU.Cuda_malloc (a', b', c'); ])))
   in
 

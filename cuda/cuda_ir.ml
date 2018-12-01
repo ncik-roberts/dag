@@ -270,7 +270,7 @@ and fmt_stmt n stm =
  | Expression e -> sp ^ fmt_expr e
 
  | Loop ((f, e, a), b) ->
-   let guard = sprintf "%sfor(%s; %s; %s)" sp (fmt_stmt 0 f) (fmt_expr e) (fmt_stmt 0 a) in
+   let guard = sprintf "%sfor (%s; %s; %s)" sp (fmt_stmt 0 f) (fmt_expr e) (fmt_stmt 0 a) in
    guard ^ fmt_block n b
 
  | Condition (c, b1, b2) ->
@@ -278,8 +278,8 @@ and fmt_stmt n stm =
    guard ^ fmt_block n b1 ^ "else" ^ fmt_block n b2
 
  | Cuda_malloc (typ, dest, size) ->
-   let decl = sprintf "%s%s d_%s;\n" sp (fmt_typ typ) (dest) in
-   let malloc = sprintf "%scudaMalloc(&%s,%s);" sp (dest) (fmt_expr size) in
+   let decl = sprintf "%s%s %s;\n" sp (fmt_typ typ) (dest) in
+   let malloc = sprintf "%scudaMalloc(&%s, %s);" sp (dest) (fmt_expr size) in
    decl ^ malloc
 
  | Malloc (typ, dest, size) -> sprintf "%s%s %s = malloc(%s)" sp (fmt_typ typ) (dest) (fmt_expr size)
@@ -289,7 +289,7 @@ and fmt_stmt n stm =
 
  | Transfer (dest, src, size, ttyp) ->
    sprintf "%scudaMemcpy(%s, %s, %s, %s)" sp (fmt_expr dest)
-   (fmt_expr src) (fmt_expr src) (Tuple2.uncurry fmt_mem_tfr ttyp)
+   (fmt_expr src) (fmt_expr size) (Tuple2.uncurry fmt_mem_tfr ttyp)
 
  | Launch ((x, y, z), (a, b, c), { name }, args) ->
    let block = sprintf "%sdim3 dimBlock(%s, %s, %s);\n" sp (fmt_expr a) (fmt_expr b) (fmt_expr c) in

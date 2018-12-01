@@ -34,7 +34,7 @@ let run_on_ast (ast : unit Ast.t) (function_names : string list) : unit =
         ]);
         Ir_to_air.all ir temp_dag)
       in
-      let cudas = List.mapi [List.hd_exn airs] ~f:(fun i air ->
+      let cudas = List.mapi airs ~f:(fun i air ->
         say (fun () -> [
           Printf.sprintf "AIR #%d" i;
           Air.Pretty_print.pp_t air;
@@ -50,8 +50,6 @@ let run_on_ast (ast : unit Ast.t) (function_names : string list) : unit =
           Printf.sprintf "Cuda:";
           Cuda_ir.fmt_gstmts cuda;
         ]);
-
-        exit 0;
       ) in
       ignore cudas
     end)

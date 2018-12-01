@@ -54,17 +54,19 @@ let annotate_array_view
   : A_air.buffer_info =
   let open A_air in
 
-  let app index t =
-    match index with
-    | Many_fn.Fun f -> f t
-    | Many_fn.Result arr -> Many_fn.Result (Expr.Index (arr, t))
-  in
+  let app index t = Many_fn.app index t ~default:(fun arr -> Expr.Index (arr, t)) in
 
   let app_many index ts = List.fold_left ts ~init:index ~f:app
   in
 
   let rec loop : Air.array_view -> buffer_info = function
-    | (_, Air.Array t) -> lookup_exn ctx t
+    | (_, Air.Array t) ->
+        let bi = lookup_exn ctx t in
+        { dim = bi.dim;
+          length = bi.length;
+          index = Many_fn.Result (Expr.Temp t);
+          typ = bi.typ;
+        }
     | (_, Air.Array_index (t1, t2)) ->
         let bi = lookup_exn ctx t1 in
         { dim = bi.dim - 1;
@@ -114,13 +116,12 @@ let annotate_array_view
           typ;
           filtered_lengths = hd.filtered_lengths;
           index =
-            let open Many_fn in
-            Fun (fun expr ->
+            Many_fn.Fun (fun expr ->
               let e =
-                let f bi = result_exn ~msg:"result_exn zip_with" (app bi.index expr)
+                let f bi = Many_fn.result_exn ~msg:"result_exn zip_with" (app bi.index expr)
                 in Expr.Call (op, List.map bis ~f)
               in
-              Result e);
+              Many_fn.Result e);
         }
   in
   loop av

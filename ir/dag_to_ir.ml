@@ -45,7 +45,7 @@ let run (dag_fun : Dag.dag_fun) (traversal : Dag_traversal.traversal) : Ir.t * T
     match Dag.view dag arg with
     | Literal (Bare_binop b) -> Ir.Operator.Binop b
     | Literal (Bare_unop u) -> Ir.Operator.Unop u
-    | Literal (Int32 _) | Parallel_block _
+    | Literal (Int32 _) | Literal (Float _) | Parallel_block _ 
     | Function _ | Binop _ | Unop _ | Input _ -> failwith "Not operator."
   in
 
@@ -56,6 +56,11 @@ let run (dag_fun : Dag.dag_fun) (traversal : Dag_traversal.traversal) : Ir.t * T
       | Ast.Reduce -> `Unary (fun op -> Ir.Reduce op)
       | Ast.Map -> `Unary (fun op -> Ir.Map op)
       | Ast.Zip_with -> `Unary (fun op -> Ir.Zip_with op)
+      | Ast.Tabulate -> `Nullary Ir.Tabulate
+      | Ast.Float_of_int -> `Nullary Ir.Float_of_int
+      | Ast.Int_of_float -> `Nullary Ir.Int_of_float
+      | Ast.Min -> `Nullary Ir.Min
+      | Ast.Max -> `Nullary Ir.Max
       | Ast.Dim n -> `Nullary (Ir.Dim n)
       | Ast.Transpose -> `Nullary Ir.Transpose
       | Ast.Fun_ident _ -> failwith "You didn't inline before trying to translate."

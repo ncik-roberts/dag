@@ -31,6 +31,19 @@ type binop =
   | MUL
   | DIV
   | MOD
+  | SHL
+  | SHR
+  | AND
+  | OR
+  | GTE
+  | LTE
+  | GT
+  | LT
+  | BITAND
+  | BITOR
+  | BITXOR
+  | EQ
+  | NEQ
   [@@deriving sexp]
 
 type unop =
@@ -38,15 +51,6 @@ type unop =
   | DECR
   | NEG
   | NOT
-  [@@deriving sexp]
-
-type cmpop =
-  | EQ
-  | NEQ
-  | GTE
-  | LTE
-  | GT
-  | LT
   [@@deriving sexp]
 
 type dim =
@@ -69,7 +73,7 @@ type cuda_expr =
   | KVar of kernel_variable
   | Unop of unop * cuda_expr
   | Binop of binop * cuda_expr * cuda_expr
-  | Cmpop of cmpop * cuda_expr * cuda_expr
+  | Cmpop of binop * cuda_expr * cuda_expr
   | FnCall of cuda_ident * (cuda_expr list)
   | Address of cuda_expr
   | Deref of cuda_expr
@@ -165,14 +169,19 @@ let fmt_binop = function
   | MUL -> "*"
   | DIV -> "/"
   | MOD -> "%"
-
-let fmt_cmpop = function
+  | SHL -> "<<"
+  | SHR -> ">>"
+  | AND -> "&&"
+  | OR  -> "||"
   | EQ  -> "=="
   | NEQ -> "!="
   | LT  -> "<"
   | LTE -> "<="
   | GT  -> ">"
   | GTE -> ">="
+  | BITAND -> "&"
+  | BITOR  -> "|"
+  | BITXOR -> "^"
 
 let fmt_dim = function
   | X -> "x"
@@ -198,7 +207,7 @@ let rec fmt_expr = function
   | Binop (b,e1,e2) ->
     sprintf "(%s %s %s)" (fmt_expr e1) (fmt_binop b) (fmt_expr e2)
   | Cmpop (c,e1,e2) ->
-    sprintf "(%s %s %s)" (fmt_expr e1) (fmt_cmpop c) (fmt_expr e2)
+    sprintf "(%s %s %s)" (fmt_expr e1) (fmt_binop c) (fmt_expr e2)
   | FnCall (n,args) ->
     sprintf "%s%s" (n) (comma_delineated (List.map ~f:fmt_expr args))
   | Address e -> sprintf "&(%s)" (fmt_expr e)

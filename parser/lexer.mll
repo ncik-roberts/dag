@@ -19,6 +19,14 @@ let decnumber s lexbuf = match Int32.of_string_opt s with
   | Some i -> P.CONST i
   | None -> errorf lexbuf "cannot parse integral constant `%s`"
 
+let hexnumber s lexbuf = match Int32.of_string_opt s with 
+  | Some i -> P.CONST i 
+  | None -> errorf lexbuf "cannot parse hexadecimal constant `%s`"
+
+let floatnumber s lexbuf = match float_of_string_opt s with
+  | Some i -> P.FLOATCONST i
+  | None -> errorf lexbuf "cannot parse float constant `%s`"
+
 let eof () =
   if !commentLevel > 0 then error "unterminated comment";
   P.EOF
@@ -27,6 +35,8 @@ let eof () =
 
 let id = ['A'-'Z' 'a'-'z' '_']['A'-'Z' 'a'-'z' '0'-'9' '_']*
 let decnum = ("0" | ['1'-'9'](['0'-'9']*))
+let hexnum = "0"['x' 'X']['0'-'9' 'a'-'f' 'A'-'F']+
+let fnum = decnum '.' (['0'-'9']*)
 let ws = [' ' '\t' '\r' '\011' '\012']
 
 rule initial =
@@ -52,6 +62,17 @@ rule initial =
   | '*' { P.TIMES }
   | '/' { P.DIV }
   | '%' { P.MOD }
+  | "<<" { P.LSHIFT }
+  | ">>" { P.RSHIFT }
+  | '<' { P.LT }
+  | "<=" { P.LTE }
+  | '>' { P.GT }
+  | ">=" { P.GTE }
+  | "&&" { P.LOGICAL_AND }
+  | "||" { P.LOGICAL_OR }
+  | '&' { P.BITWISE_AND }
+  | '|' { P.BITWISE_OR }
+  | '^' { P.BITWISE_XOR }
 
   | "return" { P.RETURN }
   | "parallel" { P.PARALLEL }

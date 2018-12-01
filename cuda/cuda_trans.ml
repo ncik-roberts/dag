@@ -91,6 +91,17 @@ let trans_binop = function
   | Ast.Times -> CU.MUL
   | Ast.Div -> CU.DIV
   | Ast.Mod -> CU.MOD
+  | Ast.Lshift -> CU.SHL
+  | Ast.Rshift -> CU.SHR
+  | Ast.And -> CU.AND
+  | Ast.Or -> CU.OR
+  | Ast.BitAnd -> CU.BITAND
+  | Ast.BitOr -> CU.BITOR
+  | Ast.BitXor -> CU.BITXOR
+  | Ast.Less -> CU.LT
+  | Ast.LessEq -> CU.LTE
+  | Ast.Greater -> CU.GT
+  | Ast.GreaterEq -> CU.GTE
 
 let trans_unop = function
   | Ast.Negate -> CU.NEG

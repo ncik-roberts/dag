@@ -8,19 +8,20 @@
 
 %token <string> IDENT
 %token <int32> CONST
+%token <float> FLOATCONST
 
 // Operators
 // %token DOT ARROW
 %token TIMES DIV MOD
 %token PLUS MINUS
-// %token LSHIFT RSHIFT
-// %token LT GT LTE GTE
+%token LSHIFT RSHIFT
+%token LT GT LTE GTE
 // %token EQUALS NOT_EQUALS
-// %token BITWISE_AND
-// %token BITWISE_XOR
-// %token BITWISE_OR
-// %token LOGICAL_AND
-// %token LOGICAL_OR
+%token BITWISE_AND
+%token BITWISE_XOR
+%token BITWISE_OR
+%token LOGICAL_AND
+%token LOGICAL_OR
 
 %token ASSIGN BIND
 %token SEMICOLON COMMA
@@ -35,6 +36,13 @@
 %token EOF
 
 // Precedences
+%left LOGICAL_OR
+%left LOGICAL_AND
+%left BITWISE_OR
+%left BITWISE_XOR
+%left BITWISE_AND
+%left LT LTE GT GTE
+%left LSHIFT RSHIFT
 %left PLUS MINUS
 %left TIMES DIV MOD
 %nonassoc UNARY_MINUS
@@ -158,6 +166,8 @@ expr :
 _expr :
   | i = CONST;
       { Ast.Const i }
+  | i = FLOATCONST;
+      { Ast.Float i }
   | ident = IDENT;
       { Ast.Variable ident }
   | call_ident = IDENT;
@@ -168,7 +178,12 @@ _expr :
           | "reduce" -> Ast.Reduce
           | "transpose" -> Ast.Transpose
           | "map" -> Ast.Map
+          | "max" -> Ast.Max
+          | "min" -> Ast.Min
           | "zipWith" -> Ast.Zip_with
+          | "tabulate" -> Ast.Tabulate
+          | "float_of_int" -> Ast.Float_of_int
+          | "int_of_float" -> Ast.Int_of_float
           | s ->
             let open Core in
             let dim =
@@ -216,6 +231,28 @@ binop :
       { Ast.Div }
   | MOD;
       { Ast.Mod }
+  | LSHIFT; 
+      { Ast.Lshift }
+  | RSHIFT;
+      { Ast.Rshift }
+  | LOGICAL_AND;
+      { Ast.And }
+  | LOGICAL_OR;
+      { Ast.Or }
+  | BITWISE_OR;
+      { Ast.BitOr }
+  | BITWISE_AND;
+      { Ast.BitAnd }
+  | BITWISE_XOR;
+      { Ast.BitXor }
+  | LT;
+      { Ast.Less }
+  | LTE;
+      { Ast.LessEq }
+  | GT;
+      { Ast.Greater }
+  | GTE;
+      { Ast.GreaterEq }
   ;
 
 /**********************************

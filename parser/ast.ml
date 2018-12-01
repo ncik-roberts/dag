@@ -23,6 +23,17 @@ type binop =
   | Times
   | Div
   | Mod
+  | Lshift
+  | Rshift
+  | And
+  | Or
+  | BitAnd
+  | BitOr
+  | BitXor
+  | Less
+  | Greater
+  | LessEq
+  | GreaterEq
   [@@deriving sexp]
 
 type 'a stmt =
@@ -45,6 +56,11 @@ and call_name =
   | Map
   | Transpose
   | Zip_with
+  | Tabulate
+  | Float_of_int
+  | Int_of_float
+  | Min
+  | Max
   | Dim of int
   | Fun_ident of ident
   [@@deriving sexp]
@@ -73,6 +89,7 @@ and 'a expr' =
       binary_operand2 : 'a expr;
     }
   | Const of int32
+  | Float of float
   | Variable of ident
   [@@deriving sexp]
 
@@ -84,3 +101,6 @@ type 'a fun_defn = {
 } [@@deriving sexp]
 
 type 'a t = 'a fun_defn list
+
+let x = 
+  Float.of_string

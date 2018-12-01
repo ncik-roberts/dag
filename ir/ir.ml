@@ -11,6 +11,11 @@ type fun_call =
   | Reduce of Operator.t
   | Map of Operator.t
   | Zip_with of Operator.t
+  | Tabulate 
+  | Float_of_int
+  | Int_of_float
+  | Min
+  | Max
   | Transpose
   | Dim of int
   [@@deriving sexp]

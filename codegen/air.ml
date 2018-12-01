@@ -10,6 +10,7 @@ and array_view' =
   | Array_index of Temp.t * Temp.t
   | Zip_with of Ir.Operator.t * array_view list
   | Reverse of array_view
+  | Tabulate of array_view
   | Transpose of array_view
   [@@deriving sexp]
 
@@ -84,33 +85,34 @@ end = struct
 
   let rec pp_array_view (_, av) = pp_array_view' av
   and pp_array_view' = function
-    | Array_index (t1, t2) -> Printf.sprintf "%%%d[%%%d]" (Temp.to_int t1) (Temp.to_int t2)
-    | Array t -> Printf.sprintf "%%%d" (Temp.to_int t)
+    | Array_index (t1, t2) -> sprintf "%%%d[%%%d]" (Temp.to_int t1) (Temp.to_int t2)
+    | Array t -> sprintf "%%%d" (Temp.to_int t)
     | Zip_with (o, avs) ->
-        Printf.sprintf "zip_with(%s, %s)"
+        sprintf "zip_with(%s, %s)"
           (Sexp.to_string_hum (Ir.Operator.sexp_of_t o))
           (String.concat ~sep:", " (List.map avs ~f:pp_array_view))
-    | Reverse av -> Printf.sprintf "reverse(%s)" (pp_array_view av)
-    | Transpose av -> Printf.sprintf "transpose(%s)" (pp_array_view av)
+    | Reverse av -> sprintf "reverse(%s)" (pp_array_view av)
+    | Tabulate av -> sprintf "tabulate(%s)" (pp_array_view av)
+    | Transpose av -> sprintf "transpose(%s)" (pp_array_view av)
 
   let rec pp_operand = function
     | Const c -> Int32.to_string_hum c
-    | Temp t -> Printf.sprintf "%%%d" (Temp.to_int t)
-    | Index (a, i) -> Printf.sprintf "%%%d[%%%d]" (Temp.to_int a) (Temp.to_int i)
-    | Dim (i, av) -> Printf.sprintf "dim%d(%s)" i (pp_array_view av)
+    | Temp t -> sprintf "%%%d" (Temp.to_int t)
+    | Index (a, i) -> sprintf "%%%d[%%%d]" (Temp.to_int a) (Temp.to_int i)
+    | Dim (i, av) -> sprintf "dim%d(%s)" i (pp_array_view av)
 
   let pp_dest = function
-    | Ir.Dest t -> Printf.sprintf "%%%d" (Temp.to_int t)
+    | Ir.Dest t -> sprintf "%%%d" (Temp.to_int t)
     | Ir.Return _ -> "ret"
 
   let rec pp_par_stmt ?(indent="") = function
     | Parallel (dst, id, tavs, seq_stmt) ->
-        Printf.sprintf "%s%s <- parallel[%d](%s) {\n%s\n%s}"
+        sprintf "%s%s <- parallel[%d](%s) {\n%s\n%s}"
           indent
           (pp_dest dst)
           (Id.to_int id)
           (String.concat ~sep:","
-             (List.map tavs ~f:(fun (t, t_idx, av) -> Printf.sprintf "(%%%d, %%%d) <- %s"
+             (List.map tavs ~f:(fun (t, t_idx, av) -> sprintf "(%%%d, %%%d) <- %s"
                (Temp.to_int t) (Temp.to_int t_idx) (pp_array_view av))))
           (pp_seq_stmt ~indent:(indent ^ "  ") seq_stmt)
           indent
@@ -120,33 +122,33 @@ end = struct
   and pp_seq_stmt ?(indent="") = function
     | Seq_stmt seq_stmt ->
         pp_stmt ~prefix:"s" ~indent (pp_seq_stmt ~indent:(indent ^ "  ")) seq_stmt
-    | Binop (dst, binop, src1, src2) -> Printf.sprintf "%s%s <- %s %s %s" indent (pp_dest dst)
+    | Binop (dst, binop, src1, src2) -> sprintf "%s%s <- %s %s %s" indent (pp_dest dst)
         (pp_operand src1)
         (Sexp.to_string_hum (Ast.sexp_of_binop binop))
         (pp_operand src2)
-    | Unop (dst, unop, src) -> Printf.sprintf "%s%s <- %s%s" indent (pp_dest dst)
+    | Unop (dst, unop, src) -> sprintf "%s%s <- %s%s" indent (pp_dest dst)
         (Sexp.to_string_hum (Ast.sexp_of_unop unop))
         (pp_operand src)
-    | Assign (dst, src) -> Printf.sprintf "%s%s <- %s" indent (pp_dest dst)
+    | Assign (dst, src) -> sprintf "%s%s <- %s" indent (pp_dest dst)
         (pp_operand src)
   and pp_stmt : type t. ?indent:string -> prefix:string -> (t -> string) -> t stmt -> string =
     fun ?(indent="") ~prefix pp -> function
     | Nop -> indent ^ prefix ^ "nop"
     | Block stmts -> String.concat ~sep:"\n" (List.map ~f:pp stmts)
-    | Run (dst, av) -> Printf.sprintf "%s%s <- %srun(%s)" indent (pp_dest dst) prefix (pp_array_view av)
+    | Run (dst, av) -> sprintf "%s%s <- %srun(%s)" indent (pp_dest dst) prefix (pp_array_view av)
     | For (dst, (t, t_idx, av), stmt) ->
-        Printf.sprintf "%s%s <- %sfor ((%%%d, %%%d) <- %s) {\n%s\n%s}" indent (pp_dest dst) prefix
+        sprintf "%s%s <- %sfor ((%%%d, %%%d) <- %s) {\n%s\n%s}" indent (pp_dest dst) prefix
         (Temp.to_int t) (Temp.to_int t_idx) (pp_array_view av)
         (pp stmt)
         indent
     | Reduce (dst, op, id, (_, av)) ->
-        Printf.sprintf "%s%s <- %sreduce(%s, %s, %s)" indent (pp_dest dst) prefix
+        sprintf "%s%s <- %sreduce(%s, %s, %s)" indent (pp_dest dst) prefix
           (Sexp.to_string_hum (Ir.Operator.sexp_of_t op))
           (pp_operand id)
           (pp_array_view av)
 
   let pp_t { params; body; } =
-    Printf.sprintf "(%s) {\n%s\n}"
+    sprintf "(%s) {\n%s\n}"
       (String.concat ~sep:", " (List.map params ~f:(fun (p) -> "%" ^ string_of_int (Temp.to_int p))))
       (pp_par_stmt ~indent:"  " body)
 

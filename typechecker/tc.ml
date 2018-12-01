@@ -5,6 +5,7 @@ module IdentMap = String.Map
 
 type typ =
   | Int
+  | Float
   | Struct of ident
   | Array of typ
   | Pointer of typ
@@ -115,6 +116,32 @@ let check_fun (ctx : t) (fun_name : Ast.call_name) (arg_types : typ list) : typ 
         | [ Array (Array typ); ] -> Array (Array typ)
         | _ -> failwith "Invalid argument to transpose."
       end
+  | Ast.Tabulate -> 
+      begin
+        match arg_types with 
+        | [ typ1; typ2; typ3 ] when 
+          typ1 = typ2 && typ2 = typ3
+          && typ1 = Int -> typ1
+        | _ -> failwith "Invalid arguments to Tabulate."
+      end
+  | (Ast.Min|Ast.Max) ->
+      begin
+      match arg_types with
+      | [typ1; typ2 ] when typ1 = typ2 -> typ1
+      | _ -> failwith "Invalid arguments to min/max"
+      end
+  | Ast.Float_of_int ->
+      begin
+      match arg_types with
+      | [Int] -> Float
+      | _ -> failwith "Invalid arguments to I -> F"
+      end
+  | Ast.Int_of_float ->
+      begin
+      match arg_types with 
+      | [Float] -> Int
+      | _ -> failwith "Invalid arguments to F -> I"
+      end
   | Ast.Fun_ident fun_name ->
       begin
         match IdentMap.find ctx.fun_ctx fun_name with
@@ -124,6 +151,7 @@ let check_fun (ctx : t) (fun_name : Ast.call_name) (arg_types : typ list) : typ 
             else failwith "Invalid argument types."
         | None -> failwithf "Unknown function `%s`" fun_name ()
       end
+  
 
 let rec check_type (ctx : t) (ast : Ast.typ) : typ = match ast with
   | Ast.Ident "int" -> Int
@@ -132,6 +160,7 @@ let rec check_type (ctx : t) (ast : Ast.typ) : typ = match ast with
 
 let rec check_expr (ctx : t) (ast : unit Ast.expr) : typ Ast.expr = match snd ast with
   | Ast.Const c -> (Int, Ast.Const c)
+  | Ast.Float f -> (Float, Ast.Float f)
   | Ast.Variable ident ->
       let typ = Option.value_exn (IdentMap.find ctx.local_var_ctx ident)
         ~error:(Error.of_exn (Failure (Printf.sprintf "Unbound variable `%s`." ident)))

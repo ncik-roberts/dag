@@ -35,10 +35,16 @@ let make_array_view
     | Ir.Zip_with f, [ `Array_view view1; `Array_view view2; ] -> Air.Zip_with (f, [ view1; view2; ])
     | Ir.Transpose, [ `Array_view view ] -> Air.Transpose view
     | Ir.Map f, [ `Array_view view ] -> Air.Zip_with (f, [ view ])
+    | Ir.Tabulate, [`Array_view view ] -> Air.Tabulate view  
+    | Ir.Int_of_float ,_ -> failwith "I <- F is not an array view."
+    | Ir.Float_of_int ,_ -> failwith "F <- I is not an array view."
     | Ir.Reduce _, _ -> failwith "Reduce is not an array view."
     | Ir.Dim _, _ -> failwith "Dim is not an array view."
+    | Ir.Min , _ -> failwith "Min is not an array view."
+    | Ir.Max , _ -> failwith "Max is not an array view."
     | Ir.Zip_with _, _ -> failwith "Invalid zipwith."
     | Ir.Transpose, _ -> failwith "Invalid transpose."
+    | Ir.Tabulate, _ -> failwith "Invalid tabulate."
     | Ir.Map _, _ -> failwith "Invalid map."
 
 let canonicalize (ctx : context) : Ir.operand -> 'a = function

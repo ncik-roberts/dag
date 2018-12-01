@@ -64,7 +64,6 @@ let rec trans_type (typ : Tc.typ) : CU.cuda_type =
 and remove_arrays =
   function Tc.Array typ -> remove_arrays typ | typ -> trans_type typ
 
-
 (* Translate an AIR parameter list into a list of CUDA parameters.
  *
  * Notice that `temp_name t` allows us to uniquely determine the name of a temp at

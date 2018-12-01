@@ -54,11 +54,7 @@ let annotate_array_view
   : A_air.buffer_info =
   let open A_air in
 
-  let app index t =
-    match index with
-    | Many_fn.Fun f -> f t
-    | Many_fn.Result arr -> Many_fn.Result (Expr.Index (arr, t))
-  in
+  let app index t = Many_fn.app index t ~default:(fun arr -> Expr.Index (arr, t)) in
 
   let app_many index ts = List.fold_left ts ~init:index ~f:app
   in

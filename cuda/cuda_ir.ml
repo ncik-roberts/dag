@@ -124,6 +124,7 @@ and cuda_stmt =
     (* Launch dimension, blocks/thread, kernel, arguments *)
   | Launch of grid_dim * grid_dim * cuda_func * cuda_expr list
 
+  | Return of cuda_expr
   | Free of cuda_ident
   | Sync
   | Nop
@@ -237,11 +238,12 @@ let rec fmt_block n block =
    let sp = str_depth n in
    let body = List.map block ~f:(fun s -> fmt_stmt (n+1) s^";\n") in
    let body' = String.concat body in
-   "{\n"^body'^sp^"}"
+   " {\n"^body'^sp^"}"
 
 and fmt_stmt n stm =
  let sp = str_depth n in
  match stm with
+ | Return exp -> sprintf "%sreturn %s" sp (fmt_expr exp)
  | DeclareAssign (typ, id, exp) ->
    sprintf "%s%s %s = %s" sp (fmt_typ typ) id (fmt_expr exp)
 
@@ -268,8 +270,8 @@ and fmt_stmt n stm =
  | Expression e -> sp ^ fmt_expr e
 
  | Loop ((f, e, a), b) ->
-   let guard = sprintf "%sfor(%s; %s; %s)\n" sp (fmt_stmt 0 f) (fmt_expr e) (fmt_stmt 0 a) in
-   guard ^ sp ^ fmt_block n b
+   let guard = sprintf "%sfor(%s; %s; %s)" sp (fmt_stmt 0 f) (fmt_expr e) (fmt_stmt 0 a) in
+   guard ^ fmt_block n b
 
  | Condition (c, b1, b2) ->
    let guard = sprintf "%sif(%s)\n" sp (fmt_expr c) in
@@ -283,15 +285,15 @@ and fmt_stmt n stm =
  | Malloc (typ, dest, size) -> sprintf "%s%s %s = malloc(%s)" sp (fmt_typ typ) (dest) (fmt_expr size)
 
  | Memcpy (dest, src, size) ->
-   sprintf "%smemcpy(%s,%s,%s)" sp (fmt_expr dest) (fmt_expr src) (fmt_expr src)
+   sprintf "%smemcpy(%s, %s, %s)" sp (fmt_expr dest) (fmt_expr src) (fmt_expr src)
 
  | Transfer (dest, src, size, ttyp) ->
-   sprintf "%scudaMemcpy(%s,%s,%s,%s)" sp (fmt_expr dest)
+   sprintf "%scudaMemcpy(%s, %s, %s, %s)" sp (fmt_expr dest)
    (fmt_expr src) (fmt_expr src) (Tuple2.uncurry fmt_mem_tfr ttyp)
 
  | Launch ((x, y, z), (a, b, c), { name }, args) ->
-   let block = sprintf "%sdim3 dimBlock(%s,%s,%s);\n" sp (fmt_expr a) (fmt_expr b) (fmt_expr c) in
-   let grid = sprintf "%sdim3 dimGrid(%s,%s,%s);\n" sp (fmt_expr x) (fmt_expr y) (fmt_expr z) in
+   let block = sprintf "%sdim3 dimBlock(%s, %s, %s);\n" sp (fmt_expr a) (fmt_expr b) (fmt_expr c) in
+   let grid = sprintf "%sdim3 dimGrid(%s, %s, %s);\n" sp (fmt_expr x) (fmt_expr y) (fmt_expr z) in
    let launch = sprintf "%s%s<<<dimGrid,dimBlock>>>%s" sp name (comma_delineated (List.map ~f:fmt_expr args))
    in block ^ grid ^ launch
 
@@ -301,10 +303,10 @@ and fmt_stmt n stm =
 
 let fmt_func f =
   let params_str = List.map f.params ~f:(fun (t, id) -> fmt_typ t ^ " " ^ id)
-    |> String.concat ~sep:","
+    |> String.concat ~sep:", "
     |> sprintf "(%s)"
   in
-  let header = sprintf ("%s %s %s%s")
+  let header = sprintf ("%s%s %s%s")
   (fmt_mem_hdr f.typ) (fmt_typ f.ret) f.name params_str in
   let body = fmt_block 0 f.body in
   "\n" ^ header ^ body ^ "\n"

@@ -11,7 +11,7 @@ let failwith n = failwith ("AIR -> CUDA : " ^ n)
 
 type context = {
   result : Ano.result;
-  lvalue : CU.cuda_expr; (* this is an lvalue *)
+  lvalue : CU.cuda_expr option; (* this is an lvalue *)
 
   (* Temps indicating the dimensions of parameters. *)
   dims_of_params : Temp.t list;
@@ -40,11 +40,17 @@ let temp_to_var (t : Temp.t) : CU.cuda_expr = CU.Var (temp_name t)
 
 let next_var () : CU.cuda_expr = temp_to_var (Temp.next Tc.Int ())
 
-(* on_return is the lvalue to use upon encountering a return stmt. *)
 let dest_to_lvalue (ctx : context) (dest : Ir.dest) : CU.cuda_expr =
   match dest with
-  | Ir.Return _ -> ctx.lvalue
+  | Ir.Return _ -> Option.value_exn ctx.lvalue
   | Ir.Dest t -> temp_to_var t
+
+(* on_return is the lvalue to use upon encountering a return stmt. *)
+let dest_to_stmt (ctx : context) (dest : Ir.dest) (rhs : CU.cuda_expr) : CU.cuda_stmt =
+  match dest, ctx.lvalue with
+  | Ir.Return _, None -> CU.Return rhs
+  | Ir.Return _, Some lhs -> CU.Assign (lhs, rhs)
+  | Ir.Dest t, _ -> CU.Assign (temp_to_var t, rhs)
 
 (* These flatten out any nesting. We're presuming the nd_array struct takes care of it. *)
 let rec typ_name (typ : Tc.typ) : string =
@@ -203,7 +209,7 @@ let rec trans_a_stmt : type a. (context -> a -> CU.cuda_stmt list) -> context ->
         let body =
           (* The lvalue for the for body is an index into the destination array. *)
           (* Translate the body under the new lvalue. *)
-          let ctx' = { ctx with lvalue = CU.(Index (dest_array, temp_to_var t_idx)) } in
+          let ctx' = { ctx with lvalue = Some CU.(Index (dest_array, temp_to_var t_idx)) } in
           continuation ctx' stmt in
         [ CU.Loop (hdr, body); ]
 
@@ -261,7 +267,7 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       in
       [ CU.DeclareAssign (CU.Integer, temp_name lvalue, trans_op init);
         CU.Loop (hdr, [assign_stmt]);
-        CU.Assign (dest_to_lvalue ctx dest, temp_to_var lvalue);
+        dest_to_stmt ctx dest (temp_to_var lvalue);
       ]
   | _ -> trans_seq_stmt_stmt ctx seq_stmt
 
@@ -390,7 +396,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
                   CU.Assign (acc, CU.Binop (CU.DIV, acc, len));
                 ]
               );
-              trans_seq_stmt { ctx with lvalue; } body;
+              trans_seq_stmt { ctx with lvalue = Some lvalue; } body;
             ]
           end;
       }) in
@@ -437,7 +443,7 @@ and trans_array_view (ctx : context) (dest, loop_temp, index_fn) : CU.cuda_stmt 
 
 let rec extract_kernel_launches : CU.cuda_stmt list -> CU.cuda_func list =
   List.fold_left ~init:[] ~f:(fun kernel_launches -> function
-    | CU.Sync | CU.Nop | CU.DeclareArray _ | CU.DeclareAssign _ | CU.Assign _
+    | CU.Return _ | CU.Sync | CU.Nop | CU.DeclareArray _ | CU.DeclareAssign _ | CU.Assign _
     | CU.AssignOp _ | CU.Cuda_malloc _ | CU.Malloc _ | CU.Free _ | CU.Transfer _
     | CU.Expression _ | CU.Memcpy _ -> kernel_launches
     | CU.Launch (_, _, cuda_func, _) -> cuda_func :: kernel_launches
@@ -453,20 +459,12 @@ let rec extract_kernel_launches : CU.cuda_stmt list -> CU.cuda_func list =
  *)
 let trans (program : Air.t) (result : Ano.result) : CU.cuda_gstmt list =
   let params = trans_params Ano.(result.params) in
-  let lvalue = match Ano.(result.out_param) with
-    (* When there is an output buffer, this is the lvalue that an Air `return`
-     * stmt should write into. *)
-    | Some t -> t
-
-    (* Just make up a new temp in the case that there is no buffer
-     * to write into. *)
-    | None -> Temp.next Tc.Int ()
-  in
+  let lvalue = Ano.(result.out_param) in
   let allocation_method = Temp.Table.create () in
   let body = trans_par_stmt {
     result;
     allocation_method;
-    lvalue = temp_to_var lvalue;
+    lvalue = Option.map ~f:temp_to_var lvalue;
     dims_of_params = List.concat_map Ano.(result.params) ~f:(function
       | Ano.Param.Array (_, dims) -> dims
       | Ano.Param.Not_array _ -> []);
@@ -489,7 +487,7 @@ let trans (program : Air.t) (result : Ano.result) : CU.cuda_gstmt list =
             Size_of (remove_arrays typ)))
       in
       match Temp.Table.find allocation_method t with
-      | None -> f t (fun (a, b, c) -> [ CU.Malloc (a, b, c) ])
+      | None -> []
       | Some `Just_device -> f t (fun (a, b, c) -> [ CU.Cuda_malloc (a, b, c) ])
       | Some `Host_and_device t' -> f t (fun (a, b, c) -> f t' (fun (a', b', c') -> [ CU.Malloc (a, b, c); CU.Cuda_malloc (a', b', c'); ])))
   in
@@ -499,7 +497,11 @@ let trans (program : Air.t) (result : Ano.result) : CU.cuda_gstmt list =
     gdecls;
     List.return
       CU.({ typ = Host;
-            ret = Void;
+            ret = begin
+              match Ano.(result.out_param) with
+              | None -> trans_type Air.(program.return_type)
+              | Some _ -> Void
+            end;
             name = "dag_" ^ Air.(program.fn_name);
             params;
             body = malloc'ing @ body; });

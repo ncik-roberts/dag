@@ -249,7 +249,7 @@ and fmt_stmt n stm =
 
  | DeclareArray (mem, typ, id, sizes) ->
    let arr_exps = String.concat(List.map sizes ~f:(fun e -> "["^fmt_expr e^"]")) in
-   sprintf "%s %s %s %s %s" sp (fmt_mem_hdr mem) (fmt_typ typ) id arr_exps
+   sprintf "%s%s %s %s %s" sp (fmt_mem_hdr mem) (fmt_typ typ) id arr_exps
 
 (* Should we model structs as pointers to structs? *)
 (* That would make host/device transfer much more complicated. *)
@@ -306,7 +306,7 @@ let fmt_func f =
     |> String.concat ~sep:", "
     |> sprintf "(%s)"
   in
-  let header = sprintf ("%s%s %s%s")
+  let header = sprintf ("%s %s %s%s")
   (fmt_mem_hdr f.typ) (fmt_typ f.ret) f.name params_str in
   let body = fmt_block 0 f.body in
   "\n" ^ header ^ body ^ "\n"
@@ -355,9 +355,9 @@ let transpose_kernel : cuda_func = {
     Assign (Var "y", Binop (ADD, Binop (MUL, KVar (BlockIdx X), Var "TILE_DIM"), KVar (ThreadIdx Y)));
 
     Loop
-      ((DeclareAssign(Integer,"j",IConst 0L),
-        Cmpop(LT,Var "j",Var "TILE_DIM"),
-        AssignOp(ADD,Var "j",Var "BLOCK_ROWS")),
+      ((DeclareAssign (Integer, "j", IConst 0L),
+        Cmpop (LT,Var "j", Var "TILE_DIM"),
+        AssignOp (ADD, Var "j", Var "BLOCK_ROWS")),
        [ Assign
            (Index (Var "result", Binop (ADD, Binop (MUL, Binop (ADD, Var "y", Var "j"), Var "width"), Var "x")),
             Index (Index (Var "tile", KVar (ThreadIdx X)), Binop(ADD,KVar (ThreadIdx Y), Var "j")));

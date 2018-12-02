@@ -65,12 +65,13 @@ let rec trans_type (typ : Tc.typ) : CU.cuda_type =
   | Tc.Int -> CU.Integer
   | Tc.Float -> CU.Float
   | Tc.Struct i -> CU.Struct i
-  | Tc.Array t -> CU.Pointer (trans_type t)
+  | Tc.Array t -> CU.Pointer (remove_arrays t)
   | _ -> failwith "Don't currently support other types"
 
 (* Remove outermost arrays. *)
-let rec remove_arrays =
+and remove_arrays =
   function Tc.Array typ -> remove_arrays typ | typ -> trans_type typ
+
 
 (* Translate an AIR parameter list into a list of CUDA parameters.
  *
@@ -154,20 +155,8 @@ let rec trans_len_expr : Length_expr.t -> CU.cuda_expr = function
   | Length_expr.Temp t -> temp_to_var t
   | Length_expr.Mult (e1, e2) -> CU.Binop (CU.MUL, trans_len_expr e1, trans_len_expr e2)
 
-let rec trans_expr : Expr.t -> CU.cuda_expr = function
-  | Expr.Temp t -> temp_to_var t
-  | Expr.Const i -> CU.IConst (Int64.of_int32 i)
-  | Expr.Index (arr, i) -> CU.Index (trans_expr arr, trans_expr i)
-  | Expr.Call (op, xs) as e ->
-  let open Ir.Operator in
-  match op, xs with
-  | Binop b, [ e1; e2; ] -> CU.Binop (trans_binop b, trans_expr e1, trans_expr e2)
-  | Unop u, [ e1; ] -> CU.Unop (trans_unop u, trans_expr e1)
-  | _ -> failwithf "Invalid: %s." (Sexp.to_string_hum (Expr.sexp_of_t e)) ()
-
-
-let app index t = Many_fn.app index t ~default:(fun arr -> Expr.Index (arr, t))
-let rec app_expr f e = Many_fn.compose trans_expr (app f e)
+let build_index_expr lens init =
+  List.fold_left lens ~init ~f:(fun acc x -> CU.Binop (CU.MUL, acc, x))
 
 (* Find a buffer info's length. *)
 let get_lengths (ctx : context) (t : Temp.t) : CU.cuda_expr list =
@@ -175,13 +164,48 @@ let get_lengths (ctx : context) (t : Temp.t) : CU.cuda_expr list =
   | Some inf -> List.map ~f:trans_len_expr Ano.(inf.length)
   | None -> failwithf "Couldn't find buffer size for `%d`" (Temp.to_int t) ()
 
+let rec trans_index_expr
+  (ctx : context)
+  (arr : Expr.t)
+  (i : Expr.t) : CU.cuda_expr * CU.cuda_expr * CU.cuda_expr list =
+  match arr with
+  | Expr.Index (arr', j) ->
+    begin
+      match trans_index_expr ctx arr' j with
+      | (result_arr, index_expr, _ :: lens) ->
+          let index_expr' = CU.Binop (CU.ADD, index_expr, build_index_expr lens (trans_expr ctx i)) in
+          (result_arr, index_expr', lens)
+      | _ -> failwith "No more lengths :("
+    end
+  | Expr.Temp t ->
+      let lengths = List.tl_exn (get_lengths ctx t) in
+      (temp_to_var t, build_index_expr lengths (trans_expr ctx i), lengths)
+  | _ -> failwith "No."
+
+and trans_expr : context -> Expr.t -> CU.cuda_expr = fun ctx -> function
+  | Expr.Temp t -> temp_to_var t
+  | Expr.Const i -> CU.IConst (Int64.of_int32 i)
+  | Expr.Index (arr, i) ->
+      let (arr, i, _) = trans_index_expr ctx arr i in
+      CU.Index (arr, i)
+  | Expr.Call (op, xs) as e ->
+  let open Ir.Operator in
+  match op, xs with
+  | Binop b, [ e1; e2; ] -> CU.Binop (trans_binop b, trans_expr ctx e1, trans_expr ctx e2)
+  | Unop u, [ e1; ] -> CU.Unop (trans_unop u, trans_expr ctx e1)
+  | _ -> failwithf "Invalid: %s." (Sexp.to_string_hum (Expr.sexp_of_t e)) ()
+
+
+let app index t = Many_fn.app index t ~default:(fun arr -> Expr.Index (arr, t))
+let rec app_expr ctx f e = Many_fn.compose (trans_expr ctx) (app f e)
+
 let get_length ctx t = List.hd_exn (get_lengths ctx t)
 
 let get_index (ctx : context) (t : Temp.t) : Temp.t -> (Expr.t, CU.cuda_expr) Many_fn.t =
   match Map.find Ano.(ctx.result.buffer_infos) t with
   | Some inf ->
       (* Lookup function *)
-      fun t -> app_expr Ano.(inf.index) (Expr.Temp t)
+      fun t -> app_expr ctx Ano.(inf.index) (Expr.Temp t)
   | None -> failwithf "Couldn't find buffer index for `%d`" (Temp.to_int t) ()
 
 (* Create a loop that iterates over the buffer t. *)
@@ -331,7 +355,9 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
 
       (* Mark additional buffers as just-device. *)
       let additional_buffers = Set.to_list Ano.(kernel_info.additional_buffers) in
-      List.iter additional_buffers ~f:(fun key -> Temp.Table.add_exn ctx.allocation_method ~key ~data:`Just_device);
+      List.iter additional_buffers ~f:(fun key ->
+        try Temp.Table.add_exn ctx.allocation_method ~key ~data:`Just_device
+        with _ -> failwith "addtl buffers just device");
 
       (* In addition to the array view args, also get the args for the
        * additional buffers and free variables to pass to the kernel launch.
@@ -370,7 +396,9 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
 
       (* Total length of all the things we're parallel over. *)
       let bound_temps = List.map ~f:Tuple3.get1 bound_array_views in
-      List.iter bound_temps ~f:(fun key -> Temp.Table.add_exn ctx.allocation_method ~key ~data:`Unallocated);
+      List.iter bound_temps ~f:(fun key ->
+        try Temp.Table.add_exn ctx.allocation_method ~key ~data:`Unallocated
+        with _ -> failwithf "unallocated bound_temps %d" (Temp.to_int key) ());
       let lengths = List.map ~f:(get_length ctx) bound_temps in
       let total_length = build_cached_reduce_expr CU.MUL lengths in
 

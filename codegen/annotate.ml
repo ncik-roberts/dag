@@ -65,6 +65,7 @@ let annotate_array_view
         { dim = bi.dim;
           length = bi.length;
           index = Many_fn.Result (Expr.Temp t);
+          filtered_lengths = bi.filtered_lengths;
           typ = bi.typ;
         }
     | (_, Air.Array_index (t1, t2)) ->
@@ -130,6 +131,13 @@ let rec used_of_length_expr : Length_expr.t -> Temp.Set.t =
   function
     | Length_expr.Temp t -> Temp.Set.singleton t
     | Length_expr.Mult (e1, e2) -> Set.union (used_of_length_expr e1) (used_of_length_expr e2)
+
+let rec used_of_array_view (ctx : context) (av : Air.array_view) : Temp.Set.t = match snd av with
+    | Air.Zip_with (_, avs) -> List.fold_left avs ~init:Temp.Set.empty ~f:(fun s av -> Set.union s (used_of_array_view ctx av))
+    | Air.Array t -> Temp.Set.singleton t
+    | Air.Array_index _ -> Temp.Set.empty (* don't ask *)
+    | Air.Reverse av -> used_of_array_view ctx av
+    | Air.Transpose av -> used_of_array_view ctx av
 
 let used_of_operand (ctx : context) : Air.operand -> Temp.Set.t =
   function
@@ -253,8 +261,9 @@ and annotate_stmt
         -> kernel_context * context = fun kernel_ctx ctx recur stmt ->
   match stmt with
   | Air.Run (Ir.Return t, av) ->
+      let used = used_of_array_view ctx av in
       let buffer_info = annotate_array_view ctx av in
-      (kernel_ctx,
+      ({ kernel_ctx with used; return_buffer_info = Some buffer_info },
        { ctx with result = A_air.
            { ctx.result with
                buffer_infos =
@@ -262,11 +271,13 @@ and annotate_stmt
            }
        })
   | Air.Run (Ir.Dest t, av) ->
+      let used = used_of_array_view ctx av in
       let defined = Temp.Set.singleton t in
       let buffer_info = annotate_array_view ctx av in
-      ({ kernel_ctx with
-           defined = Set.union defined kernel_ctx.defined;
-           additional_buffers = Set.add kernel_ctx.additional_buffers t;
+      ({ used = Set.union used kernel_ctx.used;
+         defined = Set.union defined kernel_ctx.defined;
+         additional_buffers = Set.add kernel_ctx.additional_buffers t;
+         return_buffer_info = None;
        },
        { ctx with result = A_air.
            { ctx.result with
@@ -284,13 +295,18 @@ and annotate_stmt
         let (_, index, _) = build_length_function typ in
         A_air.{ buffer_info1 with index = Many_fn.Fun (fun e -> Many_fn.Result (index (Expr.Temp (Ir.temp_of_dest dest)) e)); }
       in
-      ({ kernel_ctx with
-           defined = Set.union defined kernel_ctx.defined;
-           additional_buffers =
-             (match dest with
-              | Ir.Return _ -> Fn.id
-              | Ir.Dest t -> Fn.flip Set.add t)
-             kernel_ctx.additional_buffers;
+      ({ used = kernel_ctx.used;
+         defined = Set.union defined kernel_ctx.defined;
+         additional_buffers =
+           (match dest with
+            | Ir.Return _ -> Fn.id
+            | Ir.Dest t -> Fn.flip Set.add t)
+           kernel_ctx.additional_buffers;
+         return_buffer_info = begin
+           match dest with
+           | Ir.Return _ -> Some my_buffer_info
+           | Ir.Dest _ -> None
+        end;
        },
        { ctx with result = A_air.
            { ctx.result with
@@ -332,7 +348,7 @@ and annotate_stmt
        })
   | Air.Reduce (dest, _, operand, (t, av)) ->
       let defined = defined_of_dest dest in
-      let used = used_of_operand ctx operand in
+      let used = Set.union (used_of_operand ctx operand) (used_of_array_view ctx av) in
       let buffer_info = annotate_array_view ctx av in
       ({ defined = Set.union defined kernel_ctx.defined;
          used = Set.union used kernel_ctx.used;

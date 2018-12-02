@@ -12,6 +12,7 @@ let failwith n = failwith ("AIR -> CUDA : " ^ n)
 type context = {
   result : Ano.result;
   lvalue : CU.cuda_expr option; (* this is an lvalue *)
+  out_param : Temp.t option;
 
   (* Temps indicating the dimensions of parameters. *)
   dims_of_params : Temp.t list;
@@ -353,6 +354,14 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
               new_temp)
       in
 
+      let device_dest_temp =
+        let new_temp = Temp.next (Ir.type_of_dest dest) () in
+        Temp.Table.set ctx.allocation_method ~key:(match dest with
+          | Ir.Return _ -> Option.value_exn ctx.out_param
+          | Ir.Dest t -> t) ~data:(`Host_and_device new_temp);
+        new_temp
+      in
+
       (* Mark additional buffers as just-device. *)
       let additional_buffers = Set.to_list Ano.(kernel_info.additional_buffers) in
       List.iter additional_buffers ~f:(fun key ->
@@ -388,7 +397,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         (* List of tuples of types, params, and args *)
         let tpas = List.concat [
           (* Don't forget to include as a parameter the dest. *)
-          List.return ((trans_type (Ir.type_of_dest dest), output_buffer_param), dest_to_lvalue ctx dest);
+          List.return ((trans_type (Ir.type_of_dest dest), output_buffer_param), temp_to_var device_dest_temp);
           List.map2_exn args args_with_host_args ~f:(fun t t' -> ((trans_type (Temp.to_type t), temp_name t'), temp_to_var t));
         ]
         in List.unzip tpas
@@ -456,8 +465,14 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         (* Memcpy the host args into the device args. *)
         memcpy CU.(Host, Device) device_args host_args;
         [CU.Launch (gdim, bdim, kernel, kernel_args)];
-        (* Memcpy the device args into the host args. *)
-        memcpy CU.(Device, Host) host_args device_args;
+        CU.[Transfer (
+          dest_to_lvalue ctx dest,
+          temp_to_var device_dest_temp,
+          build_cached_reduce_expr MUL (get_lengths ctx (match dest with
+            | Ir.Return _ -> Option.value_exn ctx.out_param
+            | Ir.Dest t -> t)),
+          (Device, Host))
+        ]
       ]
 
 and trans_seq_stmt_stmt ctx stmt = trans_a_stmt trans_seq_stmt ctx stmt
@@ -506,6 +521,7 @@ let trans (program : Air.t) (result : Ano.result) : CU.cuda_gstmt list =
     result;
     allocation_method;
     lvalue = Option.map ~f:temp_to_var lvalue;
+    out_param = lvalue;
     dims_of_params = List.concat_map Ano.(result.params) ~f:(function
       | Ano.Param.Array (_, dims) -> dims
       | Ano.Param.Not_array _ -> []);

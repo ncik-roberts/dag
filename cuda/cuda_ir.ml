@@ -155,8 +155,8 @@ let rec fmt_typ = function
 
 let fmt_mem_hdr = function
   | Host -> ""
-  | Device -> "__global__"
-  | Shared -> "__shared__"
+  | Device -> "__global__ "
+  | Shared -> "__shared__ "
 
 let comma_delineated : string list -> string =
   Fn.compose (sprintf "(%s)") (String.concat ~sep:", ")
@@ -249,7 +249,7 @@ and fmt_stmt n stm =
 
  | DeclareArray (mem, typ, id, sizes) ->
    let arr_exps = String.concat(List.map sizes ~f:(fun e -> "["^fmt_expr e^"]")) in
-   sprintf "%s%s %s %s %s" sp (fmt_mem_hdr mem) (fmt_typ typ) id arr_exps
+   sprintf "%s%s%s %s %s" sp (fmt_mem_hdr mem) (fmt_typ typ) id arr_exps
 
 (* Should we model structs as pointers to structs? *)
 (* That would make host/device transfer much more complicated. *)
@@ -279,7 +279,7 @@ and fmt_stmt n stm =
 
  | Cuda_malloc (typ, dest, size) ->
    let decl = sprintf "%s%s %s;\n" sp (fmt_typ typ) (dest) in
-   let malloc = sprintf "%scudaMalloc(&%s, %s);" sp (dest) (fmt_expr size) in
+   let malloc = sprintf "%scudaMalloc(&%s, %s)" sp (dest) (fmt_expr size) in
    decl ^ malloc
 
  | Malloc (typ, dest, size) -> sprintf "%s%s %s = malloc(%s)" sp (fmt_typ typ) (dest) (fmt_expr size)
@@ -306,7 +306,7 @@ let fmt_func f =
     |> String.concat ~sep:", "
     |> sprintf "(%s)"
   in
-  let header = sprintf ("%s %s %s%s")
+  let header = sprintf ("%s%s %s%s")
   (fmt_mem_hdr f.typ) (fmt_typ f.ret) f.name params_str in
   let body = fmt_block 0 f.body in
   "\n" ^ header ^ body ^ "\n"

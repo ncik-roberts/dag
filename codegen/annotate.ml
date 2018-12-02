@@ -130,6 +130,12 @@ let used_of_operand (ctx : context) : Air.operand -> Temp.Set.t =
         let bi = annotate_array_view ctx av in
         used_of_length_expr (List.nth_exn A_air.(bi.length) n)
 
+let used_of_primitive (ctx : context) (p : Air.primitive) : Temp.Set.t = 
+  let of_op = used_of_operand ctx in
+  match p with
+    | Air.Min (a,b) | Air.Max (a,b) -> Set.union (of_op a) (of_op b)
+    | Air.F2I (a) | Air.I2F (a) -> of_op a
+
 let defined_of_dest : Ir.dest -> Temp.Set.t =
   function
     | Ir.Return _ -> Temp.Set.empty
@@ -254,6 +260,10 @@ and annotate_seq_stmt
         ({ used; defined; additional_buffers = Temp.Set.empty; }, ctx)
     | Air.Assign (dest, src) | Air.Unop (dest, _, src) ->
         let used = used_of_operand ctx src in
+        let defined = defined_of_dest dest in
+        ({ used; defined; additional_buffers = Temp.Set.empty }, ctx)
+    | Air.Primitive (dest,src) ->
+        let used = used_of_primitive ctx src in
         let defined = defined_of_dest dest in
         ({ used; defined; additional_buffers = Temp.Set.empty }, ctx)
     | Air.Seq_stmt seq_stmt -> annotate_seq_stmt_stmt kernel_ctx ctx seq_stmt

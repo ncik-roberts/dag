@@ -85,6 +85,17 @@ let trans_op = function
   | Air.Temp t -> CU.Var (temp_name t)
   | Air.Dim (n, view) -> CU.Const (Int64.of_int_exn n)
 
+let trans_prim = 
+  let trans_cmp op a b = 
+    let a,b = trans_op a, trans_op b in 
+    CU.Ternary(CU.Binop(op,a,b),a,b)
+  in
+  function
+  | Air.Min (a,b) -> trans_cmp CU.LT a b
+  | Air.Max (a,b) -> trans_cmp CU.GT a b
+  | Air.I2F a -> CU.Cast(CU.Float,trans_op a)
+  | Air.F2I a -> CU.Cast(CU.Integer,trans_op a)
+
 let trans_binop = function
   | Ast.Plus -> CU.ADD
   | Ast.Minus -> CU.SUB
@@ -202,6 +213,8 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       [ d <-- CU.Unop (trans_unop op, trans_op s) ]
   | Air.Assign (d, s) ->
       [ d <-- trans_op s ]
+  | Air.Primitive (d, s) ->
+      [ d <-- trans_prim s]
   | Air.Seq_stmt seq_stmt ->
 
   (* Run/reduce given sequential semantics. *)

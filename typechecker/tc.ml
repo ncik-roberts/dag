@@ -156,7 +156,10 @@ let check_fun (ctx : tctxt) (fun_name : Ast.call_name) (arg_types : typ list) : 
 let rec check_type (ctx : tctxt) (ast : Ast.typ) : typ = match ast with
   | Ast.Ident "int" -> Int
   | Ast.Ident "float" -> Float
-  | Ast.Ident ident -> failwithf "Unknown type `%s`" ident ()
+  | Ast.Ident ident ->
+    (match Map.find ctx.struct_ctx ident with
+      | Some _ -> Struct ident
+      | None -> failwithf "Unknown type `%s`" ident ())
   | Ast.Array ast' -> Array (check_type ctx ast')
 
 let rec check_expr (ctx : tctxt) (ast : unit Ast.expr) : typ Ast.expr = match snd ast with

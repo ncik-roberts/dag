@@ -74,6 +74,8 @@ type cuda_expr =
   | Unop of unop * cuda_expr
   | Binop of binop * cuda_expr * cuda_expr
   | Cmpop of binop * cuda_expr * cuda_expr
+  | Cast of cuda_type * cuda_expr
+  | Ternary of cuda_expr * cuda_expr * cuda_expr
   | FnCall of cuda_ident * (cuda_expr list)
   | Address of cuda_expr
   | Deref of cuda_expr
@@ -204,6 +206,10 @@ let rec fmt_expr = function
       | (INCR|DECR) -> sprintf "(%s)%s" (fmt_expr e) (fmt_unop u)
       | (NEG | NOT) -> sprintf "%s(%s)" (fmt_unop u) (fmt_expr e)
     end
+  | Cast (t,e) ->
+    sprintf ("((%s) %s)") (fmt_typ t) (fmt_expr e)
+  | Ternary (c,i,e) ->
+    sprintf ("(%s ? %s : %s)") (fmt_expr c) (fmt_expr i) (fmt_expr e)
   | Binop (b,e1,e2) ->
     sprintf "(%s %s %s)" (fmt_expr e1) (fmt_binop b) (fmt_expr e2)
   | Cmpop (c,e1,e2) ->

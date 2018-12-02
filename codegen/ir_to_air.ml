@@ -170,7 +170,35 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
       match List.map ~f:(canonicalize ctx) srcs with
       | [ `Array_view v; ] ->
           [(ctx, Air.(Seq (Assign (dest, Dim (n, v)))))]
-      | _ -> failwith "Invalid reduce."
+      | _ -> failwith "Invalid dim."
+    end
+  | Ir.Fun_call (dest, Ir.Min, srcs) ->
+    begin
+      match List.map ~f:(canonicalize ctx) srcs with
+      | [ `Operand a; `Operand b ] ->
+          [(ctx, Air.(Seq (Primitive (dest, Min (a, b)))))]
+      | _ -> failwith "Invalid Min."
+    end
+  | Ir.Fun_call (dest, Ir.Max, srcs) ->
+    begin
+      match List.map ~f:(canonicalize ctx) srcs with
+      | [ `Operand a; `Operand b ] ->
+          [(ctx, Air.(Seq (Primitive (dest, Max (a, b)))))]
+      | _ -> failwith "Invalid Max."
+    end
+  | Ir.Fun_call (dest, Ir.Float_of_int, srcs) ->
+    begin
+      match List.map ~f:(canonicalize ctx) srcs with
+      | [ `Operand a; ] ->
+          [(ctx, Air.(Seq (Primitive (dest, I2F (a)))))]
+      | _ -> failwith "Invalid Float of int."
+    end
+   | Ir.Fun_call (dest, Ir.Int_of_float, srcs) ->
+    begin
+      match List.map ~f:(canonicalize ctx) srcs with
+      | [ `Operand a; ] ->
+          [(ctx, Air.(Seq (Primitive (dest, F2I (a)))))]
+      | _ -> failwith "Invalid Int of Float."
     end
   | Ir.Fun_call (dest, fun_call, srcs) ->
       (* Canonical srcs (i.e. if it is an array view) *)

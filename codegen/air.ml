@@ -21,6 +21,13 @@ type operand =
   | Dim of int * array_view (* Nth dimension of an array *)
   [@@deriving sexp]
 
+type primitive = 
+  | Max of operand * operand
+  | Min of operand * operand
+  | F2I of operand
+  | I2F of operand
+  [@@deriving sexp]
+
 (* Statement with either parallel or sequential semantics. *)
 type 'a stmt = (* Type param stands for either par_stmt or seq_stmt *)
   (* _Sequential_ for loop.
@@ -64,6 +71,7 @@ and seq_stmt =
   | Seq_stmt of seq_stmt stmt (* --> Seq_stmt (Reduce (...)) *)
   | Binop of Ir.dest * Ast.binop * operand * operand
   | Unop of Ir.dest * Ast.unop * operand
+  | Primitive of Ir.dest * primitive
   | Assign of Ir.dest * operand
   [@@deriving sexp]
 
@@ -132,6 +140,8 @@ end = struct
         (pp_operand src)
     | Assign (dst, src) -> sprintf "%s%s <- %s" indent (pp_dest dst)
         (pp_operand src)
+    | Primitive (dst,src) -> sprintf "%s%s <- %s" indent (pp_dest dst) 
+        (pp_primitive src)
   and pp_stmt : type t. ?indent:string -> prefix:string -> (t -> string) -> t stmt -> string =
     fun ?(indent="") ~prefix pp -> function
     | Nop -> indent ^ prefix ^ "nop"
@@ -147,6 +157,11 @@ end = struct
           (Sexp.to_string_hum (Ir.Operator.sexp_of_t op))
           (pp_operand id)
           (pp_array_view av)
+  and pp_primitive = function
+    | Max (a,b) -> sprintf "max (%s,%s)" (pp_operand a) (pp_operand b)
+    | Min (a,b) -> sprintf "min (%s,%s)" (pp_operand a) (pp_operand b)
+    | F2I (a) -> sprintf "(int) %s" (pp_operand a)
+    | I2F (a) -> sprintf "(float) %s" (pp_operand a)
 
   let pp_t { params; body; } =
     sprintf "(%s) {\n%s\n}"

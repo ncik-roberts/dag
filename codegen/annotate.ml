@@ -84,7 +84,7 @@ let annotate_array_view
             index =
               let open Many_fn in
               Fun (fun expr1 -> Fun (fun expr2 ->
-                app_many bi.index [expr1; expr2;]));
+                app_many bi.index [expr2; expr1;]));
         }
     | (typ, Air.Reverse av) ->
         let bi = loop av in

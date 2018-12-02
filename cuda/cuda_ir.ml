@@ -167,7 +167,7 @@ let fmt_mem_type = function
   | Shared -> failwith "What??? Why are you doing that???"
 
 let fmt_mem_tfr tfr1 tfr2 =
-  sprintf "cudaMempcy%sTo%s" (fmt_mem_type tfr1) (fmt_mem_type tfr2)
+  sprintf "cudaMemcpy%sTo%s" (fmt_mem_type tfr1) (fmt_mem_type tfr2)
 
 let fmt_unop = function
   | INCR -> "++"
@@ -249,7 +249,7 @@ and fmt_stmt n stm =
 
  | DeclareArray (mem, typ, id, sizes) ->
    let arr_exps = String.concat(List.map sizes ~f:(fun e -> "["^fmt_expr e^"]")) in
-   sprintf "%s%s %s %s %s" sp (fmt_mem_hdr mem) (fmt_typ typ) id arr_exps
+   sprintf "%s %s %s %s %s" sp (fmt_mem_hdr mem) (fmt_typ typ) id arr_exps
 
 (* Should we model structs as pointers to structs? *)
 (* That would make host/device transfer much more complicated. *)

@@ -2,7 +2,7 @@ open Core
 
 let parse_lexbuf (lexbuf : Lexing.lexbuf) : unit Ast.t =
   try
-    Parser.fun_defns Lexer.initial lexbuf
+    Parser.global_stms Lexer.initial lexbuf
   with
   | Parsing.Parse_error -> failwith "Parse error."
   | Sys_error s -> failwith ("System error: " ^ s)

@@ -100,7 +100,14 @@ type 'a fun_defn = {
   fun_body : 'a stmt list;
 } [@@deriving sexp]
 
-type 'a t = 'a fun_defn list
+type 'a struct_decl = {
+  struct_name : ident;
+  struct_fields : 'a param list;
+}
+
+type 'a global_stmt = Fun of 'a fun_defn | Struct of 'a struct_decl
+
+type 'a t = 'a global_stmt list
 
 let x = 
   Float.of_string

@@ -24,7 +24,7 @@ type struct_field_type = {
 
 type struct_type = struct_field_type list
 
-type t = {
+type tctxt = {
   local_var_ctx : typ IdentMap.t;
   fun_ctx : fun_type IdentMap.t;
   struct_ctx : struct_type IdentMap.t;
@@ -78,7 +78,7 @@ let rec is_at_least_n_dimensional ~n typ = match n, typ with
   | _, Array typ' -> is_at_least_n_dimensional ~n:(n-1) typ'
   | _ -> false
 
-let check_fun (ctx : t) (fun_name : Ast.call_name) (arg_types : typ list) : typ =
+let check_fun (ctx : tctxt) (fun_name : Ast.call_name) (arg_types : typ list) : typ =
   match fun_name with
   | Ast.Map ->
       begin
@@ -153,12 +153,13 @@ let check_fun (ctx : t) (fun_name : Ast.call_name) (arg_types : typ list) : typ 
       end
   
 
-let rec check_type (ctx : t) (ast : Ast.typ) : typ = match ast with
+let rec check_type (ctx : tctxt) (ast : Ast.typ) : typ = match ast with
   | Ast.Ident "int" -> Int
+  | Ast.Ident "float" -> Float
   | Ast.Ident ident -> failwithf "Unknown type `%s`" ident ()
   | Ast.Array ast' -> Array (check_type ctx ast')
 
-let rec check_expr (ctx : t) (ast : unit Ast.expr) : typ Ast.expr = match snd ast with
+let rec check_expr (ctx : tctxt) (ast : unit Ast.expr) : typ Ast.expr = match snd ast with
   | Ast.Const c -> (Int, Ast.Const c)
   | Ast.Float f -> (Float, Ast.Float f)
   | Ast.Variable ident ->
@@ -205,7 +206,7 @@ let rec check_expr (ctx : t) (ast : unit Ast.expr) : typ Ast.expr = match snd as
       let ret_ty = check_fun ctx fun_call.call_name arg_types in
       (ret_ty, Ast.Fun_call { fun_call with call_args = args })
 
-and check_stmt (ctx : t) (ast : unit Ast.stmt) : t * typ Ast.stmt =
+and check_stmt (ctx : tctxt) (ast : unit Ast.stmt) : tctxt * typ Ast.stmt =
   if Option.is_some ctx.return_type then failwith "Function already returned.";
   match ast with
   | Ast.Let let_exp ->
@@ -227,10 +228,10 @@ and check_stmt (ctx : t) (ast : unit Ast.stmt) : t * typ Ast.stmt =
       let (typ, _) as result = check_expr ctx expr in
       ({ ctx with return_type = Some typ }, Ast.Return result)
 
-and infer_stmts (ctx : t) (ast : unit Ast.stmt list) : t * typ Ast.stmt list =
+and infer_stmts (ctx : tctxt) (ast : unit Ast.stmt list) : tctxt * typ Ast.stmt list =
   List.fold_map ~init:ctx ~f:check_stmt ast
 
-and check_stmts (ctx : t) (ast : unit Ast.stmt list) (typ : typ) : typ Ast.stmt list =
+and check_stmts (ctx : tctxt) (ast : unit Ast.stmt list) (typ : typ) : typ Ast.stmt list =
   let (ctx', result) = infer_stmts ctx ast in
   (* Check return type *)
   match ctx'.return_type with
@@ -240,34 +241,50 @@ and check_stmts (ctx : t) (ast : unit Ast.stmt list) (typ : typ) : typ Ast.stmt 
       then failwith "Given return type incompatible with inferred type"
       else result
 
-let check_fun_defn (ctx : t) (ast : unit Ast.fun_defn) : t * typ Ast.fun_defn =
+let check_global_stm (ctx : tctxt) (ast : unit Ast.global_stmt) : tctxt * (typ Ast.fun_defn option) =
   let open Ast in
-  let (return_type, _) as fun_ret_type = match ast.fun_ret_type with
-    | (), return_type -> (check_type ctx return_type, return_type)
-  in
-  let fun_params = List.map ast.fun_params ~f:(fun ({ param_type = ((), param_type) } as r) ->
-    { r with param_type = (check_type ctx param_type, param_type) })
-  in
-  let param_types = List.map fun_params ~f:(fun { param_type } -> fst param_type) in
-  let body_ctx =
-    let params_with_type =
-      List.zip_exn (List.map ~f:(fun p -> p.param_ident) ast.fun_params) param_types
+  match ast with 
+  | Fun ast ->
+    let (return_type, _) as fun_ret_type = match ast.fun_ret_type with
+      | (), return_type -> (check_type ctx return_type, return_type)
     in
-    { ctx with
-        local_var_ctx =
-          List.fold_left params_with_type ~init:ctx.local_var_ctx ~f:(fun map (key, data) ->
-            add_with_failure map ~key ~data ~on_duplicate:"Duplicate parameter `%s`") }
-  in
-  let result = check_stmts body_ctx ast.fun_body return_type in
-  (* Update fun ctx. *)
-  let ctx' = { ctx with
-      fun_ctx =
-        add_with_failure ctx.fun_ctx
-          ~key:ast.fun_name ~data:{ return_type; param_types; }
-          ~on_duplicate: "Duplicate function definition `%s`"; }
-  in (ctx', { ast with fun_body = result; fun_ret_type; fun_params; })
+    let fun_params = List.map ast.fun_params ~f:(fun ({ param_type = ((), param_type) } as r) ->
+      { r with param_type = (check_type ctx param_type, param_type) })
+    in
+    let param_types = List.map fun_params ~f:(fun { param_type } -> fst param_type) in
+    let body_ctx =
+      let params_with_type =
+        List.zip_exn (List.map ~f:(fun p -> p.param_ident) ast.fun_params) param_types
+      in
+      { ctx with
+          local_var_ctx =
+            List.fold_left params_with_type ~init:ctx.local_var_ctx ~f:(fun map (key, data) ->
+              add_with_failure map ~key ~data ~on_duplicate:"Duplicate parameter `%s`") }
+    in
+    let result = check_stmts body_ctx ast.fun_body return_type in
+    (* Update fun ctx. *)
+    let ctx' = { ctx with
+        fun_ctx =
+          add_with_failure ctx.fun_ctx
+            ~key:ast.fun_name ~data:{ return_type; param_types; }
+            ~on_duplicate: "Duplicate function definition `%s`"; }
+    in (ctx',Some { ast with fun_body = result; fun_ret_type; fun_params; })
+  | Struct ast -> 
+    let new_struct_fields = List.map ast.struct_fields 
+                            ~f:(fun {param_type; param_ident} -> 
+                            let (_,t) = param_type in
+                            {field_name = param_ident; field_type = (check_type ctx t)})
+    in
+    let ctx' = { ctx with 
+      struct_ctx = add_with_failure ctx.struct_ctx
+        ~key:ast.struct_name ~data:new_struct_fields 
+        ~on_duplicate: "Duplicate struct defn `%s`";
+      }
+    in
+    (ctx', None)
+ 
+let check_with (ctx : tctxt) (ast : unit Ast.t) : typ Ast.fun_defn list =
+  let typc = List.folding_map ~f:check_global_stm ~init:ctx ast in
+  List.filter_opt typc
 
-let check_with (ctx : t) (ast : unit Ast.t) : typ Ast.t =
-  List.folding_map ~f:check_fun_defn ~init:ctx ast
-
-let check (ast : unit Ast.t) : typ Ast.t = check_with empty ast
+let check (ast : unit Ast.t) : typ Ast.fun_defn list = check_with empty ast

@@ -28,6 +28,7 @@
 
 %token PARALLEL
 %token RETURN
+%token STRUCT
 
 %token LBRACE RBRACE /* {} */
 %token LBRACKET RBRACKET /* [] */
@@ -47,8 +48,8 @@
 %left TIMES DIV MOD
 %nonassoc UNARY_MINUS
 
-%type <unit Ast.fun_defn list> fun_defns
-%start fun_defns
+%type <unit Ast.global_stmt list> global_stms
+%start global_stms
 
 %%
 
@@ -56,12 +57,15 @@
  * FUN DEFNS
  **********************************/
 
-fun_defns :
+global_stms :
   | EOF;
       { [] }
   | f = fun_defn;
-    fs = fun_defns;
+    fs = global_stms;
       { f :: fs }
+  | s = struct_decl;
+    ss = global_stms;
+      { s :: ss }
   ;
 
 fun_defn :
@@ -73,7 +77,16 @@ fun_defn :
     LBRACE;
     fun_body = stmts;
     RBRACE;
-      { Ast.{ fun_ret_type; fun_name; fun_params; fun_body; } }
+      { Ast.Fun Ast.{ fun_ret_type; fun_name; fun_params; fun_body; } }
+  ;
+
+struct_decl :
+  | STRUCT;
+    struct_name = IDENT;
+    LBRACE;
+    struct_fields = fields;
+    RBRACE;
+      { Ast.Struct Ast.{ struct_name; struct_fields; } }
   ;
 
 /**********************************
@@ -102,6 +115,28 @@ params :
     other_params = param_tail;
       { first_param :: other_params }
   ;
+
+/**********************************
+ * STRUCTS 
+ **********************************/
+
+field_tail :
+  | /* empty */
+      { [] }
+  | SEMICOLON;
+    f = param;
+    fs = field_tail;
+      { f :: fs }
+  ;
+
+fields :
+  | /* empty */
+    { [] }
+  | first_field = param;
+    other_fields = field_tail; 
+      { first_field :: other_fields }
+  ;
+
 
 /**********************************
  * ARGUMENTS

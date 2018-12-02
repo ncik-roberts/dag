@@ -22,14 +22,14 @@ type struct_field_type = {
 
 type struct_type = struct_field_type list
 
-type t = {
+type tctxt = {
   local_var_ctx : typ IdentMap.t;
   fun_ctx : fun_type IdentMap.t;
   struct_ctx : struct_type IdentMap.t;
   return_type : typ option;
 }
 
-val empty : t
+val empty : tctxt
 
-val check : unit Ast.t -> typ Ast.t
-val check_with : t -> unit Ast.t -> typ Ast.t
+val check : unit Ast.t -> typ Ast.fun_defn list
+val check_with : tctxt -> unit Ast.t -> typ Ast.fun_defn list

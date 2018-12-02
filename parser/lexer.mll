@@ -76,8 +76,11 @@ rule initial =
 
   | "return" { P.RETURN }
   | "parallel" { P.PARALLEL }
+  | "struct" { P.STRUCT }
 
   | decnum as n { decnumber n lexbuf }
+  | fnum as n { floatnumber n lexbuf }
+  | hexnum as n { hexnumber n lexbuf }
 
   | id as name { P.IDENT name }
 

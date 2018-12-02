@@ -198,7 +198,7 @@ let next_vertex = make_counter ~seed:0l ~next:Int32.succ
 
 (** Dag of ast *)
 type t = dag_fun list [@@deriving sexp]
-let of_ast : Tc.typ Ast.t -> t =
+let of_ast : Tc.typ Ast.fun_defn list -> t =
 
   (* Returns id of expression vertex. *)
   let rec loop_expr (ctx : Context.t) ((typ, expr) : Tc.typ Ast.expr) : Result.t =

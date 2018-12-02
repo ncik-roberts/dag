@@ -55,7 +55,7 @@ type dag_fun = {
 } [@@deriving sexp]
 
 type t = dag_fun list [@@deriving sexp]
-val of_ast : Tc.typ Ast.t -> t
+val of_ast : Tc.typ Ast.fun_defn list -> t
 
 (** Inline all function calls. *)
 val inline : dag_fun -> t -> dag_fun

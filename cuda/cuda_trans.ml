@@ -80,7 +80,7 @@ let trans_params (params : Ano.Param.t list) : (CU.cuda_type * CU.cuda_ident) li
 
 (* Translate AIR operands into their cuda equivalents. s*)
 let trans_op = function
-  | Air.Index (t1, t2) -> CU.Index (temp_to_var t1, temp_to_var t2)
+  | Air.IndexOp (t1, t2) -> CU.Index (temp_to_var t1, temp_to_var t2)
   | Air.Const c -> CU.Const (Int64.of_int32_exn c)
   | Air.Temp t -> CU.Var (temp_name t)
   | Air.Dim (n, view) -> CU.Const (Int64.of_int_exn n)
@@ -209,6 +209,8 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
   match stmt with
   | Air.Binop (d, op, s1, s2) ->
       [ d <-- CU.Binop (trans_binop op, trans_op s1, trans_op s2) ]
+  | Air.Index (d, src, i) ->
+      [ d <-- CU.Index (trans_op src, trans_op i)]
   | Air.Unop (d, op, s) ->
       [ d <-- CU.Unop (trans_unop op, trans_op s) ]
   | Air.Assign (d, s) ->

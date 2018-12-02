@@ -17,7 +17,7 @@ let convert_operand : context -> Ir.operand -> Air.operand =
     | Ir.Temp t ->
 
   match Map.find ctx.idx t with
-  | Some (t_new, t_idx) -> Air.Index (t_new, t_idx)
+  | Some (t_new, t_idx) -> Air.IndexOp (t_new, t_idx)
   | None -> Air.Temp t
 
 (* Check that a temp isn't in the context.
@@ -117,7 +117,7 @@ let rec make_parallel
         begin
           let t2 = Temp.next (Ir.type_of_dest d2) () in
           let t_idx2 = Temp.next Tc.Int () in
-          Parallel (d1, Id.next (), [(t1, t_idx1, av1); (t2, t_idx2, av2);], Assign (d2, Index (t2, t_idx2)))
+          Parallel (d1, Id.next (), [(t1, t_idx1, av1); (t2, t_idx2, av2);], Assign (d2, IndexOp (t2, t_idx2)))
         end;
         Parallel (d1, Id.next (), [(t1, t_idx1, av1)], Seq_stmt (Run (d2, av2)));
         Par_stmt (For (d1, (t1, t_idx1, av1), stmt));
@@ -154,6 +154,9 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
       assert (not_in ctx src1);
       assert (not_in ctx src2);
       Air.[(ctx, Seq (Binop (dest, binop, convert_operand ctx src1, convert_operand ctx src2)))]
+  | Ir.Index (dest,src,expr) ->
+    (* Maybe no indexes that operate on indexes? *)
+    Air.[(ctx,Seq (Index (dest,convert_operand ctx src,convert_operand ctx expr)))]
   | Ir.Unop (dest, unop, src) ->
       assert (not_in ctx src);
       Air.[(ctx, Seq (Unop (dest, unop, convert_operand ctx src)))]
@@ -172,7 +175,7 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
           [(ctx, Air.(Seq (Assign (dest, Dim (n, v)))))]
       | _ -> failwith "Invalid dim."
     end
-  | Ir.Fun_call (dest, Ir.Min, srcs) ->
+  | Ir.Fun_call (dest,Ir.Min, srcs) ->
     begin
       match List.map ~f:(canonicalize ctx) srcs with
       | [ `Operand a; `Operand b ] ->

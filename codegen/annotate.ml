@@ -125,7 +125,7 @@ let used_of_operand (ctx : context) : Air.operand -> Temp.Set.t =
   function
     | Air.Const _ -> Temp.Set.empty
     | Air.Temp t -> Temp.Set.singleton t
-    | Air.Index (t1, t2) -> Temp.Set.of_list [t1; t2;]
+    | Air.IndexOp (t1, t2) -> Temp.Set.of_list [t1; t2;]
     | Air.Dim (n, av) ->
         let bi = annotate_array_view ctx av in
         used_of_length_expr (List.nth_exn A_air.(bi.length) n)
@@ -254,7 +254,7 @@ and annotate_seq_stmt
   (ctx : context)
   (stmt : Air.seq_stmt) : kernel_context * context =
   let (kernel_ctx', ctx) = match stmt with
-    | Air.Binop (dest, _, src1, src2) ->
+    | Air.Binop (dest, _, src1, src2) | Air.Index (dest,src1,src2) ->
         let used = Set.union (used_of_operand ctx src1) (used_of_operand ctx src2) in
         let defined = defined_of_dest dest in
         ({ used; defined; additional_buffers = Temp.Set.empty; }, ctx)

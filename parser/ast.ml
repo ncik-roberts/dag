@@ -88,6 +88,10 @@ and 'a expr' =
       binary_operator : binop;
       binary_operand2 : 'a expr;
     }
+  | Index of {
+     index_source : 'a expr;
+     index_expr : 'a expr;
+  }
   | Const of int32
   | Float of float
   | Variable of ident

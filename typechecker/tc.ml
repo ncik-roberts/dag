@@ -45,7 +45,7 @@ let add_with_failure
   (m : 'a IdentMap.t)
   ~(key : IdentMap.Key.t)
   ~(data : 'a)
-  ~(on_duplicate : (string, 'a IdentMap.t) failfmt) : 'a IdentMap.t =
+  ~(on_duplicate : (string, 'a IdentMap.t) failfmt) =
   match IdentMap.add m ~key ~data with
   | `Ok result -> result
   | `Duplicate -> failwithf on_duplicate key ()
@@ -71,6 +71,11 @@ let check_unop (typ : typ) (unop : Ast.unop) : typ =
   if fun_type.param_types <> [ typ ]
   then failwith "Invalid unop types."
   else fun_type.return_type
+
+let check_index (typ1 : typ) (typ2 : typ) : typ = 
+  match typ1,typ2 with 
+  | Array t,Int -> t
+  | _,_ -> failwith "Invalid index types."
 
 let rec is_at_least_n_dimensional ~n typ = match n, typ with
   | _, _ when n <= 0 -> false
@@ -178,6 +183,11 @@ let rec check_expr (ctx : tctxt) (ast : unit Ast.expr) : typ Ast.expr = match sn
       let (type1, _) as res = check_expr ctx unop.unary_operand in
       let typ = check_unop type1 unop.unary_operator in
       (typ, Ast.Unop { unop with unary_operand = res })
+  | Ast.Index index ->
+      let (typ1,_) as res1 = check_expr ctx index.index_source in
+      let (typ2,_) as res2 = check_expr ctx index.index_expr in
+      let typ = check_index typ1 typ2 in
+      (typ, Ast.Index {index_source = res1; index_expr = res2})
   | Ast.Parallel parallel ->
       begin
         let (typ, _) as res = check_expr ctx parallel.parallel_arg in

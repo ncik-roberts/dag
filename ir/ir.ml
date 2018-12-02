@@ -42,6 +42,7 @@ let temp_of_dest : dest -> Temp.t = function
 type stmt =
   | Parallel of dest * operand * Temp.t * stmt list
   | Binop of dest * Ast.binop * operand * operand
+  | Index of dest * operand * operand
   | Unop of dest * Ast.unop * operand
   | Fun_call of dest * fun_call * operand list
   | Assign of dest * operand

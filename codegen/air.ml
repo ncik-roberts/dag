@@ -17,7 +17,7 @@ and array_view' =
 type operand =
   | Const of Int32.t
   | Temp of Temp.t
-  | Index of Temp.t * Temp.t
+  | IndexOp of Temp.t * Temp.t
   | Dim of int * array_view (* Nth dimension of an array *)
   [@@deriving sexp]
 
@@ -72,6 +72,7 @@ and seq_stmt =
   | Binop of Ir.dest * Ast.binop * operand * operand
   | Unop of Ir.dest * Ast.unop * operand
   | Primitive of Ir.dest * primitive
+  | Index of Ir.dest * operand * operand
   | Assign of Ir.dest * operand
   [@@deriving sexp]
 
@@ -107,7 +108,7 @@ end = struct
   let rec pp_operand = function
     | Const c -> Int32.to_string_hum c
     | Temp t -> sprintf "%%%d" (Temp.to_int t)
-    | Index (a, i) -> sprintf "%%%d[%%%d]" (Temp.to_int a) (Temp.to_int i)
+    | IndexOp (a, i) -> sprintf "%%%d[%%%d]" (Temp.to_int a) (Temp.to_int i)
     | Dim (i, av) -> sprintf "dim%d(%s)" i (pp_array_view av)
 
   let pp_dest = function
@@ -138,6 +139,8 @@ end = struct
     | Unop (dst, unop, src) -> sprintf "%s%s <- %s%s" indent (pp_dest dst)
         (Sexp.to_string_hum (Ast.sexp_of_unop unop))
         (pp_operand src)
+    | Index (dst,src,expr) -> 
+        sprintf "%s%s <- %s[%s]" indent (pp_dest dst) (pp_operand src) (pp_operand expr)
     | Assign (dst, src) -> sprintf "%s%s <- %s" indent (pp_dest dst)
         (pp_operand src)
     | Primitive (dst,src) -> sprintf "%s%s <- %s" indent (pp_dest dst) 

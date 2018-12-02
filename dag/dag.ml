@@ -15,6 +15,7 @@ module Vertex_view = struct
     | Function of Ast.call_name
     | Binop of Ast.binop
     | Unop of Ast.unop
+    | Index 
     | Literal of literal
     | Input of Ast.ident
     [@@deriving sexp]
@@ -115,7 +116,7 @@ let unroll dag key =
   (* Only recursive production is Parallel_block *)
   match view dag key with
   | Parallel_block (_, t) -> Some t
-  | Function _ | Binop _ | Unop _ | Literal _ | Input _ -> None
+  | Function _ | Binop _ | Unop _ | Literal _ | Input _  | Index -> None
 
 type 'a counter = unit -> 'a
 let make_counter ~(seed:'a) ~(next:'a -> 'a) : 'a counter =
@@ -243,6 +244,12 @@ let of_ast : Tc.typ Ast.fun_defn list -> t =
           let view = Vertex_view.Unop unop.unary_operator in
           let result = loop_expr ctx unop.unary_operand in
           `New_vertex (vertex, view, [result], `No_additional_results)
+      | Ast.Index i -> 
+          let vertex = next_vertex () in
+          let view = Vertex_view.Index in 
+          let src = loop_expr ctx i.index_source in
+          let expr = loop_expr ctx i.index_expr in
+          `New_vertex(vertex, view, [src; expr], `No_additional_results)
       | Ast.Variable v ->
           let vertex = Map.find_exn Context.(ctx.local_vars) v in
           `Reused_vertex vertex

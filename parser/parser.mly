@@ -47,6 +47,7 @@
 %left PLUS MINUS
 %left TIMES DIV MOD
 %nonassoc UNARY_MINUS
+%left LBRACKET
 
 %type <unit Ast.global_stmt list> global_stms
 %start global_stms
@@ -228,6 +229,11 @@ _expr :
             in Option.value_map dim ~f:(fun n -> Ast.Dim n)
                   ~default:(Ast.Fun_ident call_ident)
         in Ast.Fun_call { call_name; call_args; } }
+  | index_source = expr;
+    LBRACKET;
+    index_expr = expr;
+    RBRACKET;
+    { Ast.Index { index_source; index_expr; } }
   | unary_operator = unop;
     unary_operand = expr;
       %prec UNARY_MINUS

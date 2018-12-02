@@ -25,21 +25,13 @@ struct square {
 // "Header Functions" that we assume exist.
   float log(int base,int number);
 
-// Pervasive language primitives:
-  float float_of_int(int int_value);
-  int int_of_float(float float_value);
-  int[] tabulate(int start, int stop, ?int stride);
-  int[] enumerate('a[] collection);
-  int min(int a, int b);
-  int max(int a, int b); // Though we'd like these for floats, too.
-  'a index('a[] collection);
+// Remaining language features to implement:
+   struct initialiations:
+   struct s = { field_1 = expr_1; field_2 = expr_2 };
 
 // Language features we need to get this implementatation to work:
 //   Structs, and a semantics for them.
-//   Floating point numbers (literals, operators, conversions)
-//   Booleans (maybe) and boolean operators &&,|| 
-//   Bitwise operations (for ints) and comparison operations (for ints and floats)
-//   Additional primitives (tabulate,enumerate,min,max,index)
+//   Boolean literals (at some point!)
 //   Additional blocks (parallel_filter,(parallel_filter_map?))
 //   Internally: scan.
 
@@ -245,11 +237,17 @@ int[][][][] renderSquares(square[][] squares, circle[] circles, int num_squares,
         return parallel (x <- xPixels) {
           float normX = float_of_int(x) / fWidth;
           float normY = float_of_int(y) / fHeight;
-          int[] ix_colors = filter_map (id <- square.circleIDs) {
-            circle c = index(circles,ID);
-            bool ix = pixelInCircle(c,normX,normY);
-            return (ix,c.color)
+          
+          bool[] ix = parallel (id <- square.circleIDs) {
+            return pixelInCircle(c,normX,normY);
           }
+
+          int[] colors = parallel (id <- square.circleIDs) {
+            return circles[id].color;
+          }
+
+          int[] ix_colors = filterWith(colors,ix);
+
           // Black background comes from here. Would make it 0xFFFFFFFF for white.
           return reduce(addPixels,0,ix_colors);
         };
@@ -272,7 +270,7 @@ int[][] concatPixelSubarrays (int[][][][] pixels, int width, int height)
       int j = x / squareWidth;
       int k = y % squareHeight;
       int l = x % squareWidth;
-      return index(index(index(index(pixels,i),j),k),l);
+      return pixels[i][j][k][l];
     };
   };
 }

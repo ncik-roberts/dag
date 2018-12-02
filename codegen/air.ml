@@ -10,7 +10,7 @@ and array_view' =
   | Array_index of Temp.t * Temp.t
   | Zip_with of Ir.Operator.t * array_view list
   | Reverse of array_view
-  | Tabulate of array_view
+  | Tabulate of Temp.t * Temp.t * Temp.t
   | Transpose of array_view
   [@@deriving sexp]
 
@@ -92,7 +92,8 @@ end = struct
           (Sexp.to_string_hum (Ir.Operator.sexp_of_t o))
           (String.concat ~sep:", " (List.map avs ~f:pp_array_view))
     | Reverse av -> sprintf "reverse(%s)" (pp_array_view av)
-    | Tabulate av -> sprintf "tabulate(%s)" (pp_array_view av)
+    | Tabulate (b,e,s) -> sprintf "tabulate(%d,%d,%d)" 
+        (Temp.to_int b) (Temp.to_int e) (Temp.to_int s)
     | Transpose av -> sprintf "transpose(%s)" (pp_array_view av)
 
   let rec pp_operand = function

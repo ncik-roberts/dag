@@ -257,7 +257,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         | Air.Reverse av -> temps_in_array_view av
         | Air.Array t -> Temp.Set.singleton t
         | Air.Transpose av -> temps_in_array_view av
-        | Air.Tabulate av -> temps_in_array_view av
+        | Air.Tabulate (b,e,s) -> Temp.Set.of_list [b;e;s]
         | Air.Array_index (t1, t2) -> Temp.Set.of_list [t1; t2;]
       in
       let array_view_args =

@@ -35,7 +35,7 @@ let make_array_view
     | Ir.Zip_with f, [ `Array_view view1; `Array_view view2; ] -> Air.Zip_with (f, [ view1; view2; ])
     | Ir.Transpose, [ `Array_view view ] -> Air.Transpose view
     | Ir.Map f, [ `Array_view view ] -> Air.Zip_with (f, [ view ])
-    | Ir.Tabulate, [`Array_view view ] -> Air.Tabulate view  
+    | Ir.Tabulate, [`Operand (Air.Temp b); `Operand (Air.Temp e); `Operand (Air.Temp s);] -> Air.Tabulate (b,e,s)
     | Ir.Int_of_float ,_ -> failwith "I <- F is not an array view."
     | Ir.Float_of_int ,_ -> failwith "F <- I is not an array view."
     | Ir.Reduce _, _ -> failwith "Reduce is not an array view."

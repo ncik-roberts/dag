@@ -85,7 +85,7 @@ let annotate_array_view
                   (Expr.Call (Ir.Operator.Binop Ast.Minus, [ n_minus_1; expr; ]))
                   ~msg:"App_exn reverse")
         }
-    | (typ, Air.Tabulate av) ->
+    | (typ, Air.Tabulate (b,e,s)) ->
         let bi = loop av in 
         assert (typ = bi.typ);
         bi (* Todo: What should go here? *)

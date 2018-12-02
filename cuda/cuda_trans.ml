@@ -64,6 +64,7 @@ let rec trans_type (typ : Tc.typ) : CU.cuda_type =
 and remove_arrays =
   function Tc.Array typ -> remove_arrays typ | typ -> trans_type typ
 
+
 (* Translate an AIR parameter list into a list of CUDA parameters.
  *
  * Notice that `temp_name t` allows us to uniquely determine the name of a temp at
@@ -206,13 +207,6 @@ let dest_to_stmt (ctx : context) (dest : Ir.dest) (rhs : CU.cuda_expr) : CU.cuda
 
 let app index t = Many_fn.app index t ~default:(fun arr -> Expr.Index (arr, t))
 let rec app_expr ctx f e = Many_fn.compose (trans_expr ctx) (app f e)
-
-let get_length ctx t = List.hd_exn (get_lengths ctx t)
-(* Find a buffer info's length. *)
-let get_lengths (ctx : context) (t : Temp.t) : CU.cuda_expr list =
-  match Map.find Ano.(ctx.result.buffer_infos) t with
-  | Some inf -> List.map ~f:trans_len_expr Ano.(inf.length)
-  | None -> failwithf "Couldn't find buffer size for `%d`" (Temp.to_int t) ()
 
 let get_length ctx t = List.hd_exn (get_lengths ctx t)
 

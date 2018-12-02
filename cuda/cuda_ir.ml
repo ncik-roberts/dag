@@ -306,7 +306,7 @@ let fmt_func f =
     |> String.concat ~sep:", "
     |> sprintf "(%s)"
   in
-  let header = sprintf ("%s%s %s%s")
+  let header = sprintf ("%s %s %s%s")
   (fmt_mem_hdr f.typ) (fmt_typ f.ret) f.name params_str in
   let body = fmt_block 0 f.body in
   "\n" ^ header ^ body ^ "\n"

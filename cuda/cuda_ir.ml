@@ -68,7 +68,9 @@ type kernel_variable =
 
 (* Simple nested expressions. *)
 type cuda_expr =
-  | Const of Int64.t
+  | IConst of Int64.t
+  | FConst of float
+  | BConst of bool
   | Var of cuda_ident
   | KVar of kernel_variable
   | Unop of unop * cuda_expr
@@ -196,7 +198,9 @@ let fmt_kvar = function
   | ThreadIdx idx -> "threadIdx."^fmt_dim idx
 
 let rec fmt_expr = function
-  | Const c -> Int64.to_string c
+  | IConst c -> Int64.to_string c
+  | FConst f -> string_of_float f
+  | BConst b -> string_of_bool b
   | Var v -> v
   | KVar v -> fmt_kvar v
   | Unop (u,e) ->
@@ -322,7 +326,7 @@ let transpose_kernel : cuda_func = {
     DeclareAssign (Integer, "width", Binop (MUL, KVar (GridDim X), Var "TILE_DIM"));
 
     Loop
-      ((DeclareAssign (Integer, "j", Const 0L),
+      ((DeclareAssign (Integer, "j", IConst 0L),
         Cmpop (LT, Var "j", Var "TILE_DIM"),
         AssignOp (ADD, Var "j", Var "BLOCK_ROWS")),
        [ Assign
@@ -335,7 +339,7 @@ let transpose_kernel : cuda_func = {
     Assign (Var "y", Binop (ADD, Binop (MUL, KVar (BlockIdx X), Var "TILE_DIM"), KVar (ThreadIdx Y)));
 
     Loop
-      ((DeclareAssign(Integer,"j",Const 0L),
+      ((DeclareAssign(Integer,"j",IConst 0L),
         Cmpop(LT,Var "j",Var "TILE_DIM"),
         AssignOp(ADD,Var "j",Var "BLOCK_ROWS")),
        [ Assign
@@ -347,15 +351,15 @@ let transpose_kernel : cuda_func = {
 
 (* Builds the expression for the kernel launch of the transpose primitive *)
 let launch_transpose matrix dev_matrix dev_result =
-  let rowexp = Binop (DIV, Index (Field (matrix, "lens"), Const 0L), Var "tp_TILE_DIM") in
-  let colexp = Binop (DIV, Index (Field (matrix, "lens"), Const 1L), Var "tp_TILE_DIM") in
-  let gridDim = (rowexp, colexp, Const 1L) in
-  let blockDim = (Var "tp_TILE_DIM", Var "tp_BLOCK_ROWS", Const 1L) in
+  let rowexp = Binop (DIV, Index (Field (matrix, "lens"), IConst 0L), Var "tp_TILE_DIM") in
+  let colexp = Binop (DIV, Index (Field (matrix, "lens"), IConst 1L), Var "tp_TILE_DIM") in
+  let gridDim = (rowexp, colexp, IConst 1L) in
+  let blockDim = (Var "tp_TILE_DIM", Var "tp_BLOCK_ROWS", IConst 1L) in
   Launch (gridDim, blockDim, transpose_kernel, [ dev_result; dev_matrix; ])
 
 (* IR Representation of the Transpose function from the CUDA documentation. *)
 let primitive_transpose : t = [
-  Decl (DeclareAssign (ConstType Integer, "tp_TILE_DIM", Const 32L));
-  Decl (DeclareAssign (ConstType Integer, "tp_BLOCK_ROWS", Const 8L));
+  Decl (DeclareAssign (ConstType Integer, "tp_TILE_DIM", IConst 32L));
+  Decl (DeclareAssign (ConstType Integer, "tp_BLOCK_ROWS", IConst 8L));
   Function transpose_kernel;
 ]

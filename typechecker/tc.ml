@@ -5,6 +5,7 @@ module IdentMap = String.Map
 
 type typ =
   | Int
+  | Bool
   | Float
   | Struct of ident
   | Array of typ
@@ -50,11 +51,18 @@ let add_with_failure
   | `Ok result -> result
   | `Duplicate -> failwithf on_duplicate key ()
 
-let infer_binop (binop : Ast.binop) : fun_type = {
-  param_types = [ Int; Int; ];
-  return_type = Int;
-}
+(* Well. This isn't strictly true, see - these are overloaded and can work on 
+ * floats too. Which is a problem that we'll hit soon enough. *)
+let infer_binop (binop : Ast.binop) : fun_type = 
+  match binop with 
+  | Ast.(Plus | Minus | Times | Div | Mod | Lshift | Rshift | BitAnd | BitOr | BitXor) ->
+    { param_types = [ Int; Int; ]; return_type = Int; }
+  | Ast.(And | Or ) ->
+    { param_types = [ Bool; Bool;]; return_type = Bool; }
+  | Ast.(Less | Greater | LessEq | GreaterEq ) ->
+    { param_types = [ Int; Int;]; return_type = Bool; }
 
+(* Negate works on ints and floats, logical not works on ints and bools. *)
 let infer_unop (unop : Ast.unop) : fun_type = {
   param_types = [ Int ];
   return_type = Int;
@@ -184,6 +192,7 @@ let rec check_struct_fields (ctx : tctxt) (typ : Ast.typ) (ls : 'a Ast.field lis
 let rec check_expr (ctx : tctxt) (ast : unit Ast.expr) : typ Ast.expr = match snd ast with
   | Ast.Const c -> (Int, Ast.Const c)
   | Ast.Float f -> (Float, Ast.Float f)
+  | Ast.Bool b -> (Bool, Ast.Bool b)
   | Ast.Variable ident ->
       let typ = Option.value_exn (IdentMap.find ctx.local_var_ctx ident)
         ~error:(Error.of_exn (Failure (Printf.sprintf "Unbound variable `%s`." ident)))

@@ -14,6 +14,8 @@ let nop : Air.par_stmt = Air.Par_stmt Air.Nop
 let convert_operand : context -> Ir.operand -> Air.operand =
   fun ctx -> function
     | Ir.Const i -> Air.Const i
+    | Ir.Float f -> Air.Float f
+    | Ir.Bool  b -> Air.Bool b
     | Ir.Temp t ->
 
   match Map.find ctx.idx t with
@@ -25,7 +27,7 @@ let convert_operand : context -> Ir.operand -> Air.operand =
  *)
 let not_in (ctx : context) (op : Ir.operand) : bool =
   match op with
-  | Ir.Const _ -> true
+  | (Ir.Const _ | Ir.Float _ | Ir.Bool _ ) -> true
   | Ir.Temp t -> Fn.non (Map.mem ctx.array_views) t
 
 let make_array_view
@@ -48,7 +50,7 @@ let make_array_view
     | Ir.Map _, _ -> failwith "Invalid map."
 
 let canonicalize (ctx : context) : Ir.operand -> 'a = function
-  | Ir.Const i -> `Operand (Air.Const i)
+  | (Ir.Const _|Ir.Float _|Ir.Bool _) as op ->  `Operand (convert_operand ctx op )
   | Ir.Temp t ->
       let array_view_opt = Map.find ctx.array_views t in
       Option.value_map array_view_opt

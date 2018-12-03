@@ -7,6 +7,7 @@ module Vertex_view : sig
   type literal =
     | Int32 of int32
     | Float of float
+    | Bool of bool
     | Bare_binop of Ast.binop
     | Bare_unop of Ast.unop
     [@@deriving sexp]

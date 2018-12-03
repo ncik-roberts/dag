@@ -3,6 +3,7 @@ module IdentMap = Core.String.Map
 
 type typ =
   | Int
+  | Bool
   | Float
   | Struct of ident
   | Array of typ

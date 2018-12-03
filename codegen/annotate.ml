@@ -123,7 +123,7 @@ let rec used_of_length_expr : Length_expr.t -> Temp.Set.t =
 
 let used_of_operand (ctx : context) : Air.operand -> Temp.Set.t =
   function
-    | Air.Const _ -> Temp.Set.empty
+    | Air.Const _ | Air.Float _ | Air.Bool _ -> Temp.Set.empty
     | Air.Temp t -> Temp.Set.singleton t
     | Air.IndexOp (t1, t2) -> Temp.Set.of_list [t1; t2;]
     | Air.Dim (n, av) ->

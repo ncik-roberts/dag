@@ -6,6 +6,7 @@ module Vertex_view = struct
   type literal =
     | Int32 of int32
     | Float of float
+    | Bool of bool
     | Bare_binop of Ast.binop
     | Bare_unop of Ast.unop
     [@@deriving sexp]
@@ -235,6 +236,10 @@ let of_ast : Tc.typ Ast.fun_defn list -> t =
       | Ast.Float f -> 
           let vertex = next_vertex () in
           let view = Vertex_view.(Literal (Float f)) in
+          `New_vertex (vertex, view, [], `No_additional_results)
+      | Ast.Bool b ->
+          let vertex = next_vertex () in 
+          let view = Vertex_view.(Literal (Bool b)) in
           `New_vertex (vertex, view, [], `No_additional_results)
       | Ast.Binop binop ->
           let vertex = next_vertex () in

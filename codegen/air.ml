@@ -16,6 +16,8 @@ and array_view' =
 
 type operand =
   | Const of Int32.t
+  | Float of float
+  | Bool of bool
   | Temp of Temp.t
   | IndexOp of Temp.t * Temp.t
   | Dim of int * array_view (* Nth dimension of an array *)
@@ -109,6 +111,8 @@ end = struct
 
   let rec pp_operand = function
     | Const c -> Int32.to_string_hum c
+    | Float f -> string_of_float f
+    | Bool b -> string_of_bool b
     | Temp t -> sprintf "%%%d" (Temp.to_int t)
     | IndexOp (a, i) -> sprintf "%%%d[%%%d]" (Temp.to_int a) (Temp.to_int i)
     | Dim (i, av) -> sprintf "dim%d(%s)" i (pp_array_view av)

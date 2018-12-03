@@ -34,6 +34,8 @@ let run (dag_fun : Dag.dag_fun) (traversal : Dag_traversal.traversal) : Ir.t * T
   let lookup_exn (ctx : context) (key : Vertex.t) : Ir.operand =
     match Dag.view dag key with
     | Vertex_view.Literal (Vertex_view.Int32 i) -> Ir.Const i
+    | Vertex_view.Literal (Vertex_view.Float f) -> Ir.Float f
+    | Vertex_view.Literal (Vertex_view.Bool b)  -> Ir.Bool b
     | _ ->
     match Map.find ctx.temps key with
     | Some x -> Ir.Temp x
@@ -45,9 +47,9 @@ let run (dag_fun : Dag.dag_fun) (traversal : Dag_traversal.traversal) : Ir.t * T
     match Dag.view dag arg with
     | Literal (Bare_binop b) -> Ir.Operator.Binop b
     | Literal (Bare_unop u) -> Ir.Operator.Unop u
-    | Literal (Int32 _) | Literal (Float _) | Parallel_block _ 
-    | Function _ | Binop _ | Unop _ | Input _ | Index 
-    | Struct_Init _  | Access _ -> failwith "Not operator."
+    | Literal (Int32 _) | Literal (Float _) | Literal (Bool _ )  
+    | Parallel_block _ | Function _ | Binop _ | Unop _ | Input _ 
+    | Index | Struct_Init _  | Access _ -> failwith "Not operator."
   in
 
   let convert_call_name (call_name : Ast.call_name) (args : Vertex.t list)
@@ -123,7 +125,7 @@ let run (dag_fun : Dag.dag_fun) (traversal : Dag_traversal.traversal) : Ir.t * T
               Some (dest, stmt)
           | Vertex_view.Struct_Init (typ,fields) ->
               let preds = Dag.predecessors dag v in
-              let dest = make_dest v in
+              let dest = make_dest v in 
               let exprs = List.map preds ~f:(lookup_exn ctx) in
               let fxp = match List.zip fields exprs with 
                   Some l -> l | None -> failwith "struct field length mismatch." in

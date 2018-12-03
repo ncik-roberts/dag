@@ -22,6 +22,8 @@ type fun_call =
 
 type operand =
   | Const of Int32.t
+  | Float of float
+  | Bool of bool
   | Temp of Temp.t (* This temp is the only source temp *)
   [@@deriving sexp]
 

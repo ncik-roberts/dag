@@ -98,6 +98,7 @@ and 'a expr' =
   }
   | Access of 'a expr * ident
   | Const of int32
+  | Bool of bool
   | Float of float
   | Variable of ident
   [@@deriving sexp]

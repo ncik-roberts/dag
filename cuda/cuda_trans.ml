@@ -83,9 +83,11 @@ let trans_params (params : Ano.Param.t list) : (CU.cuda_type * CU.cuda_ident) li
 (* Translate AIR operands into their cuda equivalents. s*)
 let trans_op = function
   | Air.IndexOp (t1, t2) -> CU.Index (temp_to_var t1, temp_to_var t2)
-  | Air.Const c -> CU.Const (Int64.of_int32_exn c)
+  | Air.Const c -> CU.IConst (Int64.of_int32_exn c)
+  | Air.Float f -> CU.FConst (f)
+  | Air.Bool b -> CU.BConst (b)
   | Air.Temp t -> CU.Var (temp_name t)
-  | Air.Dim (n, view) -> CU.Const (Int64.of_int_exn n)
+  | Air.Dim (n, view) -> CU.IConst (Int64.of_int_exn n)
 
 let trans_prim = 
   let trans_cmp op a b = 
@@ -138,7 +140,7 @@ let rec trans_len_expr : Length_expr.t -> CU.cuda_expr = function
 
 let rec trans_expr : Expr.t -> CU.cuda_expr = function
   | Expr.Temp t -> temp_to_var t
-  | Expr.Const i -> CU.Const (Int64.of_int32 i)
+  | Expr.Const i -> CU.IConst (Int64.of_int32 i)
   | Expr.Index (arr, i) -> CU.Index (trans_expr arr, trans_expr i)
   | Expr.Call (op, xs) as e ->
   let open Ir.Operator in
@@ -166,9 +168,9 @@ let get_index (ctx : context) (t : Temp.t) : Temp.t -> (Expr.t, CU.cuda_expr) Ma
 let create_loop (ctx : context) ~counter:loop_temp (t : Temp.t) =
   trans_incr_loop_hdr
     ~loop_var:(temp_to_var loop_temp)
-    ~lo:(CU.Const 0L)
+    ~lo:(CU.IConst 0L)
     ~hi:(get_length ctx t)
-    ~stride:(CU.Const 1L)
+    ~stride:(CU.IConst 1L)
 
 (* Used to perform operations with length expressions. *)
 let build_cached_reduce_expr (op : CU.binop) (exprs : CU.cuda_expr list) =
@@ -326,8 +328,8 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       let lengths = List.map ~f:(get_length ctx) bound_temps in
       let total_length = build_cached_reduce_expr CU.MUL lengths in
 
-      let gdim = (CU.Const 256L, CU.Const 1L, CU.Const 1L) in
-      let bdim = (total_length, CU.Const 1L, CU.Const 1L) in (* Todo: make this blocks/thrd  *)
+      let gdim = (CU.IConst 256L, CU.IConst 1L, CU.IConst 1L) in
+      let bdim = (total_length, CU.IConst 1L, CU.IConst 1L) in (* Todo: make this blocks/thrd  *)
       let index_expr =
         (* blockDim.x * blockIdx.x + threadIdx.x *)
         (* TODO: change this? *)

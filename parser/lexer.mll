@@ -41,7 +41,7 @@ let ws = [' ' '\t' '\r' '\011' '\012']
 
 rule initial =
   parse
-  | ws+ { initial lexbuf }
+  | ws+  { initial lexbuf }
   | '\n' { initial lexbuf }
 
   | '{' { P.LBRACE }
@@ -55,32 +55,34 @@ rule initial =
   | ',' { P.COMMA }
   | ';' { P.SEMICOLON }
 
-  | '=' { P.ASSIGN }
+  | '='  { P.ASSIGN }
   | "<-" { P.BIND }
 
-  | '+' { P.PLUS }
-  | '-' { P.MINUS }
-  | '*' { P.TIMES }
-  | '/' { P.DIV }
-  | '%' { P.MOD }
+  | '+'  { P.PLUS }
+  | '-'  { P.MINUS }
+  | '*'  { P.TIMES }
+  | '/'  { P.DIV }
+  | '%'  { P.MOD }
   | "<<" { P.LSHIFT }
   | ">>" { P.RSHIFT }
-  | '<' { P.LT }
+  | '<'  { P.LT }
   | "<=" { P.LTE }
-  | '>' { P.GT }
+  | '>'  { P.GT }
   | ">=" { P.GTE }
   | "&&" { P.LOGICAL_AND }
   | "||" { P.LOGICAL_OR }
-  | '&' { P.BITWISE_AND }
-  | '|' { P.BITWISE_OR }
-  | '^' { P.BITWISE_XOR }
+  | '&'  { P.BITWISE_AND }
+  | '|'  { P.BITWISE_OR }
+  | '^'  { P.BITWISE_XOR }
 
-  | "return" { P.RETURN }
+  | "return"   { P.RETURN }
   | "parallel" { P.PARALLEL }
-  | "struct" { P.STRUCT }
+  | "struct"   { P.STRUCT }
 
+  | "true"      { P.BOOLCONST true }
+  | "false"     { P.BOOLCONST false }
   | decnum as n { decnumber n lexbuf }
-  | fnum as n { floatnumber n lexbuf }
+  | fnum as n   { floatnumber n lexbuf }
   | hexnum as n { hexnumber n lexbuf }
 
   | id as name { P.IDENT name }
@@ -89,20 +91,20 @@ rule initial =
   | "*/" { error "unbalanced comments" }
 
   | "//" { comment_line lexbuf }
-  | eof { eof () }
-  | _ { errorf lexbuf "illegal character: \"%s\"" }
+  | eof  { eof () }
+  | _    { errorf lexbuf "illegal character: \"%s\"" }
 
 and comment =
   parse
   | "/*" { enterComment lexbuf; comment lexbuf }
   | "*/" { (if exitComment () then initial else comment) lexbuf }
-  | eof { eof () }
-  | _ { comment lexbuf }
+  | eof  { eof () }
+  | _    { comment lexbuf }
 
 and comment_line =
   parse
   | '\n' { initial lexbuf }
-  | eof { eof () }
-  | _ { comment_line lexbuf }
+  | eof  { eof () }
+  | _    { comment_line lexbuf }
 
 {}

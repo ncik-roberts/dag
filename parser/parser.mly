@@ -8,6 +8,7 @@
 
 %token <string> IDENT
 %token <int32> CONST
+%token <bool> BOOLCONST
 %token <float> FLOATCONST
 
 // Operators
@@ -224,6 +225,8 @@ _expr :
       { Ast.Const i }
   | i = FLOATCONST;
       { Ast.Float i }
+  | i = BOOLCONST;
+      { Ast.Bool i }
   | ident = IDENT;
       { Ast.Variable ident }
   | call_ident = IDENT;

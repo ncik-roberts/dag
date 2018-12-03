@@ -46,7 +46,8 @@ let run (dag_fun : Dag.dag_fun) (traversal : Dag_traversal.traversal) : Ir.t * T
     | Literal (Bare_binop b) -> Ir.Operator.Binop b
     | Literal (Bare_unop u) -> Ir.Operator.Unop u
     | Literal (Int32 _) | Literal (Float _) | Parallel_block _ 
-    | Function _ | Binop _ | Unop _ | Input _ | Index | Struct_Init _ -> failwith "Not operator."
+    | Function _ | Binop _ | Unop _ | Input _ | Index 
+    | Struct_Init _  | Access _ -> failwith "Not operator."
   in
 
   let convert_call_name (call_name : Ast.call_name) (args : Vertex.t list)
@@ -104,8 +105,14 @@ let run (dag_fun : Dag.dag_fun) (traversal : Dag_traversal.traversal) : Ir.t * T
           | Vertex_view.Index ->
               let (pred1,pred2) = Dag.predecessors dag v |> tuple2_of_list_exn in
               let (arg1,arg2) = (lookup_exn ctx pred1, lookup_exn ctx pred2) in
-              let dest = make_dest v in (* I mean, conceptually... *)
+              let dest = make_dest v in 
               let stmt = Ir.Index (dest, arg1, arg2) in
+              Some (dest, stmt)
+          | Vertex_view.Access field ->
+              let pred = Dag.predecessors dag v |> tuple1_of_list_exn in
+              let strct = lookup_exn ctx pred in
+              let dest = make_dest v in
+              let stmt = Ir.Access (dest,strct,field) in
               Some (dest, stmt)
           | Vertex_view.Function call_name ->
               let preds = Dag.predecessors dag v in

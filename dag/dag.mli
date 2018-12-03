@@ -16,6 +16,7 @@ module Vertex_view : sig
     | Function of Ast.call_name
     | Binop of Ast.binop
     | Unop of Ast.unop
+    | Access of Ast.ident
     | Index 
     | Struct_Init of Tc.typ * Ast.ident list
     | Literal of literal

@@ -213,6 +213,8 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       [ d <-- CU.Binop (trans_binop op, trans_op s1, trans_op s2) ]
   | Air.Index (d, src, i) ->
       [ d <-- CU.Index (trans_op src, trans_op i)]
+  | Air.Access (d,src,f) ->
+      [ d <-- CU.Field (trans_op src, f)]
   | Air.Unop (d, op, s) ->
       [ d <-- CU.Unop (trans_unop op, trans_op s) ]
   | Air.Assign (d, s) ->

@@ -33,6 +33,7 @@
 %token LBRACE RBRACE /* {} */
 %token LBRACKET RBRACKET /* [] */
 %token LPAREN RPAREN /* () */
+%token DOT /* . */
 
 %token EOF
 
@@ -47,7 +48,7 @@
 %left PLUS MINUS
 %left TIMES DIV MOD
 %nonassoc UNARY_MINUS
-%left LBRACKET
+%left LBRACKET DOT
 
 %type <unit Ast.global_stmt list> global_stms
 %start global_stms
@@ -253,6 +254,10 @@ _expr :
     index_expr = expr;
     RBRACKET;
     { Ast.Index { index_source; index_expr; } }
+  | field_source = expr;
+    DOT;
+    field_name = IDENT;
+    { Ast.Access (field_source,field_name) }
   | LBRACE;
     struct_type = typ;
     struct_fields = struct_init_exprs;

@@ -51,6 +51,7 @@ rule initial =
   | '[' { P.LBRACKET }
   | ']' { P.RBRACKET }
 
+  | '.' { P.DOT }
   | ',' { P.COMMA }
   | ';' { P.SEMICOLON }
 

@@ -15,6 +15,7 @@ module Vertex_view = struct
     | Function of Ast.call_name
     | Binop of Ast.binop
     | Unop of Ast.unop
+    | Access of Ast.ident
     | Index 
     | Struct_Init of Tc.typ * Ast.ident list
     | Literal of literal
@@ -117,7 +118,8 @@ let unroll dag key =
   (* Only recursive production is Parallel_block *)
   match view dag key with
   | Parallel_block (_, t) -> Some t
-  | Function _ | Binop _ | Unop _ | Literal _ | Input _  | Index | Struct_Init _ -> None
+  | Function _ | Binop _ | Unop _ | Literal _ 
+  | Input _  | Index | Struct_Init _ | Access _ -> None
 
 type 'a counter = unit -> 'a
 let make_counter ~(seed:'a) ~(next:'a -> 'a) : 'a counter =
@@ -251,6 +253,11 @@ let of_ast : Tc.typ Ast.fun_defn list -> t =
           let src = loop_expr ctx i.index_source in
           let expr = loop_expr ctx i.index_expr in
           `New_vertex(vertex, view, [src; expr], `No_additional_results)
+      | Ast.Access (s,f) -> 
+          let vertex = next_vertex () in 
+          let view = Vertex_view.Access f in 
+          let src = loop_expr ctx s in
+          `New_vertex(vertex, view, [src], `No_additional_results)
       | Ast.Struct_Init s ->
           let vertex = next_vertex () in 
           let fields = List.map ~f:(fun f -> Ast.(f.field_name)) s.struct_fields in

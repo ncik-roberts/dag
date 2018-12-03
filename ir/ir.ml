@@ -43,6 +43,7 @@ type stmt =
   | Parallel of dest * operand * Temp.t * stmt list
   | Binop of dest * Ast.binop * operand * operand
   | Index of dest * operand * operand
+  | Access of dest * operand * Ast.ident
   | Unop of dest * Ast.unop * operand
   | Struct_Init of Tc.typ * dest * (Ast.ident * operand) list
   | Fun_call of dest * fun_call * operand list

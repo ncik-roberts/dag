@@ -157,6 +157,8 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
   | Ir.Index (dest,src,expr) ->
     (* Maybe no indexes that operate on indexes? *)
     Air.[(ctx,Seq (Index (dest,convert_operand ctx src,convert_operand ctx expr)))]
+  | Ir.Access (dest,strc,field) ->
+    Air.[(ctx,Seq (Access (dest,convert_operand ctx strc,field)))]
   | Ir.Unop (dest, unop, src) ->
       assert (not_in ctx src);
       Air.[(ctx, Seq (Unop (dest, unop, convert_operand ctx src)))]

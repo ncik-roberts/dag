@@ -74,6 +74,7 @@ and seq_stmt =
   | Primitive of Ir.dest * primitive
   | Struct_Init of Ir.dest * Tc.typ * (Ast.ident * operand) list
   | Index of Ir.dest * operand * operand
+  | Access of Ir.dest * operand * Ast.ident
   | Assign of Ir.dest * operand
   [@@deriving sexp]
 
@@ -145,6 +146,8 @@ end = struct
     | Struct_Init (dst,_,flx) ->
         let fields = String.concat ~sep:"; " (List.map flx ~f:(fun (n,o) -> n^" = "^pp_operand o)) in
         sprintf "%s%s <- { %s }" indent (pp_dest dst) (fields)
+    | Access (dest,strc,fld) -> 
+        sprintf "%s%s <- %s.%s" indent (pp_dest dest) (pp_operand strc) (fld)
     | Assign (dst, src) -> sprintf "%s%s <- %s" indent (pp_dest dst)
         (pp_operand src)
     | Primitive (dst,src) -> sprintf "%s%s <- %s" indent (pp_dest dst) 

@@ -263,7 +263,7 @@ and annotate_seq_stmt
         let used = Set.union (used_of_operand ctx src1) (used_of_operand ctx src2) in
         let defined = defined_of_dest dest in
         ({ used; defined; additional_buffers = Temp.Set.empty; }, ctx)
-    | Air.Assign (dest, src) | Air.Unop (dest, _, src) ->
+    | Air.Assign (dest, src) | Air.Unop (dest, _, src) | Air.Access (dest,src,_) ->
         let used = used_of_operand ctx src in
         let defined = defined_of_dest dest in
         ({ used; defined; additional_buffers = Temp.Set.empty }, ctx)

@@ -218,7 +218,7 @@ let rec fmt_expr = function
   | Address e -> sprintf "&(%s)" (fmt_expr e)
   | Index (e,i) -> sprintf "%s[%s]" (fmt_expr e) (fmt_expr i)
   | Deref e -> sprintf "*(%s)" (fmt_expr e)
-  | Field (s,f) -> sprintf "(%s)->%s" (fmt_expr s) f
+  | Field (s,f) -> sprintf "(%s).%s" (fmt_expr s) f
 
 let rec fmt_block n block =
    let sp = str_depth n in

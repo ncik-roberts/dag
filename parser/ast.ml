@@ -96,6 +96,7 @@ and 'a expr' =
     struct_type : 'a * typ;
     struct_fields : 'a field list;
   }
+  | Access of 'a expr * ident
   | Const of int32
   | Float of float
   | Variable of ident

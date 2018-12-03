@@ -77,6 +77,17 @@ let check_index (typ1 : typ) (typ2 : typ) : typ =
   | Array t,Int -> t
   | _,_ -> failwith "Invalid index types."
 
+let check_access ctx typ field = 
+  match typ with 
+  | Struct s -> 
+    (match Map.find (ctx.struct_ctx) s with
+    | Some t ->  
+      (match List.find t ~f:(fun f -> f.field_name = field) with
+        | Some f -> f.field_type
+        | None -> failwith "Struct does not have field.")
+    | None -> failwith "Struct does not exist?" )
+  | _ -> failwith "Cannot access non-struct."
+
 let rec is_at_least_n_dimensional ~n typ = match n, typ with
   | _, _ when n <= 0 -> false
   | 1, Array _ -> true
@@ -191,6 +202,11 @@ let rec check_expr (ctx : tctxt) (ast : unit Ast.expr) : typ Ast.expr = match sn
       let (typ2,_) as res2 = check_expr ctx index.index_expr in
       let typ = check_index typ1 typ2 in
       (typ, Ast.Index {index_source = res1; index_expr = res2})
+  | Ast.Access (e,f) ->
+      let (typ1,_) as res1 = check_expr ctx e in 
+      let typ = check_access ctx typ1 f in
+      (typ, Ast.Access (res1,f))
+
   | Ast.Struct_Init struc -> 
       let results = List.map ~f:(check_expr ctx) 
                     (List.map ~f:(fun f -> Ast.(f.field_expr)) struc.struct_fields) in

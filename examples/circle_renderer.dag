@@ -19,21 +19,14 @@ struct square {
   float bottom;
   float left;
   float right;
-  int[] circleIDs;
 }
 
 // "Header Functions" that we assume exist.
   float log(int base,int number);
 
-// Remaining language features to implement:
-   struct initialiations:
-   struct s = { field_1 = expr_1; field_2 = expr_2 };
-
 // Language features we need to get this implementatation to work:
-//   Structs, and a semantics for them.
-//   Boolean literals (at some point!)
-//   Additional blocks (parallel_filter,(parallel_filter_map?))
-//   Internally: scan.
+//   Additional primitives: filterWith, scan
+//   Nice To Have: if then else (expressions, not statements.) -- thoughts from Nick?
 
 // Current this is ported in from the assignment 2 starter code. 
 // It makes use of ternary expressions. We could replace this by implementing 
@@ -86,24 +79,21 @@ square[][] partitionImage(int width, int height, int num_squares, int num_circle
   // Assuming a definition of (exclusive) tabulate something along the lines of:
   // tabulate (start,stop,?stride) -> [start,start+stride,...,stop-stride] 
   // Note: this requires some casting from int -> float at some point.
-  int[] xs = tabulate(0,(width/num_squares)));
-  int[] ys = tabulate(0,(height/num_squares)));
+  int[] xs = tabulate(0,(width/num_squares),1);
+  int[] ys = tabulate(0,(height/num_squares),1);
 
   // We use the parallel block to define a map.
   float fnum = float_of_int(num_squares);
-  square[] xsquares = parallel (width <- xs) {
-    square s;
-    s.left = float_of_int(width) * fnum;
-    s.right = float_of_int(width + 1) * fnum;
-    return s;
-  };
 
   // We nest parallel maps to "graft" an array implicitly
   square[][] ysquares = parallel (square <- xsquares) {
     return parallel (height <- ys) {
-      square.left = float_of_int(height) * fnum;
-      square.right = float_of_int(height + 1) * fnum;
-      return square;
+      parallel (width <- xs) {
+        // New struct initialization syntax in action. All fields must be filled.
+        return { left = float_of_int(width) * fnum;
+                 right = float_of_int(width + 1) * fnum;
+                 top = float_of_int(height) * fnum;
+                 bottom = float_of_int(height + 1) * fnum; }
     };
   };
 
@@ -119,7 +109,7 @@ square[][] partitionImage(int width, int height, int num_squares, int num_circle
 // A lot of this stems from the fact that we need some way to index into a cached
 // array of circle structs with our algorithm, or the performance is going to be 
 // absolutely trashed.
-square[][] scanCircles (square[][] squares, circle[] circles)
+int[][][] scanCircles (square[][] squares, circle[] circles)
 {
   return parallel(sub_squares <- squares){
     return parallel(square <- sub_squares){ 
@@ -135,8 +125,7 @@ square[][] scanCircles (square[][] squares, circle[] circles)
       int[] unfiltered_IDs = enumerate(circles);
 
       // ('a [] * bool [] -> 'a []) "Maps" a filter out of an array of boolans.
-      square.circleIDs = filterWith(unfiltered_IDs,intersections);
-      return square;
+      return filterWith(unfiltered_IDs,intersections);
 
       // ---------
 
@@ -147,8 +136,7 @@ square[][] scanCircles (square[][] squares, circle[] circles)
       circle[] filtered_circles = parallel_filter(circle <- circles){
         return circleIntersectsSquare(circle,square);
       };
-      square.circleIDs = enumerate(filtered_circles);
-      return square;
+      return enumerate(filtered_circles);
 
       // ----------
 
@@ -157,10 +145,10 @@ square[][] scanCircles (square[][] squares, circle[] circles)
       // to the current index. Additionally, we have a filter_map construct
       // that returns a pair of boolean, and an expression to be evaluated
       // and return if the boolean was true.
-      square.circleIDs = parallel_filter_map(circle <- circles){
+      return parallel_filter_map(circle <- circles){
         return (circleIntersectsSquare(circle,square),PARALLEL_INDEX);
       };
-      return square;
+
     };
   };
 }
@@ -173,8 +161,8 @@ int getColor(int x,int offset){
 }
 // Gotta be able to set them, too.
 int setColor(int x,int offset,int color){
-   x = x & (0xFF << offset);
-   return x & (color << offset);
+   y = x & (~(0xFF << offset));
+   return y & (color << offset);
 }
 // Convenience wrappers. 
 int setRed(int x,int red){
@@ -207,13 +195,13 @@ int addPixels(int pixelColor, int newColor)
   int r = blendColor(alpha,oneMinusAlpha,pixelColor,newColor,24);
   int g = blendColor(alpha,oneMinusAlpha,pixelColor,newColor,16);
   int b = blendColor(alpha,oneMinusAlpha,pixelColor,newColor,8);
-  int a = alpha + pixelColor & 0xFF; // What information hiding? 
+  int a = int_of_float(alpha*255.0) + (pixelColor & 0xFF); 
 
   //Chain it up.
   return setRed(setGreen(setBlue(setAlpha(pixelColor,a),b),g),r);
 }
 
-// Distance check.
+// Distance check. An example of why we need float comparisons
 bool pixelInCircle(circle c, float normX, float normY)
 {
   float dx = (c.x - normX) * (c.x - normX);
@@ -223,7 +211,7 @@ bool pixelInCircle(circle c, float normX, float normY)
 
 // This relies on a primitive: index(collection,idx) = collection[idx]
 // Is the nesting a little ridiculous? Yes. Yes it is. Fully 4D parallelism.
-int[][][][] renderSquares(square[][] squares, circle[] circles, int num_squares, int width, int height)
+int[][][][] renderSquares(square[][] squares, int[][][] scanned, circle[] circles, int num_squares, int width, int height)
 {
   return parallel (sub_squares <- squares) {
     return parallel (square <- sub_squares) {
@@ -237,12 +225,20 @@ int[][][][] renderSquares(square[][] squares, circle[] circles, int num_squares,
         return parallel (x <- xPixels) {
           float normX = float_of_int(x) / fWidth;
           float normY = float_of_int(y) / fHeight;
-          
-          bool[] ix = parallel (id <- square.circleIDs) {
+
+          // We need some sort of indexing primitive provided by the parallel block if
+          // these are going to be processed in parallel. The ZipWith is limited by the 
+          // fact that the function cannot be processed inline: 
+          // Proposition: Parallel_Zip (x <- xs; y <- ys) (xs,ys must have = length.)
+          // Alternative: keyword: index0, index1, .. etc 
+          //              (index of the outermost level of nesting, second, etc.)
+
+          int[] ids = scanned[index0][index1];
+          bool[] ix = parallel (id <- ids) {
             return pixelInCircle(c,normX,normY);
           }
-
-          int[] colors = parallel (id <- square.circleIDs) {
+          
+          int[] colors = parallel (id <- ids) {
             return circles[id].color;
           }
 
@@ -280,7 +276,7 @@ int[][] concatPixelSubarrays (int[][][][] pixels, int width, int height)
 int[][] renderImage(int image_width, int image_height, circle[] circles){
   int num_squares = numSquaresPerSide(dim0(circles));
   square[][] squares = partitionImage(image_width,image_height,dim0(circles));
-  square[][] scanned = scanCircles(squares,circles);
-  int[][][][] pixels = renderSquares(squares,circles,num_squares,image_width,image_height);
+  int[][][] scanned = scanCircles(squares,circles);
+  int[][][][] pixels = renderSquares(squares,scanned,circles,num_squares,image_width,image_height);
   return concatPixelSubarrays(pixels,image_width,image_height);
 }

@@ -29,8 +29,7 @@ struct square {
 //   Nice To Have: if then else (expressions, not statements.) -- thoughts from Nick?
 
 // Current this is ported in from the assignment 2 starter code. 
-// It makes use of ternary expressions. We could replace this by implementing 
-// (if then else) syntax, or by providing min() and max() as primitives.
+// It makes use of ternary expressions. We could implement (if then else) syntax.
 bool circleIntersectsSquare(circle c, square box)
 {
     // Clamp circle center to box (finds the closest point on the box)
@@ -105,10 +104,6 @@ square[][] partitionImage(int width, int height, int num_squares, int num_circle
 // This function contains a lot of options on how the operation can be performed
 // based off of the existing language primitives and a range of memory efficiency.
 
-// Author's Note: 
-// A lot of this stems from the fact that we need some way to index into a cached
-// array of circle structs with our algorithm, or the performance is going to be 
-// absolutely trashed.
 int[][][] scanCircles (square[][] squares, circle[] circles)
 {
   return parallel(sub_squares <- squares){
@@ -121,8 +116,7 @@ int[][][] scanCircles (square[][] squares, circle[] circles)
       };
 
       // We explicitly allocate an array. Enumerate is the list of indices.
-      // enumerate('a[] collection) : int[] = tabulate (0,dim0(collection));
-      int[] unfiltered_IDs = enumerate(circles);
+      int[] unfiltered_IDs = tabulate(0,dim0(circles),1);
 
       // ('a [] * bool [] -> 'a []) "Maps" a filter out of an array of boolans.
       return filterWith(unfiltered_IDs,intersections);
@@ -201,7 +195,7 @@ int addPixels(int pixelColor, int newColor)
   return setRed(setGreen(setBlue(setAlpha(pixelColor,a),b),g),r);
 }
 
-// Distance check. An example of why we need float comparisons
+// Distance check. An example of why we need float comparisons and binops.
 bool pixelInCircle(circle c, float normX, float normY)
 {
   float dx = (c.x - normX) * (c.x - normX);
@@ -258,8 +252,8 @@ int[][] concatPixelSubarrays (int[][][][] pixels, int width, int height)
   int squareHeight = dim2(pixels);
   int squareWidth  = dim3(pixels);
 
-  int[] xs = tabulate(0,width);
-  int[] ys = tabulate(0,height);
+  int[] xs = tabulate(0,width,1);
+  int[] ys = tabulate(0,height,1);
   return parallel (y <- ys){
     return parallel (x <- xs){
       int i = y / squareHeight;

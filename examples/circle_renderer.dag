@@ -24,7 +24,7 @@ struct square {
 // "Header Functions" that we assume exist.
   float log(int base,int number);
 
-// Language features we need to get this implementatation to work:
+// Language features we need to get this implementation to work:
 //   Additional primitives: filterWith, scan
 //   Nice To Have: if then else (expressions, not statements.) -- thoughts from Nick?
 
@@ -85,14 +85,13 @@ square[][] partitionImage(int width, int height, int num_squares, int num_circle
   float fnum = float_of_int(num_squares);
 
   // We nest parallel maps to "graft" an array implicitly
-  square[][] ysquares = parallel (square <- xsquares) {
-    return parallel (height <- ys) {
-      parallel (width <- xs) {
-        // New struct initialization syntax in action. All fields must be filled.
-        return { left = float_of_int(width) * fnum;
-                 right = float_of_int(width + 1) * fnum;
-                 top = float_of_int(height) * fnum;
-                 bottom = float_of_int(height + 1) * fnum; }
+  return parallel (height <- ys) {
+    parallel (width <- xs) {
+      // New struct initialization syntax in action. All fields must be filled.
+      return { left = float_of_int(width) * fnum;
+               right = float_of_int(width + 1) * fnum;
+               top = float_of_int(height) * fnum;
+               bottom = float_of_int(height + 1) * fnum; }
     };
   };
 
@@ -203,7 +202,6 @@ bool pixelInCircle(circle c, float normX, float normY)
   return dx*dx + dy*dy <= c.radius * c.radius;
 }
 
-// This relies on a primitive: index(collection,idx) = collection[idx]
 // Is the nesting a little ridiculous? Yes. Yes it is. Fully 4D parallelism.
 int[][][][] renderSquares(square[][] squares, int[][][] scanned, circle[] circles, int num_squares, int width, int height)
 {

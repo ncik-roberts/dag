@@ -56,6 +56,8 @@ and call_name =
   | Map
   | Transpose
   | Zip_with
+  | Filter_with
+  | Scan
   | Tabulate
   | Float_of_int
   | Int_of_float

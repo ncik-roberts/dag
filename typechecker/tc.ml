@@ -51,31 +51,38 @@ let add_with_failure
   | `Ok result -> result
   | `Duplicate -> failwithf on_duplicate key ()
 
-(* Well. This isn't strictly true, see - these are overloaded and can work on 
- * floats too. Which is a problem that we'll hit soon enough. *)
-let infer_binop (binop : Ast.binop) : fun_type = 
+(* *)
+let infer_binop typ (binop : Ast.binop) : fun_type = 
+  if typ <> Int && typ <> Float then failwith "Invalid Binop type." else
   match binop with 
   | Ast.(Plus | Minus | Times | Div | Mod | Lshift | Rshift | BitAnd | BitOr | BitXor) ->
-    { param_types = [ Int; Int; ]; return_type = Int; }
+    { param_types = [ typ; typ; ]; return_type = typ; }
   | Ast.(And | Or ) ->
     { param_types = [ Bool; Bool;]; return_type = Bool; }
   | Ast.(Less | Greater | LessEq | GreaterEq ) ->
-    { param_types = [ Int; Int;]; return_type = Bool; }
+    { param_types = [ typ; typ;]; return_type = Bool; }
 
 (* Negate works on ints and floats, logical not works on ints and bools. *)
-let infer_unop (unop : Ast.unop) : fun_type = {
-  param_types = [ Int ];
-  return_type = Int;
-}
+let infer_unop typ  (unop : Ast.unop) : fun_type = 
+  let _ = match unop with 
+  | Ast.Negate -> 
+    if typ <> Int && typ <> Float then failwith "Invalid negate type.";
+  | Ast.Logical_not ->
+    if typ <> Int && typ <> Bool then failwith "Invalid logical_not type."
+  in
+  {
+    param_types = [ typ ];
+    return_type = typ;
+  }
 
 let check_binop (typ1 : typ) (typ2 : typ) (binop : Ast.binop) : typ =
-  let fun_type = infer_binop binop in
+  let fun_type = infer_binop typ1 binop in
   if fun_type.param_types <> [ typ1; typ2; ]
   then failwith "Invalid binop types."
-  else fun_type.return_type
+  else fun_type.return_type 
 
 let check_unop (typ : typ) (unop : Ast.unop) : typ =
-  let fun_type = infer_unop unop in
+  let fun_type = infer_unop typ unop in
   if fun_type.param_types <> [ typ ]
   then failwith "Invalid unop types."
   else fun_type.return_type
@@ -247,14 +254,24 @@ let rec check_expr (ctx : tctxt) (ast : unit Ast.expr) : typ Ast.expr = match sn
             (Array typ, Ast.Parallel { parallel with parallel_arg = res; parallel_body = res_stmts; parallel_type; })
       end
   | Ast.Fun_call fun_call ->
-      let (arg_types, args) = List.map fun_call.call_args ~f:(function
-        | Ast.Bare_binop ((), binop) -> let typ = Fun (infer_binop binop) in (typ, Ast.Bare_binop (typ, binop))
-        | Ast.Bare_unop ((), unop) -> let typ = Fun (infer_unop unop) in (typ, Ast.Bare_unop (typ, unop))
-        | Ast.Expr expr -> let (t, e) = check_expr ctx expr in (t, Ast.Expr (t, e)))
+      let (arg_types,args) =
+      match fun_call.call_args with
+      | [Ast.Bare_binop ((),binop); Ast.Expr s1; Ast.Expr s2] ->
+          let (t1,e1),(t2,e2) = check_expr ctx s1, check_expr ctx s2 in
+          let typ = Fun (infer_binop t1 binop) in
+          ([typ;t1;t2],[Ast.Bare_binop(typ,binop);Ast.Expr (t1,e1); Ast.Expr(t2,e2)])
+      | [Ast.Bare_unop ((),unop); Ast.Expr s] ->
+          let (t,e) = check_expr ctx s in 
+          let typ = Fun (infer_unop t unop) in
+          ([typ;t],[Ast.Bare_unop(typ,unop);Ast.Expr(t,e)])
+      | exprs -> List.map exprs ~f:(function
+        | Ast.Expr expr -> let (t, e) = check_expr ctx expr in (t, Ast.Expr (t, e))
+        | _ -> failwith "Cannot use bare ops in standard calls. (Type Restriction)")
         |> List.unzip
       in
       let ret_ty = check_fun ctx fun_call.call_name arg_types in
       (ret_ty, Ast.Fun_call { fun_call with call_args = args })
+      
 
 and check_stmt (ctx : tctxt) (ast : unit Ast.stmt) : tctxt * typ Ast.stmt =
   if Option.is_some ctx.return_type then failwith "Function already returned.";

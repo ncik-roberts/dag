@@ -243,6 +243,8 @@ _expr :
           | "tabulate" -> Ast.Tabulate
           | "float_of_int" -> Ast.Float_of_int
           | "int_of_float" -> Ast.Int_of_float
+          | "filterWith" -> Ast.Filter_with
+          | "scan" -> Ast.Scan
           | s ->
             let open Core in
             let dim =

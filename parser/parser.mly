@@ -138,6 +138,25 @@ fields :
       { first_field :: other_fields }
   ;
 
+init_field : 
+  | field_name = IDENT;
+    field_expr = expr;
+    { Ast.{ field_name; field_expr; } }
+
+init_field_tail :
+  | /* empty */ 
+    { [] }
+  | SEMICOLON;
+    first = init_field;
+    rest = init_field_tail;
+      { first :: rest }
+
+struct_init_exprs : 
+  | /* empty */ 
+    { [] }
+  | first_init = init_field;
+    other_inits = init_field_tail; 
+    { first_init :: other_inits }
 
 /**********************************
  * ARGUMENTS
@@ -234,6 +253,11 @@ _expr :
     index_expr = expr;
     RBRACKET;
     { Ast.Index { index_source; index_expr; } }
+  | LBRACE;
+    struct_type = typ;
+    struct_fields = struct_init_exprs;
+    RBRACE;
+    { Ast.Struct_Init { struct_type; struct_fields; } } 
   | unary_operator = unop;
     unary_operand = expr;
       %prec UNARY_MINUS

@@ -136,6 +136,11 @@ let used_of_primitive (ctx : context) (p : Air.primitive) : Temp.Set.t =
     | Air.Min (a,b) | Air.Max (a,b) -> Set.union (of_op a) (of_op b)
     | Air.F2I (a) | Air.I2F (a) -> of_op a
 
+let used_of_struct_fields (ctx : context) (fields) =
+  let of_op = used_of_operand ctx in
+  List.fold fields ~init:Temp.Set.empty 
+  ~f:(fun set (_,fld) -> Set.union set (of_op fld))
+
 let defined_of_dest : Ir.dest -> Temp.Set.t =
   function
     | Ir.Return _ -> Temp.Set.empty
@@ -266,6 +271,10 @@ and annotate_seq_stmt
         let used = used_of_primitive ctx src in
         let defined = defined_of_dest dest in
         ({ used; defined; additional_buffers = Temp.Set.empty }, ctx)
+    | Air.Struct_Init (dest,_,flx) ->
+       let used = used_of_struct_fields ctx flx in
+       let defined = defined_of_dest dest in
+       ({ used; defined; additional_buffers = Temp.Set.empty }, ctx)
     | Air.Seq_stmt seq_stmt -> annotate_seq_stmt_stmt kernel_ctx ctx seq_stmt
   in
 

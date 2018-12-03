@@ -160,6 +160,9 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
   | Ir.Unop (dest, unop, src) ->
       assert (not_in ctx src);
       Air.[(ctx, Seq (Unop (dest, unop, convert_operand ctx src)))]
+  | Ir.Struct_Init (typ,dest,fxp) ->
+    let conv't_exps = List.map fxp ~f:(fun (n,o) -> (n,convert_operand ctx o)) in
+    Air.[(ctx, Seq (Struct_Init(dest,typ,conv't_exps)))] 
   | Ir.Fun_call (dest, Ir.Reduce op, srcs) ->
     begin
       match List.map ~f:(canonicalize ctx) srcs with

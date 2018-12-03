@@ -44,6 +44,7 @@ type stmt =
   | Binop of dest * Ast.binop * operand * operand
   | Index of dest * operand * operand
   | Unop of dest * Ast.unop * operand
+  | Struct_Init of Tc.typ * dest * (Ast.ident * operand) list
   | Fun_call of dest * fun_call * operand list
   | Assign of dest * operand
   | Nop

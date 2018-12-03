@@ -17,6 +17,7 @@ module Vertex_view : sig
     | Binop of Ast.binop
     | Unop of Ast.unop
     | Index 
+    | Struct_Init of Tc.typ * Ast.ident list
     | Literal of literal
     | Input of Ast.ident
     [@@deriving sexp]

@@ -46,7 +46,7 @@ let run (dag_fun : Dag.dag_fun) (traversal : Dag_traversal.traversal) : Ir.t * T
     | Literal (Bare_binop b) -> Ir.Operator.Binop b
     | Literal (Bare_unop u) -> Ir.Operator.Unop u
     | Literal (Int32 _) | Literal (Float _) | Parallel_block _ 
-    | Function _ | Binop _ | Unop _ | Input _ | Index -> failwith "Not operator."
+    | Function _ | Binop _ | Unop _ | Input _ | Index | Struct_Init _ -> failwith "Not operator."
   in
 
   let convert_call_name (call_name : Ast.call_name) (args : Vertex.t list)
@@ -83,7 +83,7 @@ let run (dag_fun : Dag.dag_fun) (traversal : Dag_traversal.traversal) : Ir.t * T
       let typ = Dag.type_of dag v in
       let t = Temp.next typ () in
       if Vertex.equal v ctx.return then Ir.Return t else Ir.Dest t
-    in
+    in 
 
     match t with
     | Dag_traversal.Just v ->
@@ -114,6 +114,15 @@ let run (dag_fun : Dag.dag_fun) (traversal : Dag_traversal.traversal) : Ir.t * T
               let args = List.map preds ~f:(lookup_exn ctx) in
               let stmt = Ir.Fun_call (dest, fun_call, args) in
               Some (dest, stmt)
+          | Vertex_view.Struct_Init (typ,fields) ->
+              let preds = Dag.predecessors dag v in
+              let dest = make_dest v in
+              let exprs = List.map preds ~f:(lookup_exn ctx) in
+              let fxp = match List.zip fields exprs with 
+                  Some l -> l | None -> failwith "struct field length mismatch." in
+              let stmt = Ir.Struct_Init(typ,dest,fxp) in
+              Some (dest,stmt)
+
           | Vertex_view.Literal _ -> None
           | Vertex_view.Input input ->
               failwithf "Encountered unexpected parameter: `%s`" input ()

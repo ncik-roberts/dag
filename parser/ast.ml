@@ -92,10 +92,19 @@ and 'a expr' =
      index_source : 'a expr;
      index_expr : 'a expr;
   }
+  | Struct_Init of { 
+    struct_type : 'a * typ;
+    struct_fields : 'a field list;
+  }
   | Const of int32
   | Float of float
   | Variable of ident
   [@@deriving sexp]
+
+and 'a field = {
+  field_name : ident;
+  field_expr : 'a expr;
+}
 
 type 'a fun_defn = {
   fun_ret_type : 'a * typ;

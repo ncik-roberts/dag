@@ -167,6 +167,9 @@ let rec check_type (ctx : tctxt) (ast : Ast.typ) : typ = match ast with
       | None -> failwithf "Unknown type `%s`" ident ())
   | Ast.Array ast' -> Array (check_type ctx ast')
 
+let rec check_struct_fields (ctx : tctxt) (typ : Ast.typ) (ls : 'a Ast.field list) : unit = 
+    ()  (* Todo : check that struct_exprs match field types. *) 
+
 let rec check_expr (ctx : tctxt) (ast : unit Ast.expr) : typ Ast.expr = match snd ast with
   | Ast.Const c -> (Int, Ast.Const c)
   | Ast.Float f -> (Float, Ast.Float f)
@@ -188,6 +191,15 @@ let rec check_expr (ctx : tctxt) (ast : unit Ast.expr) : typ Ast.expr = match sn
       let (typ2,_) as res2 = check_expr ctx index.index_expr in
       let typ = check_index typ1 typ2 in
       (typ, Ast.Index {index_source = res1; index_expr = res2})
+  | Ast.Struct_Init struc -> 
+      let results = List.map ~f:(check_expr ctx) 
+                    (List.map ~f:(fun f -> Ast.(f.field_expr)) struc.struct_fields) in
+      let new_fields = List.map2_exn (struc.struct_fields) results ~f:(fun f exp -> Ast.{f with field_expr = exp }) in
+      let (_,ast_t) = struc.struct_type in
+      let typ = check_type ctx (ast_t) in
+      check_struct_fields ctx (ast_t) (new_fields);
+      (typ, Ast.Struct_Init { struct_type = (typ,ast_t); struct_fields = new_fields; })
+
   | Ast.Parallel parallel ->
       begin
         let (typ, _) as res = check_expr ctx parallel.parallel_arg in

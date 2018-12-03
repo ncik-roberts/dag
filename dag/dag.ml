@@ -16,6 +16,7 @@ module Vertex_view = struct
     | Binop of Ast.binop
     | Unop of Ast.unop
     | Index 
+    | Struct_Init of Tc.typ * Ast.ident list
     | Literal of literal
     | Input of Ast.ident
     [@@deriving sexp]
@@ -116,7 +117,7 @@ let unroll dag key =
   (* Only recursive production is Parallel_block *)
   match view dag key with
   | Parallel_block (_, t) -> Some t
-  | Function _ | Binop _ | Unop _ | Literal _ | Input _  | Index -> None
+  | Function _ | Binop _ | Unop _ | Literal _ | Input _  | Index | Struct_Init _ -> None
 
 type 'a counter = unit -> 'a
 let make_counter ~(seed:'a) ~(next:'a -> 'a) : 'a counter =
@@ -224,7 +225,7 @@ let of_ast : Tc.typ Ast.fun_defn list -> t =
           } in
           let { Result.vertex = return_vertex; _; } as result = loop_stmts ctx' parallel.parallel_body in
           let view = Vertex_view.Parallel_block (vertex_binding, return_vertex) in
-          `New_vertex (vertex, view, [result_expr], `With_additional_results [result; result_binding])
+          `New_vertex (vertex, view, [result_expr], `With_additional_results [result; result_binding])      
       | Ast.Const i ->
           let vertex = next_vertex () in
           let view = Vertex_view.(Literal (Int32 i)) in
@@ -250,6 +251,13 @@ let of_ast : Tc.typ Ast.fun_defn list -> t =
           let src = loop_expr ctx i.index_source in
           let expr = loop_expr ctx i.index_expr in
           `New_vertex(vertex, view, [src; expr], `No_additional_results)
+      | Ast.Struct_Init s ->
+          let vertex = next_vertex () in 
+          let fields = List.map ~f:(fun f -> Ast.(f.field_name)) s.struct_fields in
+          let (new_typ,_) = s.struct_type in
+          let view = Vertex_view.Struct_Init (new_typ, fields) in
+          let results = List.map ~f:(fun f -> loop_expr ctx Ast.(f.field_expr)) s.struct_fields in
+          `New_vertex(vertex,view, results, `No_additional_results)
       | Ast.Variable v ->
           let vertex = Map.find_exn Context.(ctx.local_vars) v in
           `Reused_vertex vertex

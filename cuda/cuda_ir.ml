@@ -100,9 +100,8 @@ type cuda_func = {
 
 and cuda_stmt =
   | DeclareArray of cuda_mem_type * cuda_type * cuda_ident * (cuda_expr list)
-              (* type ident = expr *)
   | DeclareAssign of cuda_type * cuda_ident * cuda_expr
-
+  | InitStruct of cuda_type * cuda_expr * (cuda_ident * cuda_expr) list 
    (* Pretending exprs are lvalues. *)
   | Assign of cuda_expr * cuda_expr
   | AssignOp of binop * cuda_expr * cuda_expr
@@ -236,6 +235,16 @@ and fmt_stmt n stm =
  | DeclareArray (mem, typ, id, sizes) ->
    let arr_exps = String.concat(List.map sizes ~f:(fun e -> "["^fmt_expr e^"]")) in
    sprintf "%s %s %s %s %s;" sp (fmt_mem_hdr mem) (fmt_typ typ) id arr_exps
+
+(* Should we model structs as pointers to structs? *)
+(* That would make host/device transfer much more complicated. *)
+(* So we stick them on the stack for now. *)
+| InitStruct (typ,dest,fieldlist) ->
+   let d = fmt_expr dest in
+   let inits = String.concat ~sep:";\n" (List.map fieldlist 
+    ~f:(fun (n,o) -> sprintf "%s%s.%s = %s" sp d n (fmt_expr o))) in
+   let decl = sprintf "%s%s %s;" sp (fmt_typ (typ)) (d) in
+   decl ^ inits ^";"
 
  | Assign (l, exp) ->
    sprintf "%s %s = %s;" sp (fmt_expr l) (fmt_expr exp)

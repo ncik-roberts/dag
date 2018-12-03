@@ -72,6 +72,7 @@ and seq_stmt =
   | Binop of Ir.dest * Ast.binop * operand * operand
   | Unop of Ir.dest * Ast.unop * operand
   | Primitive of Ir.dest * primitive
+  | Struct_Init of Ir.dest * Tc.typ * (Ast.ident * operand) list
   | Index of Ir.dest * operand * operand
   | Assign of Ir.dest * operand
   [@@deriving sexp]
@@ -141,6 +142,9 @@ end = struct
         (pp_operand src)
     | Index (dst,src,expr) -> 
         sprintf "%s%s <- %s[%s]" indent (pp_dest dst) (pp_operand src) (pp_operand expr)
+    | Struct_Init (dst,_,flx) ->
+        let fields = String.concat ~sep:"; " (List.map flx ~f:(fun (n,o) -> n^" = "^pp_operand o)) in
+        sprintf "%s%s <- { %s }" indent (pp_dest dst) (fields)
     | Assign (dst, src) -> sprintf "%s%s <- %s" indent (pp_dest dst)
         (pp_operand src)
     | Primitive (dst,src) -> sprintf "%s%s <- %s" indent (pp_dest dst) 
@@ -165,6 +169,7 @@ end = struct
     | Min (a,b) -> sprintf "min (%s,%s)" (pp_operand a) (pp_operand b)
     | F2I (a) -> sprintf "(int) %s" (pp_operand a)
     | I2F (a) -> sprintf "(float) %s" (pp_operand a)
+
 
   let pp_t { params; body; } =
     sprintf "(%s) {\n%s\n}"

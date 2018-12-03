@@ -52,6 +52,8 @@ let rec typ_name (typ : Tc.typ) : string =
 let rec trans_type (typ : Tc.typ) : CU.cuda_type =
   match typ with
   | Tc.Int -> CU.Integer
+  | Tc.Float -> CU.Float
+  | Tc.Struct i -> CU.Struct i
   | Tc.Array t -> CU.Pointer (trans_type t)
   | _ -> failwith "Don't currently support other types"
 
@@ -217,6 +219,9 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       [ d <-- trans_op s ]
   | Air.Primitive (d, s) ->
       [ d <-- trans_prim s]
+  | Air.Struct_Init (d,t,flx) -> 
+      let dest = dest_to_lvalue ctx d in 
+      [ CU.InitStruct(trans_type t,dest,List.map flx ~f:(fun (n,o) -> (n,trans_op o)))]
   | Air.Seq_stmt seq_stmt ->
 
   (* Run/reduce given sequential semantics. *)

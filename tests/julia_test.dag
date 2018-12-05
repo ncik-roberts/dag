@@ -1,0 +1,58 @@
+// Let's test DAG's ability to work with images. 
+// And articulate a reasonable breadth of non-parallel computation,
+// despite having neither loop or conditional constructs.
+// 
+// We attempt to render the Julia set.
+//
+
+// Tests structs.
+struct complex {
+  float r;
+  float i;
+}
+
+// And functions that operate on them.
+complex complex_add(complex a, complex b){
+  return { r = a.r + b.r; i = a.i + b.i; };
+}
+
+complex complex_mult(complex a,complex b){
+  return { r = a.r * b.r - a.i * b.i; 
+           i = a.i * b.r + a.r * b.i; };
+}
+
+bool julia (int x, int y, int dim) {
+  float scale = 1.5;
+  float jx = scale * float_of_int((dim/2 - x)/(dim/2));
+  float jy = scale * float_of_int((dim/2 - y)/(dim/2));
+  
+  complex c = { r = -0.8; i = 0.156; };
+  complex a = { r = jx; i = jy; };
+  
+  // Todo: figure out how to express this kind of iteration using 
+  // DAG syntax. It's a reduce, but how exactly? 
+  // Proposal: FOLD primitive. (CANNOT be an array_view)
+  //
+  //   fold : 'a list -> 'b -> ('b -> 'a -> 'b) -> 'b 
+  // 
+  //   fold (INIT, ACCUMULATOR, ITEM <- LIST)
+  //
+
+  // No need to use i here. But we start the loop.
+  fold (a, acc, i <- tabulate(0,200,1)){
+    return complex_add(complex_mult(acc,acc),c);
+  }
+
+  float mag = a.r * a.r + a.i * a.i; 
+  return mag <= 1000.0;
+}
+
+// Tests reusing the same vertex in a nested parallel binding (hah!)
+bool[][] render_julia_DAG(int dimension){
+  int[] dims = tabulate(0,dimension,1);
+  return parallel (y <- dims){
+    return parallel (x <- dims){}
+      return julia(x,y,dimension);
+    }
+  }
+}

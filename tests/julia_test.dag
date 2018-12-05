@@ -41,7 +41,7 @@ bool julia (int x, int y, int dim) {
   // No need to use i here. But we start the loop.
   fold (a, acc, i <- tabulate(0,200,1)){
     return complex_add(complex_mult(acc,acc),c);
-  }
+  };
 
   float mag = a.r * a.r + a.i * a.i; 
   return mag <= 1000.0;
@@ -51,8 +51,8 @@ bool julia (int x, int y, int dim) {
 bool[][] render_julia_DAG(int dimension){
   int[] dims = tabulate(0,dimension,1);
   return parallel (y <- dims){
-    return parallel (x <- dims){}
+    return parallel (x <- dims){
       return julia(x,y,dimension);
-    }
-  }
+    };
+  };
 }

@@ -20,12 +20,12 @@ float[] saxpy_float_DAG(float[] a, float[] b, float[] c){
 // Test language primitives, like zipwith and reduce.
 int sum_int_DAG(int[] a, int[] b){
   int[] c = zipwith(+,a,b);
-  return reduce(+,c);
+  return reduce(+,0,c);
 }
 
 // Float equivalent.
 float sum_float_DAG(float[] a, float[] b){
   float[] c = zipwith(+,a,b);
-  return reduce(+,c);
+  return reduce(+,0,c);
 }
 

@@ -25,6 +25,7 @@ type kernel_context = {
   used : Temp.Set.t;
   defined : Temp.Set.t;
   additional_buffers : Temp.Set.t;
+  return_buffer_info : A_air.buffer_info option;
 }
 
 let kernel_ctx_to_kernel_info : kernel_context -> A_air.kernel_info = fun kc ->
@@ -58,6 +59,7 @@ let annotate_array_view
         let bi = lookup_exn ctx t1 in
         { dim = bi.dim - 1;
           length = List.tl_exn bi.length;
+          filtered_lengths = Option.map ~f:List.tl_exn bi.filtered_lengths;
           index = Many_fn.app_exn bi.index (Expr.Temp t2);
           typ = (match bi.typ with Tc.Array t -> t | _ -> failwith "No.");
         }
@@ -91,18 +93,19 @@ let annotate_array_view
         bi (* Todo: What should go here? *)
 
     | (typ, Air.Zip_with (op, avs)) ->
-        let length, bis = match avs with
+        let hd, bis = match avs with
           | hd :: tl ->
               let bi = loop hd in
               let bis = List.map tl ~f:loop in
-              (bi.length, bi :: bis)
+              (bi, bi :: bis)
           | _ -> failwith "Empty zipwith!"
         in
         let dim = dim typ in
         assert (dim = 1); (* Don't know how to handle other cases yet. *)
         { dim;
-          length;
+          length = hd.length;
           typ;
+          filtered_lengths = hd.filtered_lengths;
           index =
             let open Many_fn in
             Fun (fun expr ->
@@ -146,6 +149,39 @@ let defined_of_dest : Ir.dest -> Temp.Set.t =
     | Ir.Return _ -> Temp.Set.empty
     | Ir.Dest t -> Temp.Set.singleton t
 
+let mk_buffer_info_out_of_temp t kernel_ctx buffer_infos =
+  (* DON'T ASK *)
+  match kernel_ctx.return_buffer_info with
+  | Some buffer_info ->
+      A_air.{
+        typ = Temp.to_type t;
+        dim = 1 + buffer_info.dim;
+        length = List.map buffer_infos ~f:(fun bi -> List.hd_exn bi.length) @ buffer_info.length;
+        index = (Tuple3.get2 (build_length_function (Temp.to_type t))) (Expr.Temp t);
+        filtered_lengths = begin
+          let chosen = ref false in
+          let set_chosen x =
+            chosen := true;
+            x
+          in
+          let fi =
+            Option.value_map buffer_info.filtered_lengths ~f:set_chosen ~default:buffer_info.length
+          in
+          let rest = List.map buffer_infos ~f:(fun bi ->
+            Option.value_map bi.filtered_lengths
+              ~default:(List.hd_exn bi.length) ~f:(Fn.compose set_chosen List.hd_exn))
+          in
+          if !chosen then Some (fi @ rest) else None
+        end;
+      }
+  | None -> A_air.{
+        typ = Temp.to_type t;
+        dim = List.length buffer_infos;
+        length = List.map buffer_infos ~f:(fun bi -> List.hd_exn bi.length);
+        index = (Tuple3.get2 (build_length_function (Temp.to_type t))) (Expr.Temp t);
+        filtered_lengths = None;
+      }
+
 let rec annotate_par_stmts (ctx : context) (stmts : Air.par_stmt list) : context =
   List.fold_left stmts ~init:ctx ~f:annotate_par_stmt
 
@@ -168,6 +204,11 @@ and annotate_par_stmt (ctx : context) (stmt : Air.par_stmt) : context =
       { ctx with result = A_air.
           { ctx.result with
               kernel_infos = Map.add_exn ctx.result.kernel_infos ~key:id ~data:(kernel_ctx_to_kernel_info kernel_ctx);
+              buffer_infos = ctx.result.buffer_infos |>
+                (* only update buffer infos as necessary *)
+                (match dest with
+                 | Ir.Return _ -> Fn.id
+                 | Ir.Dest t -> Map.add_exn ~key:t ~data:(mk_buffer_info_out_of_temp t kernel_ctx buffer_infos));
           }
       }
   | Air.Seq stmt -> snd (annotate_seq_stmt ctx stmt)
@@ -177,6 +218,7 @@ and empty_kernel_ctx : kernel_context =
   { used = Temp.Set.empty;
     defined = Temp.Set.empty;
     additional_buffers = Temp.Set.empty;
+    return_buffer_info = None;
   }
 
 and annotate_par_stmt_stmt (ctx : context) (par : Air.par_stmt Air.stmt) : context =
@@ -220,13 +262,69 @@ and annotate_stmt
            }
        })
   | Air.Nop -> (kernel_ctx, ctx)
+  | Air.Filter_with (dest, (t1, av1), (t2, av2)) ->
+      let defined = defined_of_dest dest in
+      let buffer_info1 = annotate_array_view ctx av1 in
+      let buffer_info2 = annotate_array_view ctx av2 in
+      let my_buffer_info =
+        let typ = A_air.(buffer_info1.typ) in
+        let (_, index, _) = build_length_function typ in
+        A_air.{ buffer_info1 with index = index (Expr.Temp (Ir.temp_of_dest dest)); }
+      in
+      ({ kernel_ctx with
+           defined = Set.union defined kernel_ctx.defined;
+           additional_buffers =
+             (match dest with
+              | Ir.Return _ -> Fn.id
+              | Ir.Dest t -> Fn.flip Set.add t)
+             kernel_ctx.additional_buffers;
+       },
+       { ctx with result = A_air.
+           { ctx.result with
+               buffer_infos =
+                 Map.add_exn ctx.result.buffer_infos ~key:t1 ~data:buffer_info1
+                   |> Map.add_exn ~key:t2 ~data:buffer_info2
+                   |> match dest with
+                      | Ir.Return _ -> Fn.id
+                      | Ir.Dest t -> Map.add_exn ~key:t ~data:my_buffer_info;
+           }
+       })
+  | Air.Scan (dest, _, operand, (t, av)) ->
+      let defined = defined_of_dest dest in
+      let used = used_of_operand ctx operand in
+      let buffer_info_av = annotate_array_view ctx av in
+      let my_buffer_info =
+        let typ = Ir.type_of_dest dest in
+        let (_, index, _) = build_length_function (Ir.type_of_dest dest) in
+        A_air.{ buffer_info_av with typ; index = index (Expr.Temp (Ir.temp_of_dest dest)); }
+      in
+      ({ defined = Set.union defined kernel_ctx.defined;
+         used = Set.union used kernel_ctx.used;
+         (* Conditionally add returned thing to addtl_buffers *)
+         additional_buffers =
+           (match dest with
+            | Ir.Return _ -> Fn.id
+            | Ir.Dest t -> Fn.flip Set.add t)
+           kernel_ctx.additional_buffers;
+         return_buffer_info = Some my_buffer_info;
+       },
+       { ctx with result = A_air.
+           { ctx.result with
+               buffer_infos =
+                 Map.add_exn ctx.result.buffer_infos ~key:t ~data:buffer_info_av
+                   |> match dest with
+                      | Ir.Return _ -> Fn.id
+                      | Ir.Dest t -> Map.add_exn ~key:t ~data:my_buffer_info;
+           }
+       })
   | Air.Reduce (dest, _, operand, (t, av)) ->
       let defined = defined_of_dest dest in
       let used = used_of_operand ctx operand in
       let buffer_info = annotate_array_view ctx av in
       ({ defined = Set.union defined kernel_ctx.defined;
          used = Set.union used kernel_ctx.used;
-         additional_buffers = Set.add kernel_ctx.additional_buffers t;
+         additional_buffers = kernel_ctx.additional_buffers;
+         return_buffer_info = None;
        },
        { ctx with result = A_air.
            { ctx.result with
@@ -249,32 +347,53 @@ and annotate_stmt
               Map.add_exn ctx.result.buffer_infos ~key:t ~data:buffer_info; };
       } in
       let (kernel_ctx', ctx) = recur ctx body in
+      let ctx' =
+        match dest with
+        | Ir.Return _ -> ctx
+        | Ir.Dest t ->
+            { ctx with result = A_air.
+                { ctx.result with buffer_infos =
+                  Map.add_exn ctx.result.buffer_infos ~key:t
+                    ~data:(mk_buffer_info_out_of_temp t kernel_ctx' [buffer_info]) }; }
+      in
       ({ defined = Set.union defined (Set.union kernel_ctx.defined kernel_ctx'.defined);
          used = Set.union kernel_ctx.used kernel_ctx'.used;
          additional_buffers = Set.union kernel_ctx.additional_buffers kernel_ctx'.additional_buffers;
-       }, ctx)
+         return_buffer_info = None;
+       }, ctx')
 
 and annotate_seq_stmt
-  ?(kernel_ctx=empty_kernel_ctx)
+ ?(kernel_ctx=empty_kernel_ctx)
   (ctx : context)
   (stmt : Air.seq_stmt) : kernel_context * context =
   let (kernel_ctx', ctx) = match stmt with
     | Air.Binop (dest, _, src1, src2) | Air.Index (dest,src1,src2) ->
         let used = Set.union (used_of_operand ctx src1) (used_of_operand ctx src2) in
         let defined = defined_of_dest dest in
-        ({ used; defined; additional_buffers = Temp.Set.empty; }, ctx)
-    | Air.Assign (dest, src) | Air.Unop (dest, _, src) | Air.Access (dest,src,_) ->
+        ({ used; defined; additional_buffers = Temp.Set.empty;
+           return_buffer_info = None;
+         }, ctx)
+    | Air.Assign (dest, src) ->
         let used = used_of_operand ctx src in
         let defined = defined_of_dest dest in
-        ({ used; defined; additional_buffers = Temp.Set.empty }, ctx)
+        ({ used; defined;
+           additional_buffers = Temp.Set.empty;
+           return_buffer_info = (match src with
+             | Air.Temp t -> Map.find ctx.result.A_air.buffer_infos t
+             | _ -> None);
+         }, ctx)
+    | Air.Unop (dest, _, src) | Air.Access (dest, src, (_ : Ast.ident)) ->
+        let used = used_of_operand ctx src in
+        let defined = defined_of_dest dest in
+        ({ used; defined; additional_buffers = Temp.Set.empty; return_buffer_info = None; }, ctx)
     | Air.Primitive (dest,src) ->
         let used = used_of_primitive ctx src in
         let defined = defined_of_dest dest in
-        ({ used; defined; additional_buffers = Temp.Set.empty }, ctx)
+        ({ used; defined; additional_buffers = Temp.Set.empty; return_buffer_info = None; }, ctx)
     | Air.Struct_Init (dest,_,flx) ->
        let used = used_of_struct_fields ctx flx in
        let defined = defined_of_dest dest in
-       ({ used; defined; additional_buffers = Temp.Set.empty }, ctx)
+       ({ used; defined; additional_buffers = Temp.Set.empty; return_buffer_info = None; }, ctx)
     | Air.Seq_stmt seq_stmt -> annotate_seq_stmt_stmt kernel_ctx ctx seq_stmt
   in
 
@@ -282,7 +401,8 @@ and annotate_seq_stmt
   let kernel_ctx =
     { used = Set.union kernel_ctx.used kernel_ctx'.used;
       defined = Set.union kernel_ctx.defined kernel_ctx'.defined;
-      additional_buffers = Set.union kernel_ctx.additional_buffers kernel_ctx.additional_buffers;
+      additional_buffers = Set.union kernel_ctx.additional_buffers kernel_ctx'.additional_buffers;
+      return_buffer_info = kernel_ctx'.return_buffer_info;
     }
   in
 
@@ -304,6 +424,7 @@ let param_of_temp : Temp.t -> A_air.Param.t * A_air.buffer_info option =
     | _ -> (Param.Array (p, ts), Some A_air.{
         length = List.map ~f:(fun t -> Length_expr.Temp t) ts;
         index = index (Expr.Temp p);
+        filtered_lengths = None;
         dim;
         typ;
       })

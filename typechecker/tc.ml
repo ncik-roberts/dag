@@ -52,9 +52,9 @@ let add_with_failure
   | `Duplicate -> failwithf on_duplicate key ()
 
 (* *)
-let infer_binop typ (binop : Ast.binop) : fun_type = 
+let infer_binop typ (binop : Ast.binop) : fun_type =
   if typ <> Int && typ <> Float then failwith "Invalid Binop type." else
-  match binop with 
+  match binop with
   | Ast.(Plus | Minus | Times | Div | Mod | Lshift | Rshift | BitAnd | BitOr | BitXor) ->
     { param_types = [ typ; typ; ]; return_type = typ; }
   | Ast.(And | Or ) ->
@@ -63,9 +63,9 @@ let infer_binop typ (binop : Ast.binop) : fun_type =
     { param_types = [ typ; typ;]; return_type = Bool; }
 
 (* Negate works on ints and floats, logical not works on ints and bools. *)
-let infer_unop typ  (unop : Ast.unop) : fun_type = 
-  let _ = match unop with 
-  | Ast.Negate -> 
+let infer_unop typ  (unop : Ast.unop) : fun_type =
+  let _ = match unop with
+  | Ast.Negate ->
     if typ <> Int && typ <> Float then failwith "Invalid negate type.";
   | Ast.Logical_not ->
     if typ <> Int && typ <> Bool then failwith "Invalid logical_not type."
@@ -79,7 +79,7 @@ let check_binop (typ1 : typ) (typ2 : typ) (binop : Ast.binop) : typ =
   let fun_type = infer_binop typ1 binop in
   if fun_type.param_types <> [ typ1; typ2; ]
   then failwith "Invalid binop types."
-  else fun_type.return_type 
+  else fun_type.return_type
 
 let check_unop (typ : typ) (unop : Ast.unop) : typ =
   let fun_type = infer_unop typ unop in
@@ -87,16 +87,16 @@ let check_unop (typ : typ) (unop : Ast.unop) : typ =
   then failwith "Invalid unop types."
   else fun_type.return_type
 
-let check_index (typ1 : typ) (typ2 : typ) : typ = 
-  match typ1,typ2 with 
+let check_index (typ1 : typ) (typ2 : typ) : typ =
+  match typ1,typ2 with
   | Array t,Int -> t
   | _,_ -> failwith "Invalid index types."
 
-let check_access ctx typ field = 
-  match typ with 
-  | Struct s -> 
+let check_access ctx typ field =
+  match typ with
+  | Struct s ->
     (match Map.find (ctx.struct_ctx) s with
-    | Some t ->  
+    | Some t ->
       (match List.find t ~f:(fun f -> f.field_name = field) with
         | Some f -> f.field_type
         | None -> failwith "Struct does not have field.")
@@ -104,13 +104,19 @@ let check_access ctx typ field =
   | _ -> failwith "Cannot access non-struct."
 
 let rec is_at_least_n_dimensional ~n typ = match n, typ with
-  | _, _ when n <= 0 -> false
-  | 1, Array _ -> true
+  | _, _ when n < 0 -> false
+  | 0, Array _ -> true
   | _, Array typ' -> is_at_least_n_dimensional ~n:(n-1) typ'
   | _ -> false
 
 let check_fun (ctx : tctxt) (fun_name : Ast.call_name) (arg_types : typ list) : typ =
   match fun_name with
+  | Ast.Filter_with ->
+      begin
+        match arg_types with
+        | [ Array typ; Array Bool; ] -> Array typ
+        | _ -> failwith "Invalid argument to filter_with."
+      end
   | Ast.Map ->
       begin
         match arg_types with
@@ -124,13 +130,17 @@ let check_fun (ctx : tctxt) (fun_name : Ast.call_name) (arg_types : typ list) : 
         | [ typ ] when is_at_least_n_dimensional typ ~n -> Int
         | _ -> failwith "Invalid argument to length."
       end
-  | Ast.Reduce ->
+  | Ast.Reduce | Ast.Scan ->
       begin
         match arg_types with
         | [ Fun fun_type; typ1; Array typ2; ] when
             typ1 = typ2
               && [ typ1; typ2; ] = fun_type.param_types
-              && typ1 = fun_type.return_type -> typ1
+              && typ1 = fun_type.return_type ->
+                (* Scan creates an array of these things;
+                 * reduce just gives you the final result. *)
+                if fun_name = Ast.Scan then Array typ1
+                else typ1
         | _ -> failwith "Invalid argument to reduce."
       end
   | Ast.Zip_with ->
@@ -147,10 +157,10 @@ let check_fun (ctx : tctxt) (fun_name : Ast.call_name) (arg_types : typ list) : 
         | [ Array (Array typ); ] -> Array (Array typ)
         | _ -> failwith "Invalid argument to transpose."
       end
-  | Ast.Tabulate -> 
+  | Ast.Tabulate ->
       begin
-        match arg_types with 
-        | [ typ1; typ2; typ3 ] when 
+        match arg_types with
+        | [ typ1; typ2; typ3 ] when
           typ1 = typ2 && typ2 = typ3
           && typ1 = Int -> typ1
         | _ -> failwith "Invalid arguments to Tabulate."
@@ -169,7 +179,7 @@ let check_fun (ctx : tctxt) (fun_name : Ast.call_name) (arg_types : typ list) : 
       end
   | Ast.Int_of_float ->
       begin
-      match arg_types with 
+      match arg_types with
       | [Float] -> Int
       | _ -> failwith "Invalid arguments to F -> I"
       end
@@ -182,7 +192,7 @@ let check_fun (ctx : tctxt) (fun_name : Ast.call_name) (arg_types : typ list) : 
             else failwith "Invalid argument types."
         | None -> failwithf "Unknown function `%s`" fun_name ()
       end
-  
+
 
 let rec check_type (ctx : tctxt) (ast : Ast.typ) : typ = match ast with
   | Ast.Ident "int" -> Int
@@ -193,8 +203,8 @@ let rec check_type (ctx : tctxt) (ast : Ast.typ) : typ = match ast with
       | None -> failwithf "Unknown type `%s`" ident ())
   | Ast.Array ast' -> Array (check_type ctx ast')
 
-let rec check_struct_fields (ctx : tctxt) (typ : Ast.typ) (ls : 'a Ast.field list) : unit = 
-    ()  (* Todo : check that struct_exprs match field types. *) 
+let rec check_struct_fields (ctx : tctxt) (typ : Ast.typ) (ls : 'a Ast.field list) : unit =
+    ()  (* Todo : check that struct_exprs match field types. *)
 
 let rec check_expr (ctx : tctxt) (ast : unit Ast.expr) : typ Ast.expr = match snd ast with
   | Ast.Const c -> (Int, Ast.Const c)
@@ -219,12 +229,12 @@ let rec check_expr (ctx : tctxt) (ast : unit Ast.expr) : typ Ast.expr = match sn
       let typ = check_index typ1 typ2 in
       (typ, Ast.Index {index_source = res1; index_expr = res2})
   | Ast.Access (e,f) ->
-      let (typ1,_) as res1 = check_expr ctx e in 
+      let (typ1,_) as res1 = check_expr ctx e in
       let typ = check_access ctx typ1 f in
       (typ, Ast.Access (res1,f))
 
-  | Ast.Struct_Init struc -> 
-      let results = List.map ~f:(check_expr ctx) 
+  | Ast.Struct_Init struc ->
+      let results = List.map ~f:(check_expr ctx)
                     (List.map ~f:(fun f -> Ast.(f.field_expr)) struc.struct_fields) in
       let new_fields = List.map2_exn (struc.struct_fields) results ~f:(fun f exp -> Ast.{f with field_expr = exp }) in
       let (_,ast_t) = struc.struct_type in
@@ -261,7 +271,7 @@ let rec check_expr (ctx : tctxt) (ast : unit Ast.expr) : typ Ast.expr = match sn
           let typ = Fun (infer_binop t1 binop) in
           ([typ;t1;t2],[Ast.Bare_binop(typ,binop);Ast.Expr (t1,e1); Ast.Expr(t2,e2)])
       | [Ast.Bare_unop ((),unop); Ast.Expr s] ->
-          let (t,e) = check_expr ctx s in 
+          let (t,e) = check_expr ctx s in
           let typ = Fun (infer_unop t unop) in
           ([typ;t],[Ast.Bare_unop(typ,unop);Ast.Expr(t,e)])
       | exprs -> List.map exprs ~f:(function
@@ -271,7 +281,7 @@ let rec check_expr (ctx : tctxt) (ast : unit Ast.expr) : typ Ast.expr = match sn
       in
       let ret_ty = check_fun ctx fun_call.call_name arg_types in
       (ret_ty, Ast.Fun_call { fun_call with call_args = args })
-      
+
 
 and check_stmt (ctx : tctxt) (ast : unit Ast.stmt) : tctxt * typ Ast.stmt =
   if Option.is_some ctx.return_type then failwith "Function already returned.";
@@ -310,7 +320,7 @@ and check_stmts (ctx : tctxt) (ast : unit Ast.stmt list) (typ : typ) : typ Ast.s
 
 let check_global_stm (ctx : tctxt) (ast : unit Ast.global_stmt) : tctxt * (typ Ast.fun_defn option) =
   let open Ast in
-  match ast with 
+  match ast with
   | Fun ast ->
     let (return_type, _) as fun_ret_type = match ast.fun_ret_type with
       | (), return_type -> (check_type ctx return_type, return_type)
@@ -336,20 +346,20 @@ let check_global_stm (ctx : tctxt) (ast : unit Ast.global_stmt) : tctxt * (typ A
             ~key:ast.fun_name ~data:{ return_type; param_types; }
             ~on_duplicate: "Duplicate function definition `%s`"; }
     in (ctx',Some { ast with fun_body = result; fun_ret_type; fun_params; })
-  | Struct ast -> 
-    let new_struct_fields = List.map ast.struct_fields 
-                            ~f:(fun {param_type; param_ident} -> 
+  | Struct ast ->
+    let new_struct_fields = List.map ast.struct_fields
+                            ~f:(fun {param_type; param_ident} ->
                             let (_,t) = param_type in
                             {field_name = param_ident; field_type = (check_type ctx t)})
     in
-    let ctx' = { ctx with 
+    let ctx' = { ctx with
       struct_ctx = add_with_failure ctx.struct_ctx
-        ~key:ast.struct_name ~data:new_struct_fields 
+        ~key:ast.struct_name ~data:new_struct_fields
         ~on_duplicate: "Duplicate struct defn `%s`";
       }
     in
     (ctx', None)
- 
+
 let check_with (ctx : tctxt) (ast : unit Ast.t) : typ Ast.fun_defn list =
   let typc = List.folding_map ~f:check_global_stm ~init:ctx ast in
   List.filter_opt typc

@@ -8,10 +8,12 @@ module Operator = struct
 end
 
 type fun_call =
+  | Scan of Operator.t
   | Reduce of Operator.t
   | Map of Operator.t
   | Zip_with of Operator.t
-  | Tabulate 
+  | Tabulate
+  | Filter_with
   | Float_of_int
   | Int_of_float
   | Min

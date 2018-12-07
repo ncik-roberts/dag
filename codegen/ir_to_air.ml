@@ -38,12 +38,14 @@ let make_array_view
     | Ir.Transpose, [ `Array_view view ] -> Air.Transpose view
     | Ir.Map f, [ `Array_view view ] -> Air.Zip_with (f, [ view ])
     | Ir.Tabulate, [`Operand (Air.Temp b); `Operand (Air.Temp e); `Operand (Air.Temp s);] -> Air.Tabulate (b,e,s)
-    | Ir.Int_of_float ,_ -> failwith "I <- F is not an array view."
-    | Ir.Float_of_int ,_ -> failwith "F <- I is not an array view."
+    | Ir.Int_of_float, _ -> failwith "I <- F is not an array view."
+    | Ir.Float_of_int, _ -> failwith "F <- I is not an array view."
     | Ir.Reduce _, _ -> failwith "Reduce is not an array view."
+    | Ir.Scan _, _ -> failwith "Scan is not an array view."
     | Ir.Dim _, _ -> failwith "Dim is not an array view."
     | Ir.Min , _ -> failwith "Min is not an array view."
     | Ir.Max , _ -> failwith "Max is not an array view."
+    | Ir.Filter_with, _ -> failwith "Filter_with is not an array view."
     | Ir.Zip_with _, _ -> failwith "Invalid zipwith."
     | Ir.Transpose, _ -> failwith "Invalid transpose."
     | Ir.Tabulate, _ -> failwith "Invalid tabulate."
@@ -72,17 +74,16 @@ let rec to_seq_stmt : Air.par_stmt -> Air.seq_stmt =
 
 and to_seq_stmt' : Air.par_stmt Air.stmt -> Air.seq_stmt Air.stmt =
   function
-    | Air.Reduce (a, b, c, d) -> Air.Reduce (a, b, c, d)
+    | Air.Reduce _ | Air.Scan _ | Air.Nop | Air.Run _ | Air.Filter_with _ as r ->
+        Obj.magic r (* Avoid unnecessary allocation :) *)
     | Air.Block xs -> Air.Block (List.map ~f:to_seq_stmt xs)
     | Air.For (a, b, c) -> Air.For (a, b, to_seq_stmt c)
-    | Air.Run (a, b) -> Air.Run (a, b)
-    | Air.Nop -> Air.Nop
 
 (* A program contains many parallel statements. Let's change some of
  * them to sequential statements. *)
 let rec expand (air : Air.par_stmt) : Air.par_stmt list = match air with
   | Air.Seq _ | Air.Parallel _ | Air.Par_stmt Air.Nop  -> List.return air
-  | Air.Par_stmt (Air.Reduce _ | Air.Run _ as r) -> Air.[
+  | Air.Par_stmt (Air.Reduce _ | Air.Run _ | Air.Scan _ | Air.Filter_with _ as r) -> Air.[
       Par_stmt r;
       Seq (Seq_stmt (to_seq_stmt' r));
     ]

@@ -42,6 +42,10 @@ type buffer_info = {
 
   (* Is only allowed to mention variables bound in params. *)
   length : Length_expr.t list; (* The dimensions of the buffer_info. *)
+
+  (* Only present if the buffer_info is derived from a filtered list. *)
+  filtered_lengths : Length_expr.t list option;
+
   index : (Expr.t, Expr.t) Utils.Many_fn.t;
   (* `b.index [i; j; k;]` is the expression denoting the b[i][j][k] *)
   typ : Tc.typ;

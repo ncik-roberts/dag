@@ -9,8 +9,11 @@ and array_view' =
   | Array of Temp.t
   | Array_index of Temp.t * Temp.t
   | Zip_with of Ir.Operator.t * array_view list
+    (* first array view: thing to filter.
+     * second array view: thing of booleans.
+     *)
   | Reverse of array_view
-  | Tabulate of Temp.t * Temp.t * Temp.t
+  | Tabulate of Temp.t * Temp.t * Temp.t (* lo, hi, step? *)
   | Transpose of array_view
   [@@deriving sexp]
 
@@ -23,7 +26,7 @@ type operand =
   | Dim of int * array_view (* Nth dimension of an array *)
   [@@deriving sexp]
 
-type primitive = 
+type primitive =
   | Max of operand * operand
   | Min of operand * operand
   | F2I of operand
@@ -48,6 +51,8 @@ type 'a stmt = (* Type param stands for either par_stmt or seq_stmt *)
    * buffer_infos map so that it's easier to translate the reduction.
    *)
   | Reduce of Ir.dest * Ir.Operator.t * operand * (Temp.t * array_view)
+  | Scan of Ir.dest * Ir.Operator.t * operand * (Temp.t * array_view)
+  | Filter_with of Ir.dest * (Temp.t * array_view) * (Temp.t * array_view)
   | Nop
   [@@deriving sexp]
 
@@ -105,7 +110,7 @@ end = struct
           (Sexp.to_string_hum (Ir.Operator.sexp_of_t o))
           (String.concat ~sep:", " (List.map avs ~f:pp_array_view))
     | Reverse av -> sprintf "reverse(%s)" (pp_array_view av)
-    | Tabulate (b,e,s) -> sprintf "tabulate(%d,%d,%d)" 
+    | Tabulate (b,e,s) -> sprintf "tabulate(%d,%d,%d)"
         (Temp.to_int b) (Temp.to_int e) (Temp.to_int s)
     | Transpose av -> sprintf "transpose(%s)" (pp_array_view av)
 
@@ -166,11 +171,18 @@ end = struct
         (Temp.to_int t) (Temp.to_int t_idx) (pp_array_view av)
         (pp stmt)
         indent
+    | Scan (dst, op, id, (_, av)) ->
+        sprintf "%s%s <- %sscan(%s, %s, %s)" indent (pp_dest dst) prefix
+          (Sexp.to_string_hum (Ir.Operator.sexp_of_t op))
+          (pp_operand id)
+          (pp_array_view av)
     | Reduce (dst, op, id, (_, av)) ->
         sprintf "%s%s <- %sreduce(%s, %s, %s)" indent (pp_dest dst) prefix
           (Sexp.to_string_hum (Ir.Operator.sexp_of_t op))
           (pp_operand id)
           (pp_array_view av)
+    | Filter_with (dst, (_, av1), (_, av2)) ->
+        sprintf "%s%s <- filter_with(%s, %s)" indent (pp_dest dst) (pp_array_view av1) (pp_array_view av2)
   and pp_primitive = function
     | Max (a,b) -> sprintf "max (%s,%s)" (pp_operand a) (pp_operand b)
     | Min (a,b) -> sprintf "min (%s,%s)" (pp_operand a) (pp_operand b)

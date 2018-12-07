@@ -59,6 +59,8 @@ let run (dag_fun : Dag.dag_fun) (traversal : Dag_traversal.traversal) : Ir.t * T
       | Ast.Reduce -> `Unary (fun op -> Ir.Reduce op)
       | Ast.Map -> `Unary (fun op -> Ir.Map op)
       | Ast.Zip_with -> `Unary (fun op -> Ir.Zip_with op)
+      | Ast.Scan -> `Unary (fun op -> Ir.Scan op)
+      | Ast.Filter_with -> `Nullary Ir.Filter_with
       | Ast.Tabulate -> `Nullary Ir.Tabulate
       | Ast.Float_of_int -> `Nullary Ir.Float_of_int
       | Ast.Int_of_float -> `Nullary Ir.Int_of_float

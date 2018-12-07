@@ -89,9 +89,9 @@ let trans_op = function
   | Air.Temp t -> CU.Var (temp_name t)
   | Air.Dim (n, view) -> CU.IConst (Int64.of_int_exn n)
 
-let trans_prim = 
-  let trans_cmp op a b = 
-    let a,b = trans_op a, trans_op b in 
+let trans_prim =
+  let trans_cmp op a b =
+    let a,b = trans_op a, trans_op b in
     CU.Ternary(CU.Binop(op,a,b),a,b)
   in
   function

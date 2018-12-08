@@ -256,7 +256,7 @@ let rec trans_a_stmt : type a. (context -> a -> CU.cuda_stmt list) -> context ->
 
     | Air.Block s -> List.concat_map ~f:(continuation ctx) s
     | Air.Nop -> []
-    | Air.Reduce _ | Air.Run _ ->
+    | Air.Reduce _ | Air.Run _ | Air.Scan _ | Air.Filter_with _ ->
         failwith
           "Unable to perform reduce/run without specifically associated parallel or sequential semantics."
 
@@ -298,7 +298,7 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
 
   (* For reduce, we associate the buffer_info for the view with t. *)
   | Air.Reduce (dest, op, init, (t, _)) ->
-      let lvalue = Temp.next Tc.Int () in
+      let lvalue = Temp.next (Ir.type_of_dest dest) () in
       let index_fn = get_index ctx t in
       let loop_temp = Temp.next Tc.Int () in
       let hdr = create_loop ~counter:loop_temp (get_length ctx t) in
@@ -308,10 +308,55 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
           Many_fn.result_exn ~msg:"Reduce result_exn." (index_fn loop_temp);
         ]
       in
-      [ CU.DeclareAssign (CU.Integer, temp_name lvalue, trans_op init);
+      [ CU.DeclareAssign (trans_type (Temp.to_type lvalue), temp_name lvalue, trans_op init);
         CU.Loop (hdr, [assign_stmt]);
         dest_to_stmt ctx dest (temp_to_var lvalue);
       ]
+
+  | Air.Filter_with (dest, (t1, _), (t2, _)) ->
+      List.iter [t1; t2;] ~f:(fun key ->
+        Temp.Table.add_exn ctx.allocation_method ~key ~data:`Unallocated);
+      let index1_fn = get_index ctx t1 in
+      let index2_fn = get_index ctx t2 in
+      let loop_temp = Temp.next Tc.Int () in
+      let acc = Temp.next Tc.Int () in
+      let hdr = create_loop ~counter:loop_temp (get_length ctx t1) in
+      let check_stmt =
+        CU.Condition (Many_fn.result_exn ~msg:"cuda_trans1" (index2_fn loop_temp),
+          [ CU.Assign (trans_expr ctx (Expr.Index (dest_to_expr_lvalue ctx dest, Expr.Temp acc)),
+              Many_fn.result_exn ~msg:"cuda_trans2" (index1_fn loop_temp));
+            CU.AssignOp (CU.ADD, temp_to_var acc, CU.IConst 1L);
+          ],
+          [ (* nothing to do in else case *) ])
+      in
+      [ CU.DeclareAssign (CU.Integer, temp_name acc, CU.IConst 0L);
+        CU.Loop (hdr, [ check_stmt ]);
+      ]
+
+  | Air.Scan (dest, op, init, (t, _)) ->
+      let ty = match Ir.type_of_dest dest with
+        | Tc.Array ty -> ty
+        | _ -> failwith "Not right."
+      in
+      let acc = Temp.next ty () in
+      let index_fn = get_index ctx t in
+      let loop_temp = Temp.next Tc.Int () in
+      let hdr = create_loop ~counter:loop_temp (get_length ctx t) in
+      Temp.Table.add_exn ctx.allocation_method ~key:t ~data:`Unallocated;
+      let assign_stmt = make_reduce op
+        [ temp_to_var acc;
+          Many_fn.result_exn ~msg:"Reduce result_exn." (index_fn loop_temp);
+        ]
+      in
+      [ CU.DeclareAssign (trans_type ty, temp_name acc, trans_op init);
+        CU.Loop (hdr, [
+          CU.Assign (CU.Index (dest_to_lvalue ctx dest, temp_to_var loop_temp), temp_to_var acc);
+          assign_stmt;
+        ]);
+        (* TODO: allow client to bind final reduced result. *)
+        (* dest_to_stmt ctx dest (temp_to_var acc); *)
+      ]
+
   | _ -> trans_seq_stmt_stmt ctx seq_stmt
 
 and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =

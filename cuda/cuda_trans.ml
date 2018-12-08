@@ -594,11 +594,14 @@ let rec extract_kernel_launches : CU.cuda_stmt list -> CU.cuda_func list =
         let gstmts2 = extract_kernel_launches stmts2 in
         gstmts1 @ gstmts2 @ kernel_launches)
 
+let trans_struct_decl ~(key : Tc.ident) ~(data : Tc.struct_type) : CU.cuda_gstmt =
+  CU.StructDecl (key, List.map data ~f:Tc.(fun f -> (trans_type f.field_type, f.field_name)))
+
 (* The translated gstmt contains within it kernel launches.
  * These kernel launches actually include the kernel DEFINITION.
  * It's up to a later phase to float all these kernel definitions to the top level.
  *)
-let trans (program : Air.t) (result : Ano.result) : CU.cuda_gstmt list =
+let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t) (result : Ano.result) : CU.cuda_gstmt list =
   let params = trans_params Ano.(result.params) in
   let lvalue = Ano.(result.out_param) in
   let allocation_method = Temp.Table.create () in
@@ -645,11 +648,13 @@ let trans (program : Air.t) (result : Ano.result) : CU.cuda_gstmt list =
       | Some `Host_and_device t' -> f t (fun (a, b, c) -> f t' (fun (a', b', c') -> [ CU.Malloc (a, b, c); CU.Cuda_malloc (a', b', c'); ])))
   in
 
+  let struct_decls = Map.mapi ~f:trans_struct_decl struct_decls |> Map.to_alist |> List.map ~f:snd in
   let gdecls = extract_kernel_launches body in
   List.concat [
-    gdecls;
+    struct_decls;
+    gdecls |> List.map ~f:(fun x -> CU.Function x);
     List.return
-      CU.({ typ = Host;
+      CU.(Function { typ = Host;
             ret = begin
               match Ano.(result.out_param) with
               | None -> trans_type Air.(program.return_type)
@@ -658,4 +663,4 @@ let trans (program : Air.t) (result : Ano.result) : CU.cuda_gstmt list =
             name = "dag_" ^ Air.(program.fn_name);
             params;
             body = malloc'ing @ body; });
-  ] |> List.map ~f:(fun x -> CU.Function x)
+  ]

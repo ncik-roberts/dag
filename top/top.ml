@@ -7,7 +7,7 @@ let say (msgs : unit -> string list) : unit =
 
 let run_on_ast (ast : unit Ast.t) (function_names : string list) : unit =
   let mem = Set.mem (String.Set.of_list function_names) in
-  let ast = Tc.check ast in
+  let (ctx, ast) = Tc.check ast in
   say (fun () -> ["Typechecking succeeded."]);
   let dag = Dag.of_ast ast in
   List.iter dag ~f:(fun dag_fun ->
@@ -45,7 +45,7 @@ let run_on_ast (ast : unit Ast.t) (function_names : string list) : unit =
           Sexp.to_string_hum (Annotated_air.sexp_of_result ann);
         ]);
 
-        let cuda = Cuda_trans.trans air ann in
+        let cuda = Cuda_trans.trans air Tc.(ctx.struct_ctx) ann in
         say (fun () -> [
           Printf.sprintf "Cuda:";
           Cuda_ir.fmt_gstmts cuda;

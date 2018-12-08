@@ -312,9 +312,9 @@ let fmt_func f =
 
 let fmt_struct (id,fields) =
   let sp = str_depth 1 in
-  let header = sprintf "struct %s{\n" id in
+  let header = sprintf "struct %s {\n" id in
   let block = List.map fields ~f:(fun (t, id) -> sp ^ fmt_typ t ^ " " ^ id ^ ";\n") in
-  let block' = String.concat block ^ "}\n" in
+  let block' = String.concat block ^ "};" in
   header ^ block'
 
 let fmt_gstmt = function

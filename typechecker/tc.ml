@@ -401,8 +401,8 @@ let check_global_stm (ctx : tctxt) (ast : unit Ast.global_stmt) : tctxt * (typ A
     in
     (ctx', None)
 
-let check_with (ctx : tctxt) (ast : unit Ast.t) : typ Ast.fun_defn list =
-  let typc = List.folding_map ~f:check_global_stm ~init:ctx ast in
-  List.filter_opt typc
+let check_with (ctx : tctxt) (ast : unit Ast.t) : tctxt * typ Ast.fun_defn list =
+  let (tctx, typc) = List.fold_map ~f:check_global_stm ~init:ctx ast in
+  (tctx, List.filter_opt typc)
 
-let check (ast : unit Ast.t) : typ Ast.fun_defn list = check_with empty ast
+let check (ast : unit Ast.t) : tctxt * typ Ast.fun_defn list = check_with empty ast

@@ -33,5 +33,5 @@ type tctxt = {
 
 val empty : tctxt
 
-val check : unit Ast.t -> typ Ast.fun_defn list
-val check_with : tctxt -> unit Ast.t -> typ Ast.fun_defn list
+val check : unit Ast.t -> tctxt * typ Ast.fun_defn list
+val check_with : tctxt -> unit Ast.t -> tctxt * typ Ast.fun_defn list

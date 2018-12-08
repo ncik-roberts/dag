@@ -1,3 +1,21 @@
-int f(int x) {
+int f1(int x) {
   return x;
+}
+
+int[] f2(int[] x) {
+  return x;
+}
+
+struct circle {
+  int radius;
+  int x;
+  int y;
+};
+
+circle f3() {
+  return struct circle {
+    x = 0;
+    y = 0;
+    radius = 3;
+  };
 }

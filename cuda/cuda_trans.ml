@@ -58,6 +58,7 @@ let rec trans_type (typ : Tc.typ) : CU.cuda_type =
   | Tc.Float -> CU.Float
   | Tc.Struct i -> CU.Struct i
   | Tc.Array t -> CU.Pointer (remove_arrays t)
+  | Tc.Pointer t -> CU.Pointer (trans_type t)
   | _ -> failwith "Don't currently support other types"
 
 (* Remove outermost arrays. *)
@@ -85,8 +86,9 @@ let trans_params (params : Ano.Param.t list) : (CU.cuda_type * CU.cuda_ident) li
          let dim_params = List.map dims ~f:(fun t -> (CU.Integer, temp_name t)) in
          array_param :: dim_params
 
+
      (* A non-array parameter, sadly, is not. *)
-     | Ano.Param.Not_array t -> List.return (CU.Integer, temp_name t))
+     | Ano.Param.Not_array t -> List.return (trans_type (Temp.to_type t), temp_name t))
 
 (* Translate AIR operands into their cuda equivalents. s*)
 let trans_op = function
@@ -283,8 +285,18 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
   | Air.Primitive (d, s) ->
       [ d <-- trans_prim s]
   | Air.Struct_Init (d, t, flx) ->
-      let dest = dest_to_lvalue_exn ctx d in
-      [ CU.InitStruct(trans_type t, dest, List.map flx ~f:(fun (n,o) -> (n,trans_op o)))]
+      let (dest, hd, tl) = match (dest_to_lvalue ctx d, d) with
+        | Some lvalue, Ir.Return _ -> (lvalue, [], [])
+        | _, Ir.Dest _ ->
+            let typ = Ir.type_of_dest d in
+            let t = Temp.next typ () in
+            (temp_to_var t, [ CU.Declare (trans_type typ, temp_name t) ], [])
+        | None, Ir.Return _ ->
+            let typ = Ir.type_of_dest d in
+            let t = Temp.next typ () in
+            (temp_to_var t, [ CU.Declare (trans_type typ, temp_name t) ], [ CU.Return (temp_to_var t) ])
+      in
+      hd @ [ CU.InitStruct (dest, List.map flx ~f:(fun (n,o) -> (n,trans_op o)))] @ tl
   | Air.Seq_stmt seq_stmt ->
 
   (* Run/reduce given sequential semantics. *)
@@ -293,6 +305,10 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
    * it in the annotation phase. Based on the value of view, the
    * call to get_index will return the right indexing function. *)
   | Air.Run (dest, _) ->
+      (match dest with
+       | Ir.Return t ->
+           Temp.Table.add_exn ctx.allocation_method ~key:t ~data:`Unallocated
+       | _ -> ());
       let dest_temp = Ir.temp_of_dest dest in
       let index_fn = get_index ctx dest_temp in
       let loop_temp = Temp.next Tc.Int () in
@@ -556,7 +572,7 @@ and trans_array_view (ctx : context) (dest, loop_temp, index_fn, lengths) : CU.c
 
 let rec extract_kernel_launches : CU.cuda_stmt list -> CU.cuda_func list =
   List.fold_left ~init:[] ~f:(fun kernel_launches -> function
-    | CU.Return _ | CU.Sync | CU.Nop | CU.DeclareArray _ | CU.DeclareAssign _ | CU.Assign _
+    | CU.Return _ | CU.Sync | CU.Nop | CU.DeclareArray _ | CU.DeclareAssign _ | CU.Assign _ | CU.Declare _
     | CU.AssignOp _ | CU.Cuda_malloc _ | CU.Malloc _ | CU.Free _ | CU.Transfer _ | CU.InitStruct _
     | CU.Expression _ | CU.Memcpy _ -> kernel_launches
     | CU.Launch (_, _, cuda_func, _) -> cuda_func :: kernel_launches
@@ -568,7 +584,7 @@ let rec extract_kernel_launches : CU.cuda_stmt list -> CU.cuda_func list =
 
 let rec extract_kernel_launches : CU.cuda_stmt list -> CU.cuda_func list =
   List.fold_left ~init:[] ~f:(fun kernel_launches -> function
-    | CU.Sync | CU.Nop | CU.DeclareArray _ | CU.DeclareAssign _ | CU.Assign _
+    | CU.Sync | CU.Nop | CU.DeclareArray _ | CU.DeclareAssign _ | CU.Assign _ | CU.Declare _
     | CU.AssignOp _ | CU.Malloc _ | CU.Cuda_malloc _ | CU.Free _ | CU.Transfer _
     | CU.Expression _ | CU.Memcpy _ | CU.Return _ | CU.InitStruct _ -> kernel_launches
     | CU.Launch (_, _, cuda_func, _) -> cuda_func :: kernel_launches
@@ -590,7 +606,12 @@ let trans (program : Air.t) (result : Ano.result) : CU.cuda_gstmt list =
     result;
     allocation_method;
     lvalue = Option.map ~f:(fun t -> Expr.Temp t) lvalue;
-    lvalue_lengths = Option.map ~f:(fun t -> (Map.find_exn Ano.(result.buffer_infos) t).Ano.length) lvalue;
+    lvalue_lengths = begin
+      let open Option.Monad_infix in
+      lvalue >>= fun t ->
+      Map.find Ano.(result.buffer_infos) t >>= fun x ->
+      Option.return Ano.(x.length)
+    end;
     out_param = lvalue;
     dims_of_params = List.concat_map Ano.(result.params) ~f:(function
       | Ano.Param.Array (_, dims) -> dims

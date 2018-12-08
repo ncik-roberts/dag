@@ -63,6 +63,7 @@ and call_name =
   | Int_of_float
   | Min
   | Max
+  | Log2
   | Dim of int
   | Fun_ident of ident
   [@@deriving sexp]
@@ -94,8 +95,8 @@ and 'a expr' =
      index_source : 'a expr;
      index_expr : 'a expr;
   }
-  | Struct_Init of { 
-    struct_type : 'a * typ;
+  | Struct_Init of {
+    struct_name : ident;
     struct_fields : 'a field list;
   }
   | Access of 'a expr * ident
@@ -165,10 +166,7 @@ and map_expr' ~f = function
       index_source = map_expr ~f i.index_source;
       index_expr = map_expr ~f i.index_expr;
     }
-  | Struct_Init si -> Struct_Init {
-      struct_type = map_type ~f si.struct_type;
-      struct_fields = List.map ~f:(map_field ~f) si.struct_fields;
-    }
+  | Struct_Init si -> Struct_Init { si with struct_fields = List.map ~f:(map_field ~f) si.struct_fields; }
   | Access (e, i) -> Access (map_expr ~f e, i)
   | Const i -> Const i
   | Bool b -> Bool b

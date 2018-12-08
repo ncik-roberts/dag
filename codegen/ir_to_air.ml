@@ -43,8 +43,9 @@ let make_array_view
     | Ir.Reduce _, _ -> failwith "Reduce is not an array view."
     | Ir.Scan _, _ -> failwith "Scan is not an array view."
     | Ir.Dim _, _ -> failwith "Dim is not an array view."
-    | Ir.Min , _ -> failwith "Min is not an array view."
-    | Ir.Max , _ -> failwith "Max is not an array view."
+    | Ir.Min, _ -> failwith "Min is not an array view."
+    | Ir.Max, _ -> failwith "Max is not an array view."
+    | Ir.Log2, _ -> failwith "Log2 is not an array view."
     | Ir.Filter_with, _ -> failwith "Filter_with is not an array view."
     | Ir.Zip_with _, _ -> failwith "Invalid zipwith."
     | Ir.Transpose, _ -> failwith "Invalid transpose."
@@ -268,7 +269,10 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
   in
 
   let init_ctx = { array_views =
-    Temp.Map.of_alist_exn (List.map Ir.(ir.params) ~f:(fun t -> (t, (Temp.to_type t, Air.Array t))));
+    Temp.Map.of_alist_exn (List.filter_map Ir.(ir.params) ~f:(fun t ->
+      match Temp.to_type t with
+      | Tc.Array _ as typ -> Some (t, (typ, Air.Array t))
+      | _ -> None));
     idx = Temp.Map.empty;
   } in
 

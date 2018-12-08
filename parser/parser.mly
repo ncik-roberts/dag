@@ -89,6 +89,7 @@ struct_decl :
     LBRACE;
     struct_fields = fields;
     RBRACE;
+    SEMICOLON;
       { Ast.Struct Ast.{ struct_name; struct_fields; } }
   ;
 
@@ -123,42 +124,29 @@ params :
  * STRUCTS 
  **********************************/
 
-field_tail :
-  | /* empty */
-      { [] }
-  | SEMICOLON;
-    f = param;
-    fs = field_tail;
-      { f :: fs }
-  ;
-
 fields :
   | /* empty */
     { [] }
-  | first_field = param;
-    other_fields = field_tail; 
+  | first_field = param; SEMICOLON;
+    other_fields = fields;
       { first_field :: other_fields }
   ;
 
 init_field : 
   | field_name = IDENT;
+    ASSIGN;
     field_expr = expr;
-    { Ast.{ field_name; field_expr; } }
-
-init_field_tail :
-  | /* empty */ 
-    { [] }
-  | SEMICOLON;
-    first = init_field;
-    rest = init_field_tail;
-      { first :: rest }
+    SEMICOLON;
+      { Ast.{ field_name; field_expr; } }
+  ;
 
 struct_init_exprs : 
   | /* empty */ 
-    { [] }
+      { [] }
   | first_init = init_field;
-    other_inits = init_field_tail; 
-    { first_init :: other_inits }
+    other_inits = struct_init_exprs; 
+      { first_init :: other_inits }
+  ;
 
 /**********************************
  * ARGUMENTS
@@ -169,6 +157,7 @@ arg :
       { Ast.Bare_binop ((), b) }
   | e = expr;
       { Ast.Expr e }
+  ;
 
 arg_tail :
   | /* empty */
@@ -227,6 +216,10 @@ _expr :
       { Ast.Float i }
   | i = BOOLCONST;
       { Ast.Bool i }
+  | LPAREN;
+    e = _expr;
+    RPAREN;
+      { e }
   | ident = IDENT;
       { Ast.Variable ident }
   | call_ident = IDENT;
@@ -245,6 +238,7 @@ _expr :
           | "int_of_float" -> Ast.Int_of_float
           | "filterWith" -> Ast.Filter_with
           | "scan" -> Ast.Scan
+          | "log2" -> Ast.Log2
           | s ->
             let open Core in
             let dim =
@@ -263,11 +257,12 @@ _expr :
     DOT;
     field_name = IDENT;
     { Ast.Access (field_source,field_name) }
-  | LBRACE;
-    struct_type = typ;
+  | STRUCT;
+    struct_name = IDENT;
+    LBRACE;
     struct_fields = struct_init_exprs;
     RBRACE;
-    { Ast.Struct_Init { struct_type; struct_fields; } } 
+    { Ast.Struct_Init { struct_name; struct_fields; } }
   | unary_operator = unop;
     unary_operand = expr;
       %prec UNARY_MINUS
@@ -306,7 +301,7 @@ binop :
       { Ast.Div }
   | MOD;
       { Ast.Mod }
-  | LSHIFT; 
+  | LSHIFT;
       { Ast.Lshift }
   | RSHIFT;
       { Ast.Rshift }

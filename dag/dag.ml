@@ -17,7 +17,7 @@ module Vertex_view = struct
     | Binop of Ast.binop
     | Unop of Ast.unop
     | Access of Ast.ident
-    | Index 
+    | Index
     | Struct_Init of Tc.typ * Ast.ident list
     | Literal of literal
     | Input of Ast.ident
@@ -51,7 +51,10 @@ module Vertex_info = struct
         | None -> failwithf "Unknown vertex `%ld`." key ()
       in
       let e = find enclosing_parallel_blocks ~default:[] ~f:Fn.id in
-      let t = Map.find_exn types key in
+      let t = match Map.find types key with
+        | Some t -> t
+        | None -> failwithf "(%s): Unknown type of vertex `%ld`." (Vertex_view.sexp_of_t v |> Sexp.to_string_hum) key ()
+      in
       let vtx = find vertices_in_block ~f:Option.some ~default:None in
       { predecessors = p;
         successors = s;
@@ -119,7 +122,7 @@ let unroll dag key =
   (* Only recursive production is Parallel_block *)
   match view dag key with
   | Parallel_block (_, t) -> Some t
-  | Function _ | Binop _ | Unop _ | Literal _ 
+  | Function _ | Binop _ | Unop _ | Literal _
   | Input _  | Index | Struct_Init _ | Access _ -> None
 
 type 'a counter = unit -> 'a
@@ -228,17 +231,17 @@ let of_ast : Tc.typ Ast.fun_defn list -> t =
           } in
           let { Result.vertex = return_vertex; _; } as result = loop_stmts ctx' parallel.parallel_body in
           let view = Vertex_view.Parallel_block (vertex_binding, return_vertex) in
-          `New_vertex (vertex, view, [result_expr], `With_additional_results [result; result_binding])      
+          `New_vertex (vertex, view, [result_expr], `With_additional_results [result; result_binding])
       | Ast.Const i ->
           let vertex = next_vertex () in
           let view = Vertex_view.(Literal (Int32 i)) in
           `New_vertex (vertex, view, [], `No_additional_results)
-      | Ast.Float f -> 
+      | Ast.Float f ->
           let vertex = next_vertex () in
           let view = Vertex_view.(Literal (Float f)) in
           `New_vertex (vertex, view, [], `No_additional_results)
       | Ast.Bool b ->
-          let vertex = next_vertex () in 
+          let vertex = next_vertex () in
           let view = Vertex_view.(Literal (Bool b)) in
           `New_vertex (vertex, view, [], `No_additional_results)
       | Ast.Binop binop ->
@@ -252,24 +255,23 @@ let of_ast : Tc.typ Ast.fun_defn list -> t =
           let view = Vertex_view.Unop unop.unary_operator in
           let result = loop_expr ctx unop.unary_operand in
           `New_vertex (vertex, view, [result], `No_additional_results)
-      | Ast.Index i -> 
+      | Ast.Index i ->
           let vertex = next_vertex () in
-          let view = Vertex_view.Index in 
+          let view = Vertex_view.Index in
           let src = loop_expr ctx i.index_source in
           let expr = loop_expr ctx i.index_expr in
           `New_vertex(vertex, view, [src; expr], `No_additional_results)
-      | Ast.Access (s,f) -> 
-          let vertex = next_vertex () in 
-          let view = Vertex_view.Access f in 
+      | Ast.Access (s, f) ->
+          let vertex = next_vertex () in
+          let view = Vertex_view.Access f in
           let src = loop_expr ctx s in
-          `New_vertex(vertex, view, [src], `No_additional_results)
+          `New_vertex (vertex, view, [src], `No_additional_results)
       | Ast.Struct_Init s ->
-          let vertex = next_vertex () in 
+          let vertex = next_vertex () in
           let fields = List.map ~f:(fun f -> Ast.(f.field_name)) s.struct_fields in
-          let (new_typ,_) = s.struct_type in
-          let view = Vertex_view.Struct_Init (new_typ, fields) in
+          let view = Vertex_view.Struct_Init (typ, fields) in
           let results = List.map ~f:(fun f -> loop_expr ctx Ast.(f.field_expr)) s.struct_fields in
-          `New_vertex(vertex,view, results, `No_additional_results)
+          `New_vertex (vertex, view, results, `No_additional_results)
       | Ast.Variable v ->
           let vertex = Map.find_exn Context.(ctx.local_vars) v in
           `Reused_vertex vertex

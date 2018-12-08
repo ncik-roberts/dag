@@ -19,8 +19,8 @@ let decnumber s lexbuf = match Int32.of_string_opt s with
   | Some i -> P.CONST i
   | None -> errorf lexbuf "cannot parse integral constant `%s`"
 
-let hexnumber s lexbuf = match Int32.of_string_opt s with 
-  | Some i -> P.CONST i 
+let hexnumber s lexbuf = match Int32.of_string_opt s with
+  | Some i -> P.CONST i
   | None -> errorf lexbuf "cannot parse hexadecimal constant `%s`"
 
 let floatnumber s lexbuf = match float_of_string_opt s with

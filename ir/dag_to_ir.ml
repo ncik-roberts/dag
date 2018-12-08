@@ -66,6 +66,7 @@ let run (dag_fun : Dag.dag_fun) (traversal : Dag_traversal.traversal) : Ir.t * T
       | Ast.Int_of_float -> `Nullary Ir.Int_of_float
       | Ast.Min -> `Nullary Ir.Min
       | Ast.Max -> `Nullary Ir.Max
+      | Ast.Log2 -> `Nullary Ir.Log2
       | Ast.Dim n -> `Nullary (Ir.Dim n)
       | Ast.Transpose -> `Nullary Ir.Transpose
       | Ast.Fun_ident _ -> failwith "You didn't inline before trying to translate."

@@ -18,6 +18,7 @@ type fun_call =
   | Int_of_float
   | Min
   | Max
+  | Log2
   | Transpose
   | Dim of int
   [@@deriving sexp]

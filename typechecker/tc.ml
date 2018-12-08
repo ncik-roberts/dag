@@ -180,12 +180,16 @@ let check_fun (ctx : tctxt) (fun_name : Ast.call_name) (arg_types : typ list) : 
   | Ast.Tabulate ->
       begin
         match arg_types with
-        | [ typ1; typ2; typ3 ] when
-          typ1 = typ2 && typ2 = typ3
-          && typ1 = Int -> typ1
+        | [ Int; Int; Int; ] -> Array Int
         | _ -> failwith "Invalid arguments to Tabulate."
       end
-  | (Ast.Min|Ast.Max) ->
+  | Ast.Log2 ->
+      begin
+        match arg_types with
+         | [ Int; ] -> Int
+         | _ -> failwith "Invalid argument to log2."
+      end
+  | (Ast.Min | Ast.Max) ->
       begin
       match arg_types with
       | [typ1; typ2 ] when typ1 = typ2 -> typ1
@@ -226,14 +230,24 @@ let check_fun (ctx : tctxt) (fun_name : Ast.call_name) (arg_types : typ list) : 
 let rec check_type (ctx : tctxt) (ast : Ast.typ) : typ = match ast with
   | Ast.Ident "int" -> Int
   | Ast.Ident "float" -> Float
+  | Ast.Ident "bool" -> Bool
   | Ast.Ident ident ->
     (match Map.find ctx.struct_ctx ident with
       | Some _ -> Struct ident
       | None -> failwithf "Unknown type `%s`" ident ())
   | Ast.Array ast' -> Array (check_type ctx ast')
 
-let rec check_struct_fields (ctx : tctxt) (typ : Ast.typ) (ls : 'a Ast.field list) : unit =
-    ()  (* Todo : check that struct_exprs match field types. *)
+let rec check_struct_fields (ctx : tctxt) (fields : struct_type) (ls : 'a Ast.field list) : unit =
+  let sorted1 = List.sort fields ~compare:(fun f1 f2 -> String.compare f1.field_name f2.field_name) in
+  let sorted2 = List.sort ls ~compare:(fun f1 f2 -> String.compare Ast.(f1.field_name) Ast.(f2.field_name)) in
+  match
+    List.iter2 sorted1 sorted2 ~f:(fun tc_field ast_field ->
+      let (typ, _) = Ast.(ast_field.field_expr) in
+      if not (Type.equal tc_field.field_type typ)
+        then failwith "Wrong struct fields.")
+  with
+  | List.Or_unequal_lengths.Unequal_lengths -> failwith "Wrong number of struct fields."
+  | List.Or_unequal_lengths.Ok () -> ()
 
 let rec check_expr (ctx : tctxt) (ast : unit Ast.expr) : typ Ast.expr = match snd ast with
   | Ast.Const c -> (Int, Ast.Const c)
@@ -265,11 +279,13 @@ let rec check_expr (ctx : tctxt) (ast : unit Ast.expr) : typ Ast.expr = match sn
   | Ast.Struct_Init struc ->
       let results = List.map ~f:(check_expr ctx)
                     (List.map ~f:(fun f -> Ast.(f.field_expr)) struc.struct_fields) in
-      let new_fields = List.map2_exn (struc.struct_fields) results ~f:(fun f exp -> Ast.{f with field_expr = exp }) in
-      let (_,ast_t) = struc.struct_type in
-      let typ = check_type ctx (ast_t) in
-      check_struct_fields ctx (ast_t) (new_fields);
-      (typ, Ast.Struct_Init { struct_type = (typ,ast_t); struct_fields = new_fields; })
+      let new_fields = List.map2_exn struc.struct_fields results ~f:(fun f exp -> Ast.{f with field_expr = exp }) in
+      let fields = match Map.find ctx.struct_ctx struc.struct_name with
+        | None -> failwith "struct not found"
+        | Some t -> t
+      in
+      check_struct_fields ctx fields new_fields;
+      (Struct struc.struct_name, Ast.Struct_Init { struc with struct_fields = new_fields })
 
   | Ast.Parallel parallel ->
       begin

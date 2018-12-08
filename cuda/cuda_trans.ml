@@ -193,10 +193,12 @@ let dest_to_expr_lvalue (ctx : context) (dest : Ir.dest) : Expr.t =
   | Ir.Return _ -> Option.value_exn ctx.lvalue
   | Ir.Dest t -> Expr.Temp t
 
-let dest_to_lvalue (ctx : context) (dest : Ir.dest) : CU.cuda_expr =
+let dest_to_lvalue (ctx : context) (dest : Ir.dest) : CU.cuda_expr option =
   match dest with
-  | Ir.Return _ -> trans_expr ctx (Option.value_exn ctx.lvalue)
-  | Ir.Dest t -> temp_to_var t
+  | Ir.Return _ -> Option.map ~f:(trans_expr ctx) ctx.lvalue
+  | Ir.Dest t -> Some (temp_to_var t)
+
+let dest_to_lvalue_exn ctx dest = Option.value_exn (dest_to_lvalue ctx dest)
 
 (* on_return is the lvalue to use upon encountering a return stmt. *)
 let dest_to_stmt (ctx : context) (dest : Ir.dest) (rhs : CU.cuda_expr) : CU.cuda_stmt =
@@ -262,7 +264,10 @@ let rec trans_a_stmt : type a. (context -> a -> CU.cuda_stmt list) -> context ->
 
 (* Translate a sequential statement *)
 and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
-  let (<--) d src = CU.Assign (dest_to_lvalue ctx d, src) in
+  let (<--) d src = match dest_to_lvalue ctx d with
+    | Some dest -> CU.Assign (dest, src)
+    | None -> CU.Return src
+  in
 
   match stmt with
   | Air.Binop (d, op, s1, s2) ->
@@ -277,9 +282,9 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       [ d <-- trans_op s ]
   | Air.Primitive (d, s) ->
       [ d <-- trans_prim s]
-  | Air.Struct_Init (d,t,flx) ->
-      let dest = dest_to_lvalue ctx d in
-      [ CU.InitStruct(trans_type t,dest,List.map flx ~f:(fun (n,o) -> (n,trans_op o)))]
+  | Air.Struct_Init (d, t, flx) ->
+      let dest = dest_to_lvalue_exn ctx d in
+      [ CU.InitStruct(trans_type t, dest, List.map flx ~f:(fun (n,o) -> (n,trans_op o)))]
   | Air.Seq_stmt seq_stmt ->
 
   (* Run/reduce given sequential semantics. *)
@@ -350,7 +355,7 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       in
       [ CU.DeclareAssign (trans_type ty, temp_name acc, trans_op init);
         CU.Loop (hdr, [
-          CU.Assign (CU.Index (dest_to_lvalue ctx dest, temp_to_var loop_temp), temp_to_var acc);
+          CU.Assign (CU.Index (dest_to_lvalue_exn ctx dest, temp_to_var loop_temp), temp_to_var acc);
           assign_stmt;
         ]);
         (* TODO: allow client to bind final reduced result. *)
@@ -520,7 +525,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         memcpy CU.(Host, Device) device_args host_args;
         [CU.Launch (gdim, bdim, kernel, kernel_args)];
         CU.[Transfer (
-          dest_to_lvalue ctx dest,
+          dest_to_lvalue_exn ctx dest,
           temp_to_var device_dest_temp,
           build_cached_reduce_expr MUL (get_lengths ctx (match dest with
             | Ir.Return _ -> Option.value_exn ctx.out_param

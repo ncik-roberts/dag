@@ -1,6 +1,6 @@
 open Core
 
-type ident = string [@@deriving sexp]
+type ident = string [@@deriving sexp, compare]
 module IdentMap = String.Map
 
 type typ =
@@ -11,12 +11,17 @@ type typ =
   | Array of typ
   | Pointer of typ
   | Fun of fun_type
-  [@@deriving sexp]
+  [@@deriving sexp, compare]
 
+(* when they are options, we pretend that it's polymorphic. *)
+(* all `None`s corefer. *)
 and fun_type = {
-  return_type : typ;
-  param_types : typ list;
+  allowed_types : typ list;
+  return_type : typ option;
+  param_types : typ option list;
 }
+
+module Type = Comparable.Make (struct type t = typ [@@deriving sexp, compare] end)
 
 type struct_field_type = {
   field_name : ident;
@@ -51,41 +56,55 @@ let add_with_failure
   | `Ok result -> result
   | `Duplicate -> failwithf on_duplicate key ()
 
+let instantiate_return_type typs fun_type =
+  let types_for_none =
+    List.fold2 typs fun_type.param_types
+      ~init:Type.Set.empty
+      ~f:(fun acc_set t p -> match p with
+        | None ->
+            if List.mem fun_type.allowed_types t ~equal:Type.equal
+            then Type.Set.add acc_set t
+            else failwith "Disallowed type for polymorphic fn."
+        | Some t2 -> if t = t2 then acc_set else failwith "Types don't unify")
+    |> function List.Or_unequal_lengths.Ok x -> x
+              | List.Or_unequal_lengths.Unequal_lengths -> failwith "Wrong # of args."
+  in
+    if Set.length types_for_none > 1 then failwith "Incompatible instantiations of polymorphic fn.";
+    match (fun_type.return_type, Set.choose types_for_none) with
+    | None, None -> failwith "Polymorphic fn uninstantiated."
+    | None, Some t -> t
+    | Some t, _ -> t
+
 (* *)
-let infer_binop typ (binop : Ast.binop) : fun_type =
-  if typ <> Int && typ <> Float then failwith "Invalid Binop type." else
+let infer_binop (binop : Ast.binop) : fun_type =
+  let allowed_types = [ Int; Float;] in
   match binop with
   | Ast.(Plus | Minus | Times | Div | Mod | Lshift | Rshift | BitAnd | BitOr | BitXor) ->
-    { param_types = [ typ; typ; ]; return_type = typ; }
+      { param_types = [ None; None; ]; return_type = None; allowed_types; }
   | Ast.(And | Or ) ->
-    { param_types = [ Bool; Bool;]; return_type = Bool; }
+      { param_types = [ Some Bool; Some Bool;]; return_type = Some Bool; allowed_types = []; }
   | Ast.(Less | Greater | LessEq | GreaterEq ) ->
-    { param_types = [ typ; typ;]; return_type = Bool; }
+      { param_types = [ None; None;]; return_type = Some Bool; allowed_types; }
 
 (* Negate works on ints and floats, logical not works on ints and bools. *)
-let infer_unop typ  (unop : Ast.unop) : fun_type =
-  let _ = match unop with
-  | Ast.Negate ->
-    if typ <> Int && typ <> Float then failwith "Invalid negate type.";
-  | Ast.Logical_not ->
-    if typ <> Int && typ <> Bool then failwith "Invalid logical_not type."
+let infer_unop (unop : Ast.unop) : fun_type =
+  let allowed_types = match unop with
+  | Ast.Negate -> [ Int; Float; ]
+  | Ast.Logical_not -> [ Int; Bool; ]
   in
   {
-    param_types = [ typ ];
-    return_type = typ;
+    param_types = [ None ];
+    return_type = None;
+    allowed_types;
   }
 
 let check_binop (typ1 : typ) (typ2 : typ) (binop : Ast.binop) : typ =
-  let fun_type = infer_binop typ1 binop in
-  if fun_type.param_types <> [ typ1; typ2; ]
-  then failwith "Invalid binop types."
-  else fun_type.return_type
+  let fun_type = infer_binop binop in
+  instantiate_return_type [ typ1; typ2; ] fun_type
 
 let check_unop (typ : typ) (unop : Ast.unop) : typ =
-  let fun_type = infer_unop typ unop in
-  if fun_type.param_types <> [ typ ]
-  then failwith "Invalid unop types."
-  else fun_type.return_type
+  let fun_type = infer_unop unop in
+  instantiate_return_type [typ] fun_type
 
 let check_index (typ1 : typ) (typ2 : typ) : typ =
   match typ1,typ2 with
@@ -120,8 +139,7 @@ let check_fun (ctx : tctxt) (fun_name : Ast.call_name) (arg_types : typ list) : 
   | Ast.Map ->
       begin
         match arg_types with
-        | [ Fun fun_type; Array typ; ] when [ typ ] = fun_type.param_types ->
-            Array (fun_type.return_type)
+        | [ Fun fun_type; Array typ; ] -> Array (instantiate_return_type [typ] fun_type)
         | _ -> failwith "Invalid argument to map."
       end
   | Ast.Dim n ->
@@ -135,8 +153,7 @@ let check_fun (ctx : tctxt) (fun_name : Ast.call_name) (arg_types : typ list) : 
         match arg_types with
         | [ Fun fun_type; typ1; Array typ2; ] when
             typ1 = typ2
-              && [ typ1; typ2; ] = fun_type.param_types
-              && typ1 = fun_type.return_type ->
+              && typ1 = instantiate_return_type [typ1; typ2;] fun_type ->
                 (* Scan creates an array of these things;
                  * reduce just gives you the final result. *)
                 if fun_name = Ast.Scan then Array typ1
@@ -146,9 +163,12 @@ let check_fun (ctx : tctxt) (fun_name : Ast.call_name) (arg_types : typ list) : 
   | Ast.Zip_with ->
       begin
         match arg_types with
-        | Fun fun_type :: array_typs
-            when array_typs = List.map fun_type.param_types ~f:(fun t -> Array t)
-            -> Array fun_type.return_type
+        | Fun fun_type :: array_typs ->
+            let unarray_types = List.map array_typs ~f:(function
+              |  Array t -> t
+              | _ -> failwith "Not array zipwith")
+            in
+            Array (instantiate_return_type unarray_types fun_type)
         | _ -> failwith "Invalid argument to zip_with."
       end
   | Ast.Transpose ->
@@ -187,8 +207,17 @@ let check_fun (ctx : tctxt) (fun_name : Ast.call_name) (arg_types : typ list) : 
       begin
         match IdentMap.find ctx.fun_ctx fun_name with
         | Some fun_type ->
-            if List.equal ~equal:(=) arg_types fun_type.param_types
-            then fun_type.return_type
+            let concrete_param_types =
+              List.map fun_type.param_types ~f:(function
+                | None -> failwith "Not concrete??"
+                | Some ty -> ty)
+            in
+            let concrete_ret_ty = match fun_type.return_type with
+              | Some ty -> ty
+              | None -> failwith "???"
+            in
+            if List.equal ~equal:(=) arg_types concrete_param_types
+            then concrete_ret_ty
             else failwith "Invalid argument types."
         | None -> failwithf "Unknown function `%s`" fun_name ()
       end
@@ -264,24 +293,16 @@ let rec check_expr (ctx : tctxt) (ast : unit Ast.expr) : typ Ast.expr = match sn
             (Array typ, Ast.Parallel { parallel with parallel_arg = res; parallel_body = res_stmts; parallel_type; })
       end
   | Ast.Fun_call fun_call ->
-      let (arg_types,args) =
-      match fun_call.call_args with
-      | [Ast.Bare_binop ((),binop); Ast.Expr s1; Ast.Expr s2] ->
-          let (t1,e1),(t2,e2) = check_expr ctx s1, check_expr ctx s2 in
-          let typ = Fun (infer_binop t1 binop) in
-          ([typ;t1;t2],[Ast.Bare_binop(typ,binop);Ast.Expr (t1,e1); Ast.Expr(t2,e2)])
-      | [Ast.Bare_unop ((),unop); Ast.Expr s] ->
-          let (t,e) = check_expr ctx s in
-          let typ = Fun (infer_unop t unop) in
-          ([typ;t],[Ast.Bare_unop(typ,unop);Ast.Expr(t,e)])
-      | exprs -> List.map exprs ~f:(function
-        | Ast.Expr expr -> let (t, e) = check_expr ctx expr in (t, Ast.Expr (t, e))
-        | _ -> failwith "Cannot use bare ops in standard calls. (Type Restriction)")
+      let (arg_types, args) = List.map fun_call.call_args ~f:(fun arg ->
+        match arg with
+        | Ast.Bare_binop ((), b) -> let ty = Fun (infer_binop b) in (ty, Ast.Bare_binop (ty, b))
+        | Ast.Bare_unop ((), u) -> let ty = Fun (infer_unop u) in (ty, Ast.Bare_unop (ty, u))
+        | Ast.Expr e -> let (ty, _) as e' = check_expr ctx e in (ty, Ast.Expr e'))
         |> List.unzip
       in
+      (* An ast with partially-applied functions at each node. *)
       let ret_ty = check_fun ctx fun_call.call_name arg_types in
       (ret_ty, Ast.Fun_call { fun_call with call_args = args })
-
 
 and check_stmt (ctx : tctxt) (ast : unit Ast.stmt) : tctxt * typ Ast.stmt =
   if Option.is_some ctx.return_type then failwith "Function already returned.";
@@ -343,7 +364,11 @@ let check_global_stm (ctx : tctxt) (ast : unit Ast.global_stmt) : tctxt * (typ A
     let ctx' = { ctx with
         fun_ctx =
           add_with_failure ctx.fun_ctx
-            ~key:ast.fun_name ~data:{ return_type; param_types; }
+            ~key:ast.fun_name ~data:{
+              return_type = Some return_type;
+              param_types = List.map ~f:Option.some param_types;
+              allowed_types = [];
+            }
             ~on_duplicate: "Duplicate function definition `%s`"; }
     in (ctx',Some { ast with fun_body = result; fun_ret_type; fun_params; })
   | Struct ast ->

@@ -12,8 +12,9 @@ type typ =
   [@@deriving sexp]
 
 and fun_type = {
-  return_type : typ;
-  param_types : typ list;
+  allowed_types : typ list;
+  return_type : typ option;
+  param_types : typ option list;
 }
 
 type struct_field_type = {

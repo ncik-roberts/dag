@@ -748,6 +748,19 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t) (resul
   let struct_decls = Map.mapi ~f:trans_struct_decl struct_decls |> Map.to_alist |> List.map ~f:snd in
   let gdecls = extract_kernel_launches body in
   List.concat [
+    [ CU.Include "<cuda.h>";
+      CU.Include "<cuda_runtime.h>";
+      CU.Include "<math.h>";
+      CU.Include "<algorithm>";
+      CU.Include "<stdio.h>";
+      CU.Include "<string>";
+      CU.Include "<stdbool.h>";
+      CU.Include "<thrust/host_vector.h>";
+      CU.Include "<thrust/device_vector.h>";
+      CU.Include "<thrust/execution_policy.h>";
+      CU.Include "<thrust/extrema.h>";
+      CU.Include "<vector>";
+    ];
     struct_decls;
     gdecls |> List.map ~f:(fun x -> CU.Function x);
     List.return
@@ -761,10 +774,3 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t) (resul
             params;
             body = malloc'ing @ body; });
   ]
-
-  (* sexp if you need it :)
-        printf "%s\n" (Sexp.to_string_hum (Temp.Table.sexp_of_t (function
-          | `Host_and_device t -> Tuple2.sexp_of_t Sexp.of_string Temp.sexp_of_t ("host_and_device", t)
-          | `Just_device -> Sexp.of_string "just_device"
-          | `Unallocated -> Sexp.of_string "unallocated"
-        ) ctx.allocation_method)); *)

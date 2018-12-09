@@ -204,6 +204,20 @@ let mk_buffer_info_out_of_temp t kernel_ctx buffer_infos =
         filtered_lengths = None;
       }
 
+let update_backing_temps
+  (backing_temps : Temp.Set.t Temp.Map.t)
+  (t : Temp.t)
+  (av : Air.array_view) : Temp.Set.t Temp.Map.t =
+  let rec loop (_, av) = match av with
+    | Air.Array_index (t1, _) -> Map.find_exn backing_temps t1
+    | Air.Transpose av -> loop av
+    | Air.Array t -> Temp.Set.singleton t
+    | Air.Reverse av -> loop av
+    | Air.Zip_with (_, avs) -> Temp.Set.union_list (List.map ~f:loop avs)
+    | Air.Tabulate (_, _, _) -> Temp.Set.empty
+  in
+  Map.add_exn backing_temps ~key:t ~data:(loop av)
+
 let rec annotate_par_stmts (ctx : context) (stmts : Air.par_stmt list) : context =
   List.fold_left stmts ~init:ctx ~f:annotate_par_stmt
 
@@ -379,7 +393,10 @@ and annotate_stmt
       let ctx = { ctx with result = A_air.
         { ctx.result with
             buffer_infos =
-              Map.add_exn ctx.result.buffer_infos ~key:t ~data:buffer_info; };
+              Map.add_exn ctx.result.buffer_infos ~key:t ~data:buffer_info;
+            backing_temps =
+              update_backing_temps ctx.result.backing_temps t av;
+        };
       } in
       let (kernel_ctx', ctx) = recur ctx body in
       let ctx' =
@@ -481,11 +498,13 @@ let annotate (air : Air.t) : A_air.result =
           buffer_infos = Map.add_exn buffer_infos ~key:t ~data:bi;
           kernel_infos = Id.Map.empty;
           out_param = Some t;
+          backing_temps = Temp.Map.empty;
         }
 
       (* No need to have a separate parameter at all if the function returns directly. *)
       | _ -> A_air.{
         params;
+        backing_temps = Temp.Map.empty;
         buffer_infos;
         kernel_infos = Id.Map.empty;
         out_param = None;

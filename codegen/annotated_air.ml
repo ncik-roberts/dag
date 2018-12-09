@@ -71,6 +71,9 @@ type result = {
    *)
   out_param : Temp.t option;
 
+  (* For a temp used as an array index av, what temps are it backed by? *)
+  backing_temps : Temp.Set.t Temp.Map.t;
+
   (* TODO: May need to eventually know whether a buffer is inside a kernel launch? *)
   buffer_infos : buffer_info Temp.Map.t;
 

@@ -7,6 +7,7 @@ module Op = Ir.Operator
 module CU = Cuda_ir
 module Many_fn = Utils.Many_fn
 
+let rec fix f x = f (fix f) x
 let dedup line = function
   | `Ok -> ()
   | `Duplicate -> failwithf "(%d): dup :(" line ()
@@ -23,6 +24,8 @@ type context = {
 
   (* Temps indicating the dimensions of parameters. *)
   dims_of_params : Temp.t list;
+
+  backed_temps : Temp.Hash_set.t;
 
   (* Map from temps to kind of allocation necessary *)
   (* If it's not in here, it's just on the host. *)
@@ -273,7 +276,33 @@ let rec trans_a_stmt : type a. (context -> a -> CU.cuda_stmt list) -> context ->
           (* Translate the body under the new lvalue. *)
           let ctx' = { ctx with lvalue = Some (Expr.Index (dest_array, Expr.Temp t_idx)) } in
           continuation ctx' stmt in
-        [ CU.Loop (hdr, body); ]
+
+       let to_memcpy =
+         let open Option.Monad_infix in
+         if not (Hash_set.mem ctx.backed_temps bound_temp) then []
+         else
+           let backing_temps = Map.find_exn ctx.result.Ano.backing_temps bound_temp
+             |> Set.to_list
+           in
+           List.map backing_temps ~f:(fun src ->
+             match Temp.Table.find ctx.allocation_method src with
+             | Some `Host_and_device dest -> (src, dest)
+             | _ -> failwith "No way.")
+       in
+
+       let hd = List.map to_memcpy ~f:(fun (src, dest) ->
+         let typ = Temp.to_type src in
+         let tfr = CU.(Host, Device) in
+         let lengths =
+           try get_lengths ctx dest
+           with _ -> get_lengths ctx src
+         in
+         let len = CU.Binop (CU.MUL, build_cached_reduce_expr CU.MUL lengths, CU.Size_of (remove_arrays typ)) in
+         CU.Transfer (temp_to_var dest, temp_to_var src, len, tfr))
+       in
+
+
+       hd @ [ CU.Loop (hdr, body); ]
 
     | Air.Block s -> List.concat_map ~f:(continuation ctx) s
     | Air.Nop -> []
@@ -414,6 +443,17 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         | None -> failwith "Failed to find kernel info. (trans_stmt_par)"
       in
 
+      List.iter bound_array_views ~f:(fun (_, _, av) ->
+        fix (fun loop (_, av) -> match av with
+          | Air.Array t -> ()
+          | Air.Zip_with (_, avs) -> List.iter ~f:loop avs
+          | Air.Reverse av -> loop av
+          | Air.Transpose av -> loop av
+          | Air.Tabulate _ -> ()
+          | Air.Array_index (t, _) ->
+              if Map.mem ctx.result.Ano.backing_temps t then Hash_set.add ctx.backed_temps t) av
+      );
+
       (* Get the temps of the array views to pass to the kernel launch. *)
       let rec temps_in_array_view (av : Air.array_view) : Temp.Set.t =
         match snd av with
@@ -425,12 +465,22 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         | Air.Array_index (t1, t2) -> Temp.Set.of_list [t1; t2;]
       in
 
+      let don't_ask = Temp.Hash_set.create () in
       let array_view_host_args =
-        List.folding_map bound_array_views
+        let x = List.folding_map bound_array_views
           ~init:Temp.Set.empty
           ~f:(fun ctx (t1, t2, av) -> (Set.add (Set.add ctx t1) t2, Set.diff (temps_in_array_view av) ctx))
           |> Temp.Set.union_list
-          |> Set.to_list
+        in
+        let y =
+          Hash_set.fold ctx.backed_temps ~init:x ~f:(fun acc elem ->
+            if Set.mem acc elem
+              then Set.fold (Map.find_exn ctx.result.Ano.backing_temps elem) ~init:(Set.remove acc elem) ~f:(fun acc x ->
+                Hash_set.add don't_ask x;
+                Set.add acc x)
+              else acc)
+        in
+        Set.to_list y
       in
 
       let host_args = List.concat [
@@ -449,10 +499,15 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
               Temp.Table.set ctx.allocation_method ~key:host_t ~data:(`Host_and_device_no_malloc_on_host new_temp);
               new_temp
           | None ->
+
+          match Temp.to_type host_t with
+          | Tc.Array _ ->
               let new_temp = Temp.next (Temp.to_type host_t) () in
               Temp.Table.add ctx.allocation_method ~key:host_t ~data:(`Host_and_device new_temp)
                 |> dedup __LINE__;
-              new_temp)
+              new_temp
+          | Tc.Int | Tc.Float (*TODO: which others?*) -> host_t
+          | _ -> failwith "not yet")
       in
 
       let device_dest_temp =
@@ -550,15 +605,20 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
           end;
       }) in
 
-      let memcpy tfr = List.map2_exn ~f:(fun dest src ->
+      let memcpy tfr a b = List.map2_exn a b ~f:(fun dest src ->
         let typ = Temp.to_type dest in
-        let lengths =
-          try get_lengths ctx dest
-          with _ -> get_lengths ctx src
-        in
-        let len = CU.Binop (CU.MUL, build_cached_reduce_expr CU.MUL lengths, CU.Size_of (remove_arrays typ)) in
-        CU.Transfer (temp_to_var dest, temp_to_var src, len, tfr)
-      ) in
+        if Hash_set.mem don't_ask src then None else
+        match typ with
+        | Tc.Array _ ->
+            let lengths =
+              try get_lengths ctx dest
+              with _ -> get_lengths ctx src
+            in
+            let len = CU.Binop (CU.MUL, build_cached_reduce_expr CU.MUL lengths, CU.Size_of (remove_arrays typ)) in
+            Some (CU.Transfer (temp_to_var dest, temp_to_var src, len, tfr))
+        | Tc.Int -> None
+        | _ -> failwith "Not yet."
+      ) |> List.filter_opt in
 
       List.concat [
         (* Memcpy the host args into the device args. *)
@@ -641,6 +701,7 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t) (resul
       Option.return Ano.(x.length)
     end;
     out_param = lvalue;
+    backed_temps = Temp.Hash_set.create ();
     dims_of_params = List.concat_map Ano.(result.params) ~f:(function
       | Ano.Param.Array (_, dims) -> dims
       | Ano.Param.Not_array _ -> []);

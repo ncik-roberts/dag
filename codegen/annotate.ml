@@ -209,7 +209,7 @@ let update_backing_temps
   (t : Temp.t)
   (av : Air.array_view) : Temp.Set.t Temp.Map.t =
   let rec loop (_, av) = match av with
-    | Air.Array_index (t1, _) -> Map.find_exn backing_temps t1
+    | Air.Array_index (t1, _) -> Map.find backing_temps t1 |> Option.value ~default:Temp.Set.empty
     | Air.Transpose av -> loop av
     | Air.Array t -> Temp.Set.singleton t
     | Air.Reverse av -> loop av

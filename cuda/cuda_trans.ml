@@ -199,9 +199,11 @@ and trans_index_expr
 and trans_expr : context -> Expr.t -> CU.cuda_expr = fun ctx -> function
   | Expr.Temp t -> temp_to_var t
   | Expr.Const i -> CU.IConst (Int64.of_int32 i)
-  | Expr.Index (arr, i) ->
-      let (arr, i, _) = trans_index_expr ctx arr i in
-      CU.Index (arr, i)
+  | Expr.Index (arr, i) -> begin
+      match trans_index_expr ctx arr i with
+      | (arr, i, []) -> CU.Index (arr, i)
+      | (arr, i, _) -> CU.Address (CU.Index (arr, i))
+    end
   | Expr.Call (op, xs) as e ->
   let open Ir.Operator in
   match op, xs with
@@ -577,6 +579,13 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       (* Ok, so we must split the index_expr into the corresponding indices for each of the
        * bound_temps. *)
       let indices = List.map bound_array_views ~f:Tuple3.get2 in
+      let start_indices =
+        Option.value_map ctx.lvalue
+          ~default:[]
+          ~f:(fix (fun loop -> function
+                | Expr.Index (e, Expr.Temp t) -> t :: loop e
+                | _ -> []))
+      in
 
       let kernel = CU.({
         typ = Device;
@@ -590,7 +599,8 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
             let i = temp_to_var i_temp in
             let acc_temp = Temp.next Tc.Int () in
             let acc = temp_to_var acc_temp in
-            let lvalue = List.fold_left indices ~init:(Expr.Temp output_buffer_param) ~f:(fun acc i -> Expr.Index (acc, Expr.Temp i)) in
+            let lvalue = List.fold_left (start_indices @ indices)
+              ~init:(Expr.Temp output_buffer_param) ~f:(fun acc i -> Expr.Index (acc, Expr.Temp i)) in
             List.concat [
               [ CU.DeclareAssign (CU.Integer, temp_name i_temp, index_expr);
                 CU.DeclareAssign (CU.Integer, temp_name acc_temp, i);
@@ -626,11 +636,11 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         [CU.Launch (gdim, bdim, kernel, kernel_args)];
         CU.[Transfer (
           dest_to_lvalue_exn ctx dest,
-          temp_to_var device_dest_temp,
+          trans_expr ctx (List.fold_left start_indices ~init:(Expr.Temp device_dest_temp) ~f:(fun acc i -> Expr.Index (acc, Expr.Temp i))),
           CU.Binop (CU.MUL, CU.Size_of (remove_arrays (Ir.type_of_dest dest)),
             build_cached_reduce_expr MUL (get_lengths ctx (match dest with
             | Ir.Return _ -> Option.value_exn ctx.out_param
-            | Ir.Dest t -> t))),
+            | Ir.Dest t -> t) |> Fn.flip List.drop (List.length start_indices))),
           (Device, Host))
         ]
       ]

@@ -44,3 +44,11 @@ int[] f6(int[] xs) {
     return x;
   };
 }
+
+int[][] f7(int[][] xss) {
+  return parallel(int[] xs <- xss) {
+    return parallel(int x <- xs) {
+      return x;
+    };
+  };
+}

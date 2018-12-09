@@ -7,6 +7,10 @@ module Op = Ir.Operator
 module CU = Cuda_ir
 module Many_fn = Utils.Many_fn
 
+let dedup line = function
+  | `Ok -> ()
+  | `Duplicate -> failwithf "(%d): dup :(" line ()
+
 let failwith n = failwith ("AIR -> CUDA : " ^ n)
 
 type context = {
@@ -91,26 +95,37 @@ let trans_params (params : Ano.Param.t list) : (CU.cuda_type * CU.cuda_ident) li
      | Ano.Param.Not_array t -> List.return (trans_type (Temp.to_type t), temp_name t))
 
 (* Translate AIR operands into their cuda equivalents. s*)
-let trans_op = function
-  | Air.IndexOp (t1, t2) -> CU.Index (temp_to_var t1, temp_to_var t2)
-  | Air.Const c -> CU.IConst (Int64.of_int32_exn c)
-  | Air.Float f -> CU.FConst (f)
-  | Air.Bool b -> CU.BConst (b)
-  | Air.Temp t -> CU.Var (temp_name t)
-  | Air.Dim (n, view) -> CU.IConst (Int64.of_int_exn n)
+let rec trans_op ctx = function
+  | Air.IndexOp (t1, t2) -> begin
+      match Map.find Ano.(ctx.result.buffer_infos) t1 with
+      | None -> Many_fn.Result (trans_expr ctx (Expr.Index (Expr.Temp t1, Expr.Temp t2)))
+      | Some bi -> begin
+          match Ano.(bi.index) with
+          | Many_fn.Result t -> Many_fn.Result (trans_expr ctx (Expr.Index (t, Expr.Temp t2)))
+          | Many_fn.Fun f -> Many_fn.compose (trans_expr ctx) (f (Expr.Temp t2))
+        end
+    end
+  | Air.Const c -> Many_fn.Result (CU.IConst (Int64.of_int32_exn c))
+  | Air.Float f -> Many_fn.Result (CU.FConst f)
+  | Air.Bool b -> Many_fn.Result (CU.BConst b)
+  | Air.Temp t -> Many_fn.Result (CU.Var (temp_name t))
+  | Air.Dim (n, view) -> Many_fn.Result (CU.IConst (Int64.of_int_exn n))
 
-let trans_prim =
+and trans_op_exn ctx = Fn.compose (Many_fn.result_exn ~msg:":(") (trans_op ctx)
+
+and trans_prim ctx =
   let trans_cmp op a b =
-    let a,b = trans_op a, trans_op b in
+    let a,b = trans_op_exn ctx a,
+              trans_op_exn ctx b in
     CU.Ternary(CU.Binop(op,a,b),a,b)
   in
   function
   | Air.Min (a,b) -> trans_cmp CU.LT a b
   | Air.Max (a,b) -> trans_cmp CU.GT a b
-  | Air.I2F a -> CU.Cast(CU.Float,trans_op a)
-  | Air.F2I a -> CU.Cast(CU.Integer,trans_op a)
+  | Air.I2F a -> CU.Cast(CU.Float, trans_op_exn ctx a)
+  | Air.F2I a -> CU.Cast(CU.Integer, trans_op_exn ctx a)
 
-let trans_binop = function
+and trans_binop = function
   | Ast.Plus -> CU.ADD
   | Ast.Minus -> CU.SUB
   | Ast.Times -> CU.MUL
@@ -128,38 +143,38 @@ let trans_binop = function
   | Ast.Greater -> CU.GT
   | Ast.GreaterEq -> CU.GTE
 
-let trans_unop = function
+and trans_unop = function
   | Ast.Negate -> CU.NEG
   | Ast.Logical_not -> CU.NOT
 
 (* Creates the loop header (initial value, max value, and increment stride)
  * -> for (var = init;var < limit; var += stride) *)
-let trans_incr_loop_hdr ~loop_var ~lo ~hi ~stride =
+and trans_incr_loop_hdr ~loop_var ~lo ~hi ~stride =
  (CU.DeclareAssign (CU.Integer, loop_var, lo),
    CU.Cmpop (CU.LT, CU.Var loop_var, hi), CU.AssignOp (CU.ADD, CU.Var loop_var, stride))
 
 (* Actually perform the reduction! *)
-let make_reduce op args =
+and make_reduce op args =
   match (op, args) with
     | Op.Binop bin, [a;b] -> CU.AssignOp (trans_binop bin, a, b)
     | Op.Binop _, _ -> failwith "Binary operators have two arguments."
     | Op.Unop _, _ -> failwith "Cannot reduce with a unary operator."
 
-let rec trans_len_expr : Length_expr.t -> CU.cuda_expr = function
+and trans_len_expr : Length_expr.t -> CU.cuda_expr = function
   | Length_expr.Temp t -> temp_to_var t
   | Length_expr.Mult (e1, e2) -> CU.Binop (CU.MUL, trans_len_expr e1, trans_len_expr e2)
 
-let build_index_expr lens init =
+and build_index_expr lens init =
   List.fold_left lens ~init ~f:(fun acc x -> CU.Binop (CU.MUL, acc, x))
 
 (* Find a buffer info's length. *)
-let get_lengths (ctx : context) (t : Temp.t) : CU.cuda_expr list =
+and get_lengths (ctx : context) (t : Temp.t) : CU.cuda_expr list =
   match Map.find Ano.(ctx.result.buffer_infos) t with
   | Some inf -> List.map ~f:trans_len_expr Ano.(inf.length)
   | None -> List.map ~f:trans_len_expr (Option.value_exn ctx.lvalue_lengths)
       (* failwithf "Couldn't find buffer size for `%d`" (Temp.to_int t) () *)
 
-let rec trans_index_expr
+and trans_index_expr
   (ctx : context)
   (arr : Expr.t)
   (i : Expr.t) : CU.cuda_expr * CU.cuda_expr * CU.cuda_expr list =
@@ -249,7 +264,8 @@ let rec trans_a_stmt : type a. (context -> a -> CU.cuda_stmt list) -> context ->
         (* Iterate over the bound temp (which Annotate stores as having all the
          * information of the view array). *)
         let hdr = create_loop ~counter:t_idx (get_length ctx bound_temp) in
-        Temp.Table.add_exn ctx.allocation_method ~key:bound_temp ~data:`Unallocated;
+        Temp.Table.add ctx.allocation_method ~key:bound_temp ~data:`Unallocated
+          |> dedup __LINE__;
 
         let body =
           (* The lvalue for the for body is an index into the destination array. *)
@@ -273,17 +289,16 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
 
   match stmt with
   | Air.Binop (d, op, s1, s2) ->
-      [ d <-- CU.Binop (trans_binop op, trans_op s1, trans_op s2) ]
-  | Air.Index (d, src, i) ->
-      [ d <-- CU.Index (trans_op src, trans_op i)]
+      [ d <-- CU.Binop (trans_binop op, trans_op_exn ctx s1, trans_op_exn ctx s2) ]
+  | Air.Index (d, src, i) -> [ d <-- CU.Index (trans_op_exn ctx src, trans_op_exn ctx i) ]
   | Air.Access (d,src,f) ->
-      [ d <-- CU.Field (trans_op src, f)]
+      [ d <-- CU.Field (trans_op_exn ctx src, f)]
   | Air.Unop (d, op, s) ->
-      [ d <-- CU.Unop (trans_unop op, trans_op s) ]
+      [ d <-- CU.Unop (trans_unop op, trans_op_exn ctx s) ]
   | Air.Assign (d, s) ->
-      [ d <-- trans_op s ]
+      [ d <-- trans_op_exn ctx s ]
   | Air.Primitive (d, s) ->
-      [ d <-- trans_prim s]
+      [ d <-- trans_prim ctx s]
   | Air.Struct_Init (d, t, flx) ->
       let (dest, hd, tl) = match (dest_to_lvalue ctx d, d) with
         | Some lvalue, Ir.Return _ -> (lvalue, [], [])
@@ -295,7 +310,7 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
             let t = Temp.next typ () in
             (temp_to_var t, [ CU.Declare (trans_type typ, temp_name t) ], [ CU.Return (temp_to_var t) ])
       in
-      hd @ [ CU.InitStruct (dest, List.map flx ~f:(fun (n,o) -> (n,trans_op o)))] @ tl
+      hd @ [ CU.InitStruct (dest, List.map flx ~f:(fun (n,o) -> (n,trans_op_exn ctx o)))] @ tl
   | Air.Seq_stmt seq_stmt ->
 
   (* Run/reduce given sequential semantics. *)
@@ -306,7 +321,7 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
   | Air.Run (dest, _) ->
       (match dest with
        | Ir.Return t ->
-           Temp.Table.add_exn ctx.allocation_method ~key:t ~data:`Unallocated
+           Temp.Table.add ctx.allocation_method ~key:t ~data:`Unallocated |> dedup __LINE__
        | _ -> ());
       let dest_temp = Ir.temp_of_dest dest in
       let index_fn = get_index ctx dest_temp in
@@ -322,20 +337,22 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       let index_fn = get_index ctx t in
       let loop_temp = Temp.next Tc.Int () in
       let hdr = create_loop ~counter:loop_temp (get_length ctx t) in
-      Temp.Table.add_exn ctx.allocation_method ~key:t ~data:`Unallocated;
+      Temp.Table.add ctx.allocation_method ~key:t ~data:`Unallocated
+        |> dedup __LINE__;
       let assign_stmt = make_reduce op
         [ temp_to_var lvalue;
           Many_fn.result_exn ~msg:"Reduce result_exn." (index_fn loop_temp);
         ]
       in
-      [ CU.DeclareAssign (trans_type (Temp.to_type lvalue), temp_name lvalue, trans_op init);
+      [ CU.DeclareAssign (trans_type (Temp.to_type lvalue), temp_name lvalue, trans_op_exn ctx init);
         CU.Loop (hdr, [assign_stmt]);
         dest_to_stmt ctx dest (temp_to_var lvalue);
       ]
 
   | Air.Filter_with (dest, (t1, _), (t2, _)) ->
       List.iter [t1; t2;] ~f:(fun key ->
-        Temp.Table.add_exn ctx.allocation_method ~key ~data:`Unallocated);
+        Temp.Table.add ctx.allocation_method ~key ~data:`Unallocated
+          |> dedup __LINE__);
       let index1_fn = get_index ctx t1 in
       let index2_fn = get_index ctx t2 in
       let loop_temp = Temp.next Tc.Int () in
@@ -362,13 +379,14 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       let index_fn = get_index ctx t in
       let loop_temp = Temp.next Tc.Int () in
       let hdr = create_loop ~counter:loop_temp (get_length ctx t) in
-      Temp.Table.add_exn ctx.allocation_method ~key:t ~data:`Unallocated;
+      Temp.Table.add ctx.allocation_method ~key:t ~data:`Unallocated
+        |> dedup __LINE__;
       let assign_stmt = make_reduce op
         [ temp_to_var acc;
           Many_fn.result_exn ~msg:"Reduce result_exn." (index_fn loop_temp);
         ]
       in
-      [ CU.DeclareAssign (trans_type ty, temp_name acc, trans_op init);
+      [ CU.DeclareAssign (trans_type ty, temp_name acc, trans_op_exn ctx init);
         CU.Loop (hdr, [
           CU.Assign (CU.Index (dest_to_lvalue_exn ctx dest, temp_to_var loop_temp), temp_to_var acc);
           assign_stmt;
@@ -407,7 +425,9 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       in
 
       let array_view_host_args =
-        List.map bound_array_views ~f:(fun (_, _, av) -> temps_in_array_view av)
+        List.folding_map bound_array_views
+          ~init:Temp.Set.empty
+          ~f:(fun ctx (t1, t2, av) -> (Set.add (Set.add ctx t1) t2, Set.diff (temps_in_array_view av) ctx))
           |> Temp.Set.union_list
           |> Set.to_list
       in
@@ -424,23 +444,23 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
           | Some (`Host_and_device t) -> t
           | None ->
               let new_temp = Temp.next (Temp.to_type host_t) () in
-              Temp.Table.add_exn ctx.allocation_method ~key:host_t ~data:(`Host_and_device new_temp);
+              Temp.Table.add ctx.allocation_method ~key:host_t ~data:(`Host_and_device new_temp)
+                |> dedup __LINE__;
               new_temp)
       in
 
       let device_dest_temp =
         let new_temp = Temp.next (Ir.type_of_dest dest) () in
-        Temp.Table.add_exn ctx.allocation_method ~key:(match dest with
+        Temp.Table.add ctx.allocation_method ~key:(match dest with
           | Ir.Return _ -> Option.value_exn ctx.out_param
-          | Ir.Dest t -> t) ~data:(`Host_and_device new_temp);
+          | Ir.Dest t -> t) ~data:(`Host_and_device new_temp) |> dedup __LINE__;
         new_temp
       in
 
       (* Mark additional buffers as just-device. *)
       let additional_buffers = Set.to_list Ano.(kernel_info.additional_buffers) in
       List.iter additional_buffers ~f:(fun key ->
-        try Temp.Table.add_exn ctx.allocation_method ~key ~data:`Just_device
-        with _ -> failwith "addtl buffers just device");
+        Temp.Table.add ctx.allocation_method ~key ~data:`Just_device |> dedup __LINE__);
 
       (* In addition to the array view args, also get the args for the
        * additional buffers and free variables to pass to the kernel launch.
@@ -480,7 +500,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       (* Total length of all the things we're parallel over. *)
       let bound_temps = List.map ~f:Tuple3.get1 bound_array_views in
       List.iter bound_temps ~f:(fun key ->
-        Temp.Table.add_exn ctx.allocation_method ~key ~data:`Unallocated);
+        Temp.Table.set ctx.allocation_method ~key ~data:`Unallocated);
       let lengths = List.map ~f:(get_length ctx) bound_temps in
       let total_length = build_cached_reduce_expr CU.MUL lengths in
 
@@ -509,7 +529,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
             let i = temp_to_var i_temp in
             let acc_temp = Temp.next Tc.Int () in
             let acc = temp_to_var acc_temp in
-            let lvalue = Expr.Index (Expr.Temp output_buffer_param, Expr.Temp i_temp) in
+            let lvalue = List.fold_left indices ~init:(Expr.Temp output_buffer_param) ~f:(fun acc i -> Expr.Index (acc, Expr.Temp i)) in
             List.concat [
               [ CU.DeclareAssign (CU.Integer, temp_name i_temp, index_expr);
                 CU.DeclareAssign (CU.Integer, temp_name acc_temp, i);
@@ -662,3 +682,10 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t) (resul
             params;
             body = malloc'ing @ body; });
   ]
+
+  (* sexp if you need it :)
+        printf "%s\n" (Sexp.to_string_hum (Temp.Table.sexp_of_t (function
+          | `Host_and_device t -> Tuple2.sexp_of_t Sexp.of_string Temp.sexp_of_t ("host_and_device", t)
+          | `Just_device -> Sexp.of_string "just_device"
+          | `Unallocated -> Sexp.of_string "unallocated"
+        ) ctx.allocation_method)); *)

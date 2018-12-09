@@ -98,7 +98,7 @@ let annotate_array_view
                 app bi.index (Expr.Call (Ir.Operator.Binop Ast.Minus, [ n_minus_1; expr; ])))
         }
     | (typ, Air.Tabulate (b,e,s)) ->
-        let bi = loop av in 
+        let bi = loop av in
         assert (typ = bi.typ);
         bi (* Todo: What should go here? *)
 
@@ -138,6 +138,7 @@ let rec used_of_array_view (ctx : context) (av : Air.array_view) : Temp.Set.t = 
     | Air.Array_index _ -> Temp.Set.empty (* don't ask *)
     | Air.Reverse av -> used_of_array_view ctx av
     | Air.Transpose av -> used_of_array_view ctx av
+    | Air.Tabulate (a, b, c) -> Temp.Set.of_list [a;b;c;]
 
 let used_of_operand (ctx : context) : Air.operand -> Temp.Set.t =
   function
@@ -148,7 +149,7 @@ let used_of_operand (ctx : context) : Air.operand -> Temp.Set.t =
         let bi = annotate_array_view ctx av in
         used_of_length_expr (List.nth_exn A_air.(bi.length) n)
 
-let used_of_primitive (ctx : context) (p : Air.primitive) : Temp.Set.t = 
+let used_of_primitive (ctx : context) (p : Air.primitive) : Temp.Set.t =
   let of_op = used_of_operand ctx in
   match p with
     | Air.Min (a,b) | Air.Max (a,b) -> Set.union (of_op a) (of_op b)
@@ -156,7 +157,7 @@ let used_of_primitive (ctx : context) (p : Air.primitive) : Temp.Set.t =
 
 let used_of_struct_fields (ctx : context) (fields) =
   let of_op = used_of_operand ctx in
-  List.fold fields ~init:Temp.Set.empty 
+  List.fold fields ~init:Temp.Set.empty
   ~f:(fun set (_,fld) -> Set.union set (of_op fld))
 
 let defined_of_dest : Ir.dest -> Temp.Set.t =
@@ -209,18 +210,19 @@ let rec annotate_par_stmts (ctx : context) (stmts : Air.par_stmt list) : context
 and annotate_par_stmt (ctx : context) (stmt : Air.par_stmt) : context =
   match stmt with
   | Air.Parallel (dest, id, tavs, body) ->
-      let buffer_infos = List.map tavs ~f:(fun (_, _, av) ->
-        annotate_array_view ctx av) in
-      let ctx =
-        { ctx with
-            result =
-              let result = ctx.result in
-              A_air.{ result with
-                buffer_infos = List.fold2_exn tavs buffer_infos ~init:result.buffer_infos
-                  ~f:(fun m (key, _, _) data -> Map.add_exn m ~key ~data);
-              };
-        }
-      in
+      let (ctx, buffer_infos) = List.fold_map tavs ~init:ctx ~f:(fun ctx (key, _, av) ->
+        let bi = annotate_array_view ctx av in
+        let ctx =
+          { ctx with
+              result = begin
+                let result = ctx.result in
+                A_air.{ result with
+                  buffer_infos = Map.add_exn result.buffer_infos ~key ~data:bi
+                }
+              end;
+          }
+        in (ctx, bi)
+      ) in
       let (kernel_ctx, ctx) = annotate_seq_stmt ctx body in
       let kernel_ctx = { kernel_ctx with defined = List.fold_left tavs ~init:kernel_ctx.defined ~f:(fun acc (t1, t2, _) ->
         acc |> Fn.flip Set.add t1

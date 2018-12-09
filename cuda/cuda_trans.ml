@@ -29,6 +29,7 @@ type context = {
   allocation_method :
     [ `Just_device (* additional_buffers *)
     | `Host_and_device of Temp.t (* temp is the device temp *)
+    | `Host_and_device_no_malloc_on_host of Temp.t (* temp is the device temp *)
     | `Unallocated
     ] Temp.Table.t;
 }
@@ -440,8 +441,13 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       let device_args =
         List.map host_args ~f:(fun host_t ->
           match Temp.Table.find ctx.allocation_method host_t with
-          | Some (`Just_device | `Unallocated) -> failwith "I don't think this is possible."
+          | Some `Just_device -> failwithf "I don't think this is possible (jd) `%d`" (Temp.to_int host_t) ()
           | Some (`Host_and_device t) -> t
+          | Some (`Host_and_device_no_malloc_on_host t) -> t
+          | Some `Unallocated ->
+              let new_temp = Temp.next (Temp.to_type host_t) () in
+              Temp.Table.set ctx.allocation_method ~key:host_t ~data:(`Host_and_device_no_malloc_on_host new_temp);
+              new_temp
           | None ->
               let new_temp = Temp.next (Temp.to_type host_t) () in
               Temp.Table.add ctx.allocation_method ~key:host_t ~data:(`Host_and_device new_temp)
@@ -561,9 +567,10 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         CU.[Transfer (
           dest_to_lvalue_exn ctx dest,
           temp_to_var device_dest_temp,
-          build_cached_reduce_expr MUL (get_lengths ctx (match dest with
+          CU.Binop (CU.MUL, CU.Size_of (remove_arrays (Ir.type_of_dest dest)),
+            build_cached_reduce_expr MUL (get_lengths ctx (match dest with
             | Ir.Return _ -> Option.value_exn ctx.out_param
-            | Ir.Dest t -> t)),
+            | Ir.Dest t -> t))),
           (Device, Host))
         ]
       ]
@@ -659,6 +666,7 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t) (resul
       | Some `Unallocated -> []
       | None -> f t (fun (a, b, c) -> [ CU.Malloc (a, b, c) ])
       | Some `Just_device -> f t (fun (a, b, c) -> [ CU.Cuda_malloc (a, b, c) ])
+      | Some `Host_and_device_no_malloc_on_host t' -> f t' (fun (a, b, c) -> [ CU.Cuda_malloc (a, b, c) ])
       | Some `Host_and_device t' when
           List.exists Ano.(result.params)
           ~f:(function | (Ano.Param.Array (t', _)) -> Temp.equal t t'

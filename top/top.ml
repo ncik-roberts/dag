@@ -26,7 +26,12 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
         "Inlined:";
         Sexp.to_string_hum (Dag.sexp_of_dag_fun inline);
       ]);
-      let traversals = Dag_traversal.all_traversals inline.Dag.dag_graph in
+      let traversals =
+        Dag_traversal.all_traversals inline.Dag.dag_graph
+          ~n:
+            (`Actually_I_don't_want_all_of_them
+              (`Please_stop_at 100))
+      in
       List.iter traversals ~f:(fun traversal -> say (fun () -> [
         "Traversal:";
         Sexp.to_string_hum (Dag_traversal.sexp_of_traversal traversal);

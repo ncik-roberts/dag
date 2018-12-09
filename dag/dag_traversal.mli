@@ -5,4 +5,8 @@ type traversal_tree =
 and traversal = traversal_tree list [@@deriving sexp]
 
 val any_traversal : Dag.dag -> traversal
-val all_traversals : Dag.dag -> traversal list
+val all_traversals :
+  ?n : [ `Take_all_of_'em
+       | `Actually_I_don't_want_all_of_them of
+          [ `Please_stop_at of int]
+       ] -> Dag.dag -> traversal list

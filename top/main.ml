@@ -10,11 +10,13 @@ let command =
     [%map_open
       let filename = anon ("filename" %: string)
       and function_names = anon (Command.Anons.sequence ("function_name" %: string))
+      and out_file = flag "out" (optional string)
+        ~doc:"output-file the file to write the output to (by default FILENAME.cu)"
       and verbose = flag "verbose" no_arg
         ~doc:"print extra debug information on exception"
       in
       fun () ->
-        try Top.run_on_file ~verbose filename function_names
+        try Top.run_on_file ~verbose filename function_names ~out:out_file
         with Failure str as e ->
           if not verbose
             then Printf.fprintf stderr "Error: %s\n" str

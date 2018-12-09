@@ -19,3 +19,28 @@ circle f3() {
     radius = 3;
   };
 }
+
+int f4() {
+  circle x = struct circle {
+    x = 0;
+    y = 0;
+    radius = 3;
+  };
+  return x.radius;
+}
+
+circle[] f5(int[] xs) {
+  return parallel(int x <- xs) {
+    return struct circle {
+      x = 0;
+      y = 0;
+      radius = x;
+    };
+  };
+}
+
+int[] f6(int[] xs) {
+  return parallel(int x <- xs) {
+    return x;
+  };
+}

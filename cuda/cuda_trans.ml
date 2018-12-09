@@ -287,9 +287,8 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
   | Air.Struct_Init (d, t, flx) ->
       let (dest, hd, tl) = match (dest_to_lvalue ctx d, d) with
         | Some lvalue, Ir.Return _ -> (lvalue, [], [])
-        | _, Ir.Dest _ ->
+        | _, Ir.Dest t ->
             let typ = Ir.type_of_dest d in
-            let t = Temp.next typ () in
             (temp_to_var t, [ CU.Declare (trans_type typ, temp_name t) ], [])
         | None, Ir.Return _ ->
             let typ = Ir.type_of_dest d in
@@ -425,13 +424,13 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
           | Some (`Host_and_device t) -> t
           | None ->
               let new_temp = Temp.next (Temp.to_type host_t) () in
-              Temp.Table.set ctx.allocation_method ~key:host_t ~data:(`Host_and_device new_temp);
+              Temp.Table.add_exn ctx.allocation_method ~key:host_t ~data:(`Host_and_device new_temp);
               new_temp)
       in
 
       let device_dest_temp =
         let new_temp = Temp.next (Ir.type_of_dest dest) () in
-        Temp.Table.set ctx.allocation_method ~key:(match dest with
+        Temp.Table.add_exn ctx.allocation_method ~key:(match dest with
           | Ir.Return _ -> Option.value_exn ctx.out_param
           | Ir.Dest t -> t) ~data:(`Host_and_device new_temp);
         new_temp
@@ -481,8 +480,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       (* Total length of all the things we're parallel over. *)
       let bound_temps = List.map ~f:Tuple3.get1 bound_array_views in
       List.iter bound_temps ~f:(fun key ->
-        try Temp.Table.add_exn ctx.allocation_method ~key ~data:`Unallocated
-        with _ -> failwithf "unallocated bound_temps %d" (Temp.to_int key) ());
+        Temp.Table.add_exn ctx.allocation_method ~key ~data:`Unallocated);
       let lengths = List.map ~f:(get_length ctx) bound_temps in
       let total_length = build_cached_reduce_expr CU.MUL lengths in
 

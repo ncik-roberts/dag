@@ -117,7 +117,8 @@ let rec make_parallel
         Parallel (d1, Id.next (), [(t1, t_idx1, av1)], seq_stmt);
         Par_stmt (For (d1, (t1, t_idx1, av1), stmt));
       ]
-    | Air.Par_stmt (Air.Run (d2, av2)) -> Air.[
+    | Air.Par_stmt (Air.Run (d2, av2)) ->
+        Air.[
         begin
           let t2 = Temp.next (Ir.type_of_dest d2) () in
           let t_idx2 = Temp.next Tc.Int () in
@@ -242,8 +243,12 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
       let t_idx = Temp.next Tc.Int () in
       let stmts' =
         let ctx' = {
-          array_views = Map.add_exn ctx.array_views ~key:t_src ~data:(Temp.to_type t_src,
-            Air.Array_index (t_new_src, t_idx))
+          array_views = ctx.array_views
+            |> (match Temp.to_type t_src with
+               | Tc.Array _ as typ ->
+                   Map.add_exn ~key:t_src
+                    ~data:(typ, Air.Array_index (t_new_src, t_idx))
+               | _ -> Fn.id)
             |> Map.add_exn ~key:t_new_src ~data:(Temp.to_type t_new_src, Air.Array t_new_src);
           idx = Map.add_exn ctx.idx ~key:t_src ~data:(t_new_src, t_idx);
         } in

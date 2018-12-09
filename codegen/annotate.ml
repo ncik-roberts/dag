@@ -222,6 +222,10 @@ and annotate_par_stmt (ctx : context) (stmt : Air.par_stmt) : context =
         }
       in
       let (kernel_ctx, ctx) = annotate_seq_stmt ctx body in
+      let kernel_ctx = { kernel_ctx with defined = List.fold_left tavs ~init:kernel_ctx.defined ~f:(fun acc (t1, t2, _) ->
+        acc |> Fn.flip Set.add t1
+            |> Fn.flip Set.add t2) }
+      in
       { ctx with result = A_air.
           { ctx.result with
               kernel_infos = Map.add_exn ctx.result.kernel_infos ~key:id ~data:(kernel_ctx_to_kernel_info kernel_ctx);

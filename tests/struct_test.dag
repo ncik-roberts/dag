@@ -1,0 +1,33 @@
+
+struct test {
+  int a;
+  int b;
+  int c;
+}
+
+// Compose some arrays into some structs.
+test[] structify(int[] as, int[] bs, int[] cs){
+  return parallel (i <- tabulate(0,dim0(as),1)){
+    return { a = as[i]; b = bs[i]; c = cs[i]; };
+  };
+}
+
+test[] filter_structs(test[] some_structs){
+  bool[] these_are_the_good_structs = parallel (st <- some_structs){
+    return max(s.a,min(s.b + s.c))< 100;
+  };
+  return filterWith(some_structs,these_are_the_good_structs);
+}
+
+int destructify(test[] structs){
+  int[] result = parallel (i <- tabulate(0,dim0(structs),1)){
+    test s = structs[i];
+    return s.a + s.b + s.c;
+  };
+  return reduce(+,0,result);
+}
+
+// Some nested calls.
+int dag_lang_features(int[] a, int[] b, int[] c){
+  return destructify(filter_structs(structify(a,b,c)));
+}

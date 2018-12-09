@@ -27,6 +27,7 @@ type operand =
   [@@deriving sexp]
 
 type primitive =
+  | Log2 of operand
   | Max of operand * operand
   | Min of operand * operand
   | F2I of operand
@@ -184,10 +185,11 @@ end = struct
     | Filter_with (dst, (_, av1), (_, av2)) ->
         sprintf "%s%s <- filter_with(%s, %s)" indent (pp_dest dst) (pp_array_view av1) (pp_array_view av2)
   and pp_primitive = function
-    | Max (a,b) -> sprintf "max (%s,%s)" (pp_operand a) (pp_operand b)
-    | Min (a,b) -> sprintf "min (%s,%s)" (pp_operand a) (pp_operand b)
-    | F2I (a) -> sprintf "(int) %s" (pp_operand a)
-    | I2F (a) -> sprintf "(float) %s" (pp_operand a)
+    | Log2 a -> sprintf "log2(%s)" (pp_operand a)
+    | Max (a,b) -> sprintf "max(%s, %s)" (pp_operand a) (pp_operand b)
+    | Min (a,b) -> sprintf "min(%s, %s)" (pp_operand a) (pp_operand b)
+    | F2I (a) -> sprintf "(int)(%s)" (pp_operand a)
+    | I2F (a) -> sprintf "(float)(%s)" (pp_operand a)
 
 
   let pp_t { params; body; } =

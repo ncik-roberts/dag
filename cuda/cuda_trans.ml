@@ -126,6 +126,7 @@ and trans_prim ctx =
   function
   | Air.Min (a,b) -> trans_cmp CU.LT a b
   | Air.Max (a,b) -> trans_cmp CU.GT a b
+  | Air.Log2 a -> CU.FnCall ("ilog2", [trans_op_exn ctx a])
   | Air.I2F a -> CU.Cast(CU.Float, trans_op_exn ctx a)
   | Air.F2I a -> CU.Cast(CU.Integer, trans_op_exn ctx a)
 
@@ -760,6 +761,7 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t) (resul
       CU.Include "<thrust/execution_policy.h>";
       CU.Include "<thrust/extrema.h>";
       CU.Include "<vector>";
+      CU.Include "dag_utils.cpp";
     ];
     struct_decls;
     gdecls |> List.map ~f:(fun x -> CU.Function x);

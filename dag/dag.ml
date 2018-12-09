@@ -366,6 +366,13 @@ let of_ast : Tc.typ Ast.fun_defn list -> t =
           List.fold_left input_pairs ~init:views
             ~f:(fun acc (name, vtx) -> Map.add_exn acc ~key:vtx ~data:(Vertex_view.Input name))
         in
+        let types =
+          List.fold2_exn inputs Ast.(f.fun_params) ~init:types
+            ~f:(fun acc vtx param ->
+              let (typ, _) = Ast.(param.param_type) in
+              (* No add_exn because some param types have already been added. *)
+              Map.set acc ~key:vtx ~data:typ)
+        in
         let successors = Invert_vertex.invert predecessors in
         let vertices_in_block = Invert_vertex.invert enclosing_parallel_blocks in
         let vertex_infos = Vertex_info.collect_into_map

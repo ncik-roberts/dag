@@ -152,8 +152,8 @@ let used_of_operand (ctx : context) : Air.operand -> Temp.Set.t =
 let used_of_primitive (ctx : context) (p : Air.primitive) : Temp.Set.t =
   let of_op = used_of_operand ctx in
   match p with
-    | Air.Min (a,b) | Air.Max (a,b) -> Set.union (of_op a) (of_op b)
-    | Air.F2I (a) | Air.I2F (a) -> of_op a
+    | Air.Min (a, b) | Air.Max (a, b) -> Set.union (of_op a) (of_op b)
+    | Air.F2I a | Air.I2F a | Air.Log2 a -> of_op a
 
 let used_of_struct_fields (ctx : context) (fields) =
   let of_op = used_of_operand ctx in

@@ -10,8 +10,8 @@ let command =
     [%map_open
       let filename = anon ("filename" %: string)
       and function_names = anon (Command.Anons.sequence ("function_name" %: string))
-      and out_file = flag "out_file" (optional string)
-        ~doc:"output file"
+      and out_file = flag "out" (optional string)
+        ~doc:"output-file the file to write the output to (by default FILENAME.cu)"
       and verbose = flag "verbose" no_arg
         ~doc:"print extra debug information on exception"
       in

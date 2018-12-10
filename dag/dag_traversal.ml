@@ -64,8 +64,17 @@ let transitive_predecessor_closure (dag : Dag.dag) : Vertex.Set.t Vertex.Map.t =
     if !any_changed then loop m' else m
   in loop init
 
-let traversals_with_filter (dag : Dag.dag)
-    ~(filter : poly_filterer) : traversal list =
+let traversals_with_filter (dag : Dag.dag) ~n : traversal list =
+
+  let filter = match n with
+    | None -> Fn.id
+    | Some n -> fun x -> List.take x n
+  in
+
+  let within_bound = match n with
+    | None -> fun _ -> true
+    | Some n -> fun x -> x <= n
+  in
 
   let predecessors = transitive_predecessor_closure dag in
 
@@ -94,7 +103,9 @@ let traversals_with_filter (dag : Dag.dag)
         Vertex.Set.of_list (Dag.predecessors dag vertex)
           |> Set.union predecessors_minus_vertex
       in
+      let total = ref 0 in
       List.concat_map subtraversals ~f:(fun (subtraversal, remaining) ->
+        if not (within_bound !total) then [] else
         let ctx' = {
           curr_bound_parallel_vertex = ctx.curr_bound_parallel_vertex;
           direct_predecessors = Set.union direct_predecessors remaining;
@@ -102,14 +113,18 @@ let traversals_with_filter (dag : Dag.dag)
             Set.union
               ctx.evaluated
               (Vertex.Set.of_list (vertex :: traversal_to_list subtraversal));
-        } in loop ctx' ~acc:(
+        } in
+        let xs = loop ctx' ~acc:(
           let elem = match Dag.view dag vertex with
             | Vertex_view.Parallel_block _ -> Block (vertex, subtraversal)
             | _ -> Just vertex
-          in elem :: acc))
+          in elem :: acc)
+        in
+        total := !total + List.length xs;
+        xs)
     in
-    filter.poly_filter begin
-      match Set.to_list candidates |> filter.poly_filter with
+    filter begin
+      match Set.to_list candidates |> filter with
       | [] -> [(acc, Vertex.Set.empty)]
       | candidate_list ->
           List.concat_map candidate_list ~f:(fun vertex ->
@@ -122,9 +137,9 @@ let traversals_with_filter (dag : Dag.dag)
                     | _ -> None
                   end))
             in
-            let results = loop_with vertex subtraversals in
+            let results = loop_with vertex (filter subtraversals) in
             match ctx.curr_bound_parallel_vertex with
-            | Some pvtx when not (Set.mem (Map.find_exn predecessors vertex) pvtx) ->
+            | Some pvtx when not (Set.mem (Map.find_exn predecessors vertex) pvtx) && within_bound (List.length results) ->
                 let results2 = loop ~acc { ctx with direct_predecessors = Set.remove ctx.direct_predecessors vertex } in
                 results @ (List.map results2 ~f:(Tuple2.map_snd ~f:(Fn.flip Vertex.Set.add vertex)))
             | _ -> results)
@@ -134,16 +149,13 @@ let traversals_with_filter (dag : Dag.dag)
     Option.some_if (Set.is_empty set) result)
 
 let any_traversal (dag : Dag.dag) : traversal =
-  traversals_with_filter dag ~filter:({
-    poly_filter = function [] -> [] | x :: _ -> [x]
-  })
-  |> function
+  traversals_with_filter dag ~n:(Some 1) |> function
   | [] -> failwith "No traversal found?"
   | [x] -> x
   | _ -> failwith "Too many traversals found?"
 
 let all_traversals ?(n=`Take_all_of_'em) =
-  traversals_with_filter ~filter:(match n with
-    | `Take_all_of_'em -> { poly_filter = Fn.id }
+  traversals_with_filter ~n:(match n with
+    | `Take_all_of_'em -> None
     | `Actually_I_don't_want_all_of_them
-        (`Please_stop_at n) -> { poly_filter = fun x -> List.take x n })
+        (`Please_stop_at n) -> Some n)

@@ -1,0 +1,7 @@
+
+// Test language primitives, like zipwith and reduce.
+
+int sum_int(int[] a, int[] b){
+  int[] c = zipWith(+,a,b);
+  return reduce(+,0,c);
+}

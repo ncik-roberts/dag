@@ -1,0 +1,9 @@
+
+// Indexing.
+
+int[] saxpy(int[] a, int[] b, int[] c){
+  int[] indexes = tabulate(0,dim0(a),1);
+  return parallel(int i <- indexes){
+    return a[i] * b[i] + c[i];
+  };
+}

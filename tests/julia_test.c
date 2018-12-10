@@ -58,8 +58,8 @@ int main(){
   int DIM = 1024; 
 
   int* julia_c = render_julia(DIM);
-  // Nice part is, this thing's already flattened.
-  int* julia_dag = (int*) render_julia_DAG(DIM);
+  bool* julia_dag = (bool*) calloc(DIM*DIM,(sizeof(bool)));
+  dag_render_julia(julia_dag,DIM,DIM,DIM); // this is a little awkward
 
   verifyArrays("julia",julia_c,julia_dag,DIM*DIM);
 }

@@ -8,65 +8,48 @@
 // All arguments to tabulate must be either a compile time constant 
 // or an expression composed only of constants and dim_ calls. 
 // *Maybe* temps with constant values. No function calls.
-
+// 
+// Why is this comment in this test?
 
 // Convolves with a filter.
 float[][] convolve (float[][] source,float[][] mask){
-  return parallel (i <- tabulate(1,dim0(source) - 1,1)){
-    return parallel (j <- tabulate(1,dim1(source) - 1,1)){
-      float[] temp = parallel (k <- tabulate (-1,2,1)) {
+  return parallel (int i <- tabulate(1,dim0(source) - 1,1)){
+    return parallel (int j <- tabulate(1,dim1(source) - 1,1)){
+      float[] temp = parallel (int k <- tabulate (-1,2,1)) {
         float ii = source[i+k][j-1] * mask[k+1][0];
         float ij = source[i+k][j]   * mask[k+1][1];
         float ik = source[i+k][j+1] * mask[k+1][2];
         return ii + ij + ik;
       };
-      return reduce(+,0,temp);
+      return reduce(+,0.0,temp);
     };
   };
 }
 
-// Box Blur = { { 0.111, 0.111, 0.111 }, 
-//              { 0.111, 0.111, 0.111 },  
-//              { 0.111, 0.111, 0.111 } }
-
-float[][] dag_box_blur (float[][] source){
-  // Hack, because no array literals.
-  float[][] mask = parallel (i <- tabulate(0,3,1)){
-    return parallel(j <- tabulate(0,3,1)){
-      return 0.111; 
-    };
-  };
-
-  return convolve(source,mask);
-}
-
-
+// Box Blur =
+// { { 0.111, 0.111, 0.111 }, 
+//   { 0.111, 0.111, 0.111 },  
+//   { 0.111, 0.111, 0.111 } }
 
 // Gaussian Blur = 
-//{ { 0.060, 0.130, 0.060 }, 
+// { { 0.060, 0.130, 0.060 }, 
 //  { 0.130, 0.250, 0.130 },  
 //  { 0.060, 0.130, 0.060 } }
 
-// float[][] dag_gaussian_blur(float[][] source);
-
 // Horiztonal Edge Detect = 
-//{ { 1.0,  0 , -1.0 }, 
-//  { 1.0,  0 , -1.0 },  
-//  { 1.0,  0 , -1.0 } }
-
-// float[][] dag_horizontal_edges(float[][] source);
+// { { 1.0,  0 , -1.0 }, 
+//   { 1.0,  0 , -1.0 },  
+//   { 1.0,  0 , -1.0 } }
 
 // Vertical Edge Detect = 
-//{ {  1.0,  1.0 ,  1.0 }, 
-//  {   0 ,   0  ,   0  },  
-//  { -1.0, -1.0 , -1.0 } }
-
-// float[][] dag_vertical_edges(float[][] source);
+// { {  1.0,  1.0 ,  1.0 }, 
+//   {   0 ,   0  ,   0  },  
+//   { -1.0, -1.0 , -1.0 } }
 
 // General Edge Detect
 
 //  0  1  0 
-//  1 -4  1 
+//  1 -8  1 
 //  0  1  0 
 
 // Sharpen

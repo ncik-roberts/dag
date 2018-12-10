@@ -1,9 +1,9 @@
 // Let's test DAG's ability to work with images. 
 // And articulate a reasonable breadth of non-parallel computation,
 // despite having neither loop or conditional constructs.
-// 
+
 // We attempt to render the Julia set.
-//
+
 
 // Tests structs.
 struct complex {
@@ -12,13 +12,13 @@ struct complex {
 }
 
 // And functions that operate on them.
-complex complex_add(complex a, complex b){
-  return { r = a.r + b.r; i = a.i + b.i; };
+struct complex complex_add(struct complex a, struct complex b){
+  return struct complex { r = a.r + b.r; i = a.i + b.i; };
 }
 
-complex complex_mult(complex a,complex b){
-  return { r = a.r * b.r - a.i * b.i; 
-           i = a.i * b.r + a.r * b.i; };
+struct complex complex_mult(struct complex a,struct complex b){
+  return struct complex { r = a.r * b.r - a.i * b.i; 
+                          i = a.i * b.r + a.r * b.i; };
 }
 
 bool julia (int x, int y, int dim) {
@@ -26,22 +26,216 @@ bool julia (int x, int y, int dim) {
   float jx = scale * float_of_int((dim/2 - x)/(dim/2));
   float jy = scale * float_of_int((dim/2 - y)/(dim/2));
   
-  complex c = { r = -0.8; i = 0.156; };
-  complex a = { r = jx; i = jy; };
+  struct complex c = { r = -0.8; i = 0.156; };
+  struct complex a = { r = jx; i = jy; };
   
-  // Todo: figure out how to express this kind of iteration using 
-  // DAG syntax. It's a reduce, but how exactly? 
-  // Proposal: FOLD primitive. (CANNOT be an array_view)
-  //
-  //   fold : 'a list -> 'b -> ('b -> 'a -> 'b) -> 'b 
-  // 
-  //   fold (INIT, ACCUMULATOR, ITEM <- LIST)
-  //
+  // A for loop. Maybe we should reduce the number of these.
+  // Be sure to change the loop bound in the C implementation too.
+  // Also I hope this doesn't totally destroy the stack, if that's
+  // where these are going. 
+  // There's only 400 structs * 2 floats each, though.
+  // Also, -instcombine is a thing. God bless -O3.
 
-  // No need to use i here. But we start the loop.
-  fold (a, acc, i <- tabulate(0,200,1)){
-    return complex_add(complex_mult(acc,acc),c);
-  };
+  struct complex a1 = complex_add(complex_mult(a,a),c);
+  struct complex a2 = complex_add(complex_mult(a1,a1),c);
+  struct complex a3 = complex_add(complex_mult(a2,a2),c);
+  struct complex a4 = complex_add(complex_mult(a3,a3),c);
+  struct complex a5 = complex_add(complex_mult(a4,a4),c);
+  struct complex a6 = complex_add(complex_mult(a5,a5),c);
+  struct complex a7 = complex_add(complex_mult(a6,a6),c);
+  struct complex a8 = complex_add(complex_mult(a7,a7),c);
+  struct complex a9 = complex_add(complex_mult(a8,a8),c);
+  struct complex a10 = complex_add(complex_mult(a9,a9),c);
+  struct complex a11 = complex_add(complex_mult(a10,a10),c);
+  struct complex a12 = complex_add(complex_mult(a11,a11),c);
+  struct complex a13 = complex_add(complex_mult(a12,a12),c);
+  struct complex a14 = complex_add(complex_mult(a13,a13),c);
+  struct complex a15 = complex_add(complex_mult(a14,a14),c);
+  struct complex a16 = complex_add(complex_mult(a15,a15),c);
+  struct complex a17 = complex_add(complex_mult(a16,a16),c);
+  struct complex a18 = complex_add(complex_mult(a17,a17),c);
+  struct complex a19 = complex_add(complex_mult(a18,a18),c);
+  struct complex a20 = complex_add(complex_mult(a19,a19),c);
+  struct complex a21 = complex_add(complex_mult(a20,a20),c);
+  struct complex a22 = complex_add(complex_mult(a21,a21),c);
+  struct complex a23 = complex_add(complex_mult(a22,a22),c);
+  struct complex a24 = complex_add(complex_mult(a23,a23),c);
+  struct complex a25 = complex_add(complex_mult(a24,a24),c);
+  struct complex a26 = complex_add(complex_mult(a25,a25),c);
+  struct complex a27 = complex_add(complex_mult(a26,a26),c);
+  struct complex a28 = complex_add(complex_mult(a27,a27),c);
+  struct complex a29 = complex_add(complex_mult(a28,a28),c);
+  struct complex a30 = complex_add(complex_mult(a29,a29),c);
+  struct complex a31 = complex_add(complex_mult(a30,a30),c);
+  struct complex a32 = complex_add(complex_mult(a31,a31),c);
+  struct complex a33 = complex_add(complex_mult(a32,a32),c);
+  struct complex a34 = complex_add(complex_mult(a33,a33),c);
+  struct complex a35 = complex_add(complex_mult(a34,a34),c);
+  struct complex a36 = complex_add(complex_mult(a35,a35),c);
+  struct complex a37 = complex_add(complex_mult(a36,a36),c);
+  struct complex a38 = complex_add(complex_mult(a37,a37),c);
+  struct complex a39 = complex_add(complex_mult(a38,a38),c);
+  struct complex a40 = complex_add(complex_mult(a39,a39),c);
+  struct complex a41 = complex_add(complex_mult(a40,a40),c);
+  struct complex a42 = complex_add(complex_mult(a41,a41),c);
+  struct complex a43 = complex_add(complex_mult(a42,a42),c);
+  struct complex a44 = complex_add(complex_mult(a43,a43),c);
+  struct complex a45 = complex_add(complex_mult(a44,a44),c);
+  struct complex a46 = complex_add(complex_mult(a45,a45),c);
+  struct complex a47 = complex_add(complex_mult(a46,a46),c);
+  struct complex a48 = complex_add(complex_mult(a47,a47),c);
+  struct complex a49 = complex_add(complex_mult(a48,a48),c);
+  struct complex a50 = complex_add(complex_mult(a49,a49),c);
+  struct complex a51 = complex_add(complex_mult(a50,a50),c);
+  struct complex a52 = complex_add(complex_mult(a51,a51),c);
+  struct complex a53 = complex_add(complex_mult(a52,a52),c);
+  struct complex a54 = complex_add(complex_mult(a53,a53),c);
+  struct complex a55 = complex_add(complex_mult(a54,a54),c);
+  struct complex a56 = complex_add(complex_mult(a55,a55),c);
+  struct complex a57 = complex_add(complex_mult(a56,a56),c);
+  struct complex a58 = complex_add(complex_mult(a57,a57),c);
+  struct complex a59 = complex_add(complex_mult(a58,a58),c);
+  struct complex a60 = complex_add(complex_mult(a59,a59),c);
+  struct complex a61 = complex_add(complex_mult(a60,a60),c);
+  struct complex a62 = complex_add(complex_mult(a61,a61),c);
+  struct complex a63 = complex_add(complex_mult(a62,a62),c);
+  struct complex a64 = complex_add(complex_mult(a63,a63),c);
+  struct complex a65 = complex_add(complex_mult(a64,a64),c);
+  struct complex a66 = complex_add(complex_mult(a65,a65),c);
+  struct complex a67 = complex_add(complex_mult(a66,a66),c);
+  struct complex a68 = complex_add(complex_mult(a67,a67),c);
+  struct complex a69 = complex_add(complex_mult(a68,a68),c);
+  struct complex a70 = complex_add(complex_mult(a69,a69),c);
+  struct complex a71 = complex_add(complex_mult(a70,a70),c);
+  struct complex a72 = complex_add(complex_mult(a71,a71),c);
+  struct complex a73 = complex_add(complex_mult(a72,a72),c);
+  struct complex a74 = complex_add(complex_mult(a73,a73),c);
+  struct complex a75 = complex_add(complex_mult(a74,a74),c);
+  struct complex a76 = complex_add(complex_mult(a75,a75),c);
+  struct complex a77 = complex_add(complex_mult(a76,a76),c);
+  struct complex a78 = complex_add(complex_mult(a77,a77),c);
+  struct complex a79 = complex_add(complex_mult(a78,a78),c);
+  struct complex a80 = complex_add(complex_mult(a79,a79),c);
+  struct complex a81 = complex_add(complex_mult(a80,a80),c);
+  struct complex a82 = complex_add(complex_mult(a81,a81),c);
+  struct complex a83 = complex_add(complex_mult(a82,a82),c);
+  struct complex a84 = complex_add(complex_mult(a83,a83),c);
+  struct complex a85 = complex_add(complex_mult(a84,a84),c);
+  struct complex a86 = complex_add(complex_mult(a85,a85),c);
+  struct complex a87 = complex_add(complex_mult(a86,a86),c);
+  struct complex a88 = complex_add(complex_mult(a87,a87),c);
+  struct complex a89 = complex_add(complex_mult(a88,a88),c);
+  struct complex a90 = complex_add(complex_mult(a89,a89),c);
+  struct complex a91 = complex_add(complex_mult(a90,a90),c);
+  struct complex a92 = complex_add(complex_mult(a91,a91),c);
+  struct complex a93 = complex_add(complex_mult(a92,a92),c);
+  struct complex a94 = complex_add(complex_mult(a93,a93),c);
+  struct complex a95 = complex_add(complex_mult(a94,a94),c);
+  struct complex a96 = complex_add(complex_mult(a95,a95),c);
+  struct complex a97 = complex_add(complex_mult(a96,a96),c);
+  struct complex a98 = complex_add(complex_mult(a97,a97),c);
+  struct complex a99 = complex_add(complex_mult(a98,a98),c);
+  struct complex a100 = complex_add(complex_mult(a99,a99),c);
+  struct complex a101 = complex_add(complex_mult(a100,a100),c);
+  struct complex a102 = complex_add(complex_mult(a101,a101),c);
+  struct complex a103 = complex_add(complex_mult(a102,a102),c);
+  struct complex a104 = complex_add(complex_mult(a103,a103),c);
+  struct complex a105 = complex_add(complex_mult(a104,a104),c);
+  struct complex a106 = complex_add(complex_mult(a105,a105),c);
+  struct complex a107 = complex_add(complex_mult(a106,a106),c);
+  struct complex a108 = complex_add(complex_mult(a107,a107),c);
+  struct complex a109 = complex_add(complex_mult(a108,a108),c);
+  struct complex a110 = complex_add(complex_mult(a109,a109),c);
+  struct complex a111 = complex_add(complex_mult(a110,a110),c);
+  struct complex a112 = complex_add(complex_mult(a111,a111),c);
+  struct complex a113 = complex_add(complex_mult(a112,a112),c);
+  struct complex a114 = complex_add(complex_mult(a113,a113),c);
+  struct complex a115 = complex_add(complex_mult(a114,a114),c);
+  struct complex a116 = complex_add(complex_mult(a115,a115),c);
+  struct complex a117 = complex_add(complex_mult(a116,a116),c);
+  struct complex a118 = complex_add(complex_mult(a117,a117),c);
+  struct complex a119 = complex_add(complex_mult(a118,a118),c);
+  struct complex a120 = complex_add(complex_mult(a119,a119),c);
+  struct complex a121 = complex_add(complex_mult(a120,a120),c);
+  struct complex a122 = complex_add(complex_mult(a121,a121),c);
+  struct complex a123 = complex_add(complex_mult(a122,a122),c);
+  struct complex a124 = complex_add(complex_mult(a123,a123),c);
+  struct complex a125 = complex_add(complex_mult(a124,a124),c);
+  struct complex a126 = complex_add(complex_mult(a125,a125),c);
+  struct complex a127 = complex_add(complex_mult(a126,a126),c);
+  struct complex a128 = complex_add(complex_mult(a127,a127),c);
+  struct complex a129 = complex_add(complex_mult(a128,a128),c);
+  struct complex a130 = complex_add(complex_mult(a129,a129),c);
+  struct complex a131 = complex_add(complex_mult(a130,a130),c);
+  struct complex a132 = complex_add(complex_mult(a131,a131),c);
+  struct complex a133 = complex_add(complex_mult(a132,a132),c);
+  struct complex a134 = complex_add(complex_mult(a133,a133),c);
+  struct complex a135 = complex_add(complex_mult(a134,a134),c);
+  struct complex a136 = complex_add(complex_mult(a135,a135),c);
+  struct complex a137 = complex_add(complex_mult(a136,a136),c);
+  struct complex a138 = complex_add(complex_mult(a137,a137),c);
+  struct complex a139 = complex_add(complex_mult(a138,a138),c);
+  struct complex a140 = complex_add(complex_mult(a139,a139),c);
+  struct complex a141 = complex_add(complex_mult(a140,a140),c);
+  struct complex a142 = complex_add(complex_mult(a141,a141),c);
+  struct complex a143 = complex_add(complex_mult(a142,a142),c);
+  struct complex a144 = complex_add(complex_mult(a143,a143),c);
+  struct complex a145 = complex_add(complex_mult(a144,a144),c);
+  struct complex a146 = complex_add(complex_mult(a145,a145),c);
+  struct complex a147 = complex_add(complex_mult(a146,a146),c);
+  struct complex a148 = complex_add(complex_mult(a147,a147),c);
+  struct complex a149 = complex_add(complex_mult(a148,a148),c);
+  struct complex a150 = complex_add(complex_mult(a149,a149),c);
+  struct complex a151 = complex_add(complex_mult(a150,a150),c);
+  struct complex a152 = complex_add(complex_mult(a151,a151),c);
+  struct complex a153 = complex_add(complex_mult(a152,a152),c);
+  struct complex a154 = complex_add(complex_mult(a153,a153),c);
+  struct complex a155 = complex_add(complex_mult(a154,a154),c);
+  struct complex a156 = complex_add(complex_mult(a155,a155),c);
+  struct complex a157 = complex_add(complex_mult(a156,a156),c);
+  struct complex a158 = complex_add(complex_mult(a157,a157),c);
+  struct complex a159 = complex_add(complex_mult(a158,a158),c);
+  struct complex a160 = complex_add(complex_mult(a159,a159),c);
+  struct complex a161 = complex_add(complex_mult(a160,a160),c);
+  struct complex a162 = complex_add(complex_mult(a161,a161),c);
+  struct complex a163 = complex_add(complex_mult(a162,a162),c);
+  struct complex a164 = complex_add(complex_mult(a163,a163),c);
+  struct complex a165 = complex_add(complex_mult(a164,a164),c);
+  struct complex a166 = complex_add(complex_mult(a165,a165),c);
+  struct complex a167 = complex_add(complex_mult(a166,a166),c);
+  struct complex a168 = complex_add(complex_mult(a167,a167),c);
+  struct complex a169 = complex_add(complex_mult(a168,a168),c);
+  struct complex a170 = complex_add(complex_mult(a169,a169),c);
+  struct complex a171 = complex_add(complex_mult(a170,a170),c);
+  struct complex a172 = complex_add(complex_mult(a171,a171),c);
+  struct complex a173 = complex_add(complex_mult(a172,a172),c);
+  struct complex a174 = complex_add(complex_mult(a173,a173),c);
+  struct complex a175 = complex_add(complex_mult(a174,a174),c);
+  struct complex a176 = complex_add(complex_mult(a175,a175),c);
+  struct complex a177 = complex_add(complex_mult(a176,a176),c);
+  struct complex a178 = complex_add(complex_mult(a177,a177),c);
+  struct complex a179 = complex_add(complex_mult(a178,a178),c);
+  struct complex a180 = complex_add(complex_mult(a179,a179),c);
+  struct complex a181 = complex_add(complex_mult(a180,a180),c);
+  struct complex a182 = complex_add(complex_mult(a181,a181),c);
+  struct complex a183 = complex_add(complex_mult(a182,a182),c);
+  struct complex a184 = complex_add(complex_mult(a183,a183),c);
+  struct complex a185 = complex_add(complex_mult(a184,a184),c);
+  struct complex a186 = complex_add(complex_mult(a185,a185),c);
+  struct complex a187 = complex_add(complex_mult(a186,a186),c);
+  struct complex a188 = complex_add(complex_mult(a187,a187),c);
+  struct complex a189 = complex_add(complex_mult(a188,a188),c);
+  struct complex a190 = complex_add(complex_mult(a189,a189),c);
+  struct complex a191 = complex_add(complex_mult(a190,a190),c);
+  struct complex a192 = complex_add(complex_mult(a191,a191),c);
+  struct complex a193 = complex_add(complex_mult(a192,a192),c);
+  struct complex a194 = complex_add(complex_mult(a193,a193),c);
+  struct complex a195 = complex_add(complex_mult(a194,a194),c);
+  struct complex a196 = complex_add(complex_mult(a195,a195),c);
+  struct complex a197 = complex_add(complex_mult(a196,a196),c);
+  struct complex a198 = complex_add(complex_mult(a197,a197),c);
+  struct complex a199 = complex_add(complex_mult(a198,a198),c);
+  struct complex a200 = complex_add(complex_mult(a199,a199),c);
 
   float mag = a.r * a.r + a.i * a.i; 
   return mag <= 1000.0;
@@ -52,7 +246,7 @@ bool[][] render_julia_DAG(int dimension){
   int[] dims = tabulate(0,dimension,1);
   return parallel (int y <- dims){
     return parallel (int x <- dims){
-      return julia(x,y,dimension);
+      return julia(x,y,dimension); // big ol' parallel
     };
   };
 }

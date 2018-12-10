@@ -1,0 +1,7 @@
+
+// Float equivalent.
+float sum_float(float[] a, float[] b){
+  float[] c = zipWith(+,a,b);
+  return reduce(+,0.0,c);
+}
+

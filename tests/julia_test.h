@@ -1,3 +1,4 @@
 #include <dag.h>
+#include <stdbool.h>
 
-int* render_julia_DAG(int dimension);
+void dag_render_julia(bool* result, int d1, int d2, int dimension);

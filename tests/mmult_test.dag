@@ -4,7 +4,7 @@ int dotProduct(int[] v1, int[] v2) {
 }
 
 // We annotate to interoperate with C++. 
-@EntryPoint
+//@EntryPoint
 int[][] multiplyMatrixMatrix_DAG(int[][] m1, int[][] m2) {
   return parallel (int[] row <- m1) {
     return parallel (int[] col <- transpose(m2)) {

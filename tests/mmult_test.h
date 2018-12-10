@@ -1,4 +1,4 @@
 #include <dag.h>
 
 // Interoperate with DAG code.
-dag_nd_array_t* multiplyMatrixMatrix_DAG(dag_nd_array_t* m1, dag_nd_array_t* m2);
+int* multiplyMatrixMatrix_DAG(int* m1,int m1_dim0,int m1_dim1, int* m2, int m2_dim0, int m2_dim1);

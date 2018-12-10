@@ -19,21 +19,13 @@ int main(){
   int NUM_ELEMS = 1 << 10; // 1024 to start. 
   int len = NUM_ELEMS*NUM_ELEMS;
 
-  int* m1 = (int*) malloc(len*sizeof(int));
-  int* m2 = (int*) malloc(len*sizeof(int));
-
-  // Allocate random elements into the array.
-  for (int i = 0; i < len; i++){
-      m1[i] = rand();
-      m2[i] = rand();
-  }
+  int* m1 = initRandomArrayi(len);
+  int* m2 = initRandomArrayi(len);
 
   int* m3_c = multiplyMatrixMatrix_C(m1,m2,NUM_ELEMS);
 
-  dag_nd_array_t* dag_m1 = allocateSquareMatrix(2,NUM_ELEMS,(void*) m1);
-  dag_nd_array_t* dag_m2 = allocateSquareMatrix(2,NUM_ELEMS,(void*) m2);
-  dag_nd_array_t* result = multiplyMatrixMatrix_DAG(dag_m1,dag_m2);
-  int* m3_dag = (int*) result->data;
+  int* m3_dag = multiplyMatrixMatrix_DAG(m1,NUM_ELEMS,NUM_ELEMS,
+                                         m2,NUM_ELEMS,NUM_ELEMS);
 
-  verifyArrays(m3_c,m3_dag,len);
+  verifyArrays("mmult",m3_c,m3_dag,len);
 }

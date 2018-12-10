@@ -59,8 +59,8 @@ int main(){
 
   int* julia_c = render_julia(DIM);
   // Nice part is, this thing's already flattened.
-  int* julia_dag = (int*) render_julia_DAG(DIM)->data;
+  int* julia_dag = (int*) render_julia_DAG(DIM);
 
-  verifyArrays(julia_c,julia_dag,DIM*DIM);
+  verifyArrays("julia",julia_c,julia_dag,DIM*DIM);
 }
 

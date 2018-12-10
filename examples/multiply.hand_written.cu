@@ -1,23 +1,7 @@
 #include <stdio.h>
  /*
   * This file is an attempt at producing what the generated target code 
-  * should look like for the multiplyMatrixMatrix routine. This includes
-  * a number of bits:
-  
-  *  - How to implement primitives (usually - NVIDIA examples)
-  *  - Internal C++ representations (dag_array_t) ?
-  *  - Interaction between host code and device code:
-        -> Is it possible to transform each function at the call site 
-           based off of how many nested parallel blocks it is in?
-           (Here: we inline dot-product. In general, I suspect an extremely aggressive
-           inlining policy will make our life easier.)
-  *  - C++ results of the "<-" operator
-        -> We want to avoid nested kernel launches. It's technically possible,
-           but the results are unpredictable.
-        -> We instead transform the entire thing into CUDA's nested block structure using
-           dim3 (x,y,_) to denote the 'quadratic' parallelism.
-        -> This abstraction hits a wall when the subroutines are so far composed as to offer
-           more than 'cubic' parallelism (3 nested levels). 
+  * should look like for the multiplyMatrixMatrix routine.
   */
 
 /* Prototype matrix representation. */
@@ -69,20 +53,13 @@ __global__ void multiplyMatrixVector(int* result, int* matrix, int* vector, int 
 {
   __shared__ int reduce_array[256]; // Within a block
 
-  //Todo: how do we merge nested parallel blocks into a single kernel?
-  // (By propagating the index and blocks - but more precisely)
-  
-  // int[] col <- transpose (m2) produces "vector slices"
-  // If we use CUDA's block indexing syntax: 
-
-  // or whatever size is passed in ~~~~~~~v
   int vector_slice_offset = blockIdx.x * cols + threadIdx.x; 
   int matrix_slice_offset = blockIdx.y * cols + threadIdx.x;
   reduce_array[threadIdx.x] = matrix[matrix_slice_offset] * vector[vector_slice_offset];
 
   __syncthreads();
 
-  // Can this be parallelised? Probably. We don't do that now.
+  // Sequential reduce.
   if (threadIdx.x == 0){
     int accumulator = 0;
     for (int i = 0; i < blockDim.x; i++)

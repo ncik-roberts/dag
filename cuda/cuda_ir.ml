@@ -210,7 +210,7 @@ let fmt_kvar = function
 
 let rec fmt_expr = function
   | IConst c -> Int64.to_string c
-  | FConst f -> string_of_float f
+  | FConst f -> string_of_float f ^ "f"
   | BConst b -> string_of_bool b
   | Var v -> v
   | KVar v -> fmt_kvar v

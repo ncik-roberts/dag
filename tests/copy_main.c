@@ -8,10 +8,10 @@ void copy(int* m3, int* m1, int n)
 }
 
 int main(){
-  int NUM_ELEMS = 4; // 1024 to start. 
+  int NUM_ELEMS = 1024; // 1024 to start. 
 
-  int* m3_dag  = (int*) calloc(NUM_ELEMS,sizeof(int));
-  int* m3_c    = (int*) calloc(NUM_ELEMS,sizeof(int));
+  int* m3_dag  = (int*) malloc(NUM_ELEMS*sizeof(int));
+  int* m3_c    = (int*) malloc(NUM_ELEMS*sizeof(int));
 
   int* m1 = initRandomArrayi(NUM_ELEMS);
 

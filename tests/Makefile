@@ -1,10 +1,10 @@
 EXECUTABLE := dagtest
 
-CU_FILES   := sanity_test.cu
+CU_FILES   := mmult_test.cu
 
 CU_DEPS    :=
 
-CC_FILES   := main.cpp
+CC_FILES   := mmult_main.c
 
 all: $(EXECUTABLE) $(REFERENCE)
 
@@ -15,12 +15,12 @@ LOGS	   := logs
 OBJDIR=objs
 CXX=g++ -m64
 CXXFLAGS=-O3 -Wall
-LDFLAGS=-L/usr/local/depot/cuda-8.0/lib64/ -lcudart
+LDFLAGS=-L/usr/local/cuda/lib64/ -lcudart
 NVCC=nvcc
 NVCCFLAGS=-O3 -m64 --gpu-architecture compute_35
 
 
-OBJS=$(OBJDIR)/main.o  $(OBJDIR)/scan.o
+OBJS=$(OBJDIR)/mmult_main.o  $(OBJDIR)/mmult_test.o
 
 
 .PHONY: dirs clean
@@ -33,16 +33,10 @@ dirs:
 clean:
 		rm -rf $(OBJDIR) *.ppm *~ $(EXECUTABLE) $(LOGS)
 
-check_scan: default
-				./checker.pl scan
-
-check_find_repeats: default
-				./checker.pl find_repeats
-
 $(EXECUTABLE): dirs $(OBJS)
 		$(CXX) $(CXXFLAGS) -o $@ $(OBJS) $(LDFLAGS)
 
-$(OBJDIR)/%.o: %.cpp
+$(OBJDIR)/%.o: %.c
 		$(CXX) $< $(CXXFLAGS) -c -o $@
 
 $(OBJDIR)/%.o: %.cu

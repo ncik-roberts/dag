@@ -2,7 +2,7 @@
 
 
 // Naive Matrix Multiply in C.
-int* multiplyMatrixMatrix_C(int* m1, int* m2, int n)
+int* multiplyMatrixMatrix(int* m1, int* m2, int n)
 {
   int* m3 = (int*) malloc(n*n*sizeof(int));
   for (int i = 0; i < n; i++){
@@ -18,14 +18,16 @@ int* multiplyMatrixMatrix_C(int* m1, int* m2, int n)
 int main(){
   int NUM_ELEMS = 1 << 10; // 1024 to start. 
   int len = NUM_ELEMS*NUM_ELEMS;
+  int* m3_dag  = (int*) malloc(NUM_ELEMS*NUM_ELEMS*sizeof(int));
 
   int* m1 = initRandomArrayi(len);
   int* m2 = initRandomArrayi(len);
 
-  int* m3_c = multiplyMatrixMatrix_C(m1,m2,NUM_ELEMS);
+  int* m3_c = multiplyMatrixMatrix(m1,m2,NUM_ELEMS);
 
-  int* m3_dag = multiplyMatrixMatrix_DAG(m1,NUM_ELEMS,NUM_ELEMS,
-                                         m2,NUM_ELEMS,NUM_ELEMS);
+  dag_multiplyMatrixMatrix(m3_dag,NUM_ELEMS,NUM_ELEMS,
+                            m1,NUM_ELEMS,NUM_ELEMS,
+                            m2,NUM_ELEMS,NUM_ELEMS);
 
   verifyArrays("mmult",m3_c,m3_dag,len);
 }

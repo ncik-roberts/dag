@@ -99,8 +99,20 @@ let trans_params (params : Ano.Param.t list) : (CU.cuda_type * CU.cuda_ident) li
      (* A non-array parameter, sadly, is not. *)
      | Ano.Param.Not_array t -> List.return (trans_type (Temp.to_type t), temp_name t))
 
+let rec lengths ctx (_, av) = match av with
+  | Air.Array t -> get_lengths ctx t
+  | Air.Array_index (t, _) -> List.drop (get_lengths ctx t) 1
+  | Air.Zip_with (_, []) -> failwith "lol"
+  | Air.Zip_with (_, av1 :: _) -> lengths ctx av1
+  | Air.Reverse av -> lengths ctx av
+  | Air.Tabulate (b, e, s) ->
+      [CU.Binop (CU.DIV, CU.Binop (CU.SUB, temp_to_var e, temp_to_var b), temp_to_var s)]
+  | Air.Transpose av -> match lengths ctx av with
+      | x1 :: x2 :: xs -> x2 :: x1 :: xs
+      | _ -> failwith "That can't be right."
+
 (* Translate AIR operands into their cuda equivalents. s*)
-let rec trans_op ctx = function
+and trans_op ctx = function
   | Air.IndexOp (t1, t2) -> begin
       match Map.find Ano.(ctx.result.buffer_infos) t1 with
       | None -> Many_fn.Result (trans_expr ctx (Expr.Index (Expr.Temp t1, Expr.Temp t2)))
@@ -114,7 +126,7 @@ let rec trans_op ctx = function
   | Air.Float f -> Many_fn.Result (CU.FConst f)
   | Air.Bool b -> Many_fn.Result (CU.BConst b)
   | Air.Temp t -> Many_fn.Result (CU.Var (temp_name t))
-  | Air.Dim (n, view) -> Many_fn.Result (CU.IConst (Int64.of_int_exn n))
+  | Air.Dim (n, view) -> Many_fn.Result (List.nth_exn (lengths ctx view) n)
 
 and trans_op_exn ctx = Fn.compose (Many_fn.result_exn ~msg:":(") (trans_op ctx)
 

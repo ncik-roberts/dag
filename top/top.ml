@@ -17,7 +17,7 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
   let prev = ref (Time.now ()) in
   let note msg =
     let now = Time.now () in
-    let span = Time.diff !prev now in
+    let span = Time.diff now !prev in
     prev := now;
     timing := !timing @ [(msg, span)]
   in

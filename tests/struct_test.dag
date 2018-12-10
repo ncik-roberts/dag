@@ -7,7 +7,7 @@ struct test {
 
 // Compose some arrays into some structs.
 test[] structify(int[] as, int[] bs, int[] cs){
-  return parallel (i <- tabulate(0,dim0(as),1)){
+  return parallel (int i <- tabulate(0,dim0(as),1)){
     return { a = as[i]; b = bs[i]; c = cs[i]; };
   };
 }
@@ -20,7 +20,7 @@ test[] filter_structs(test[] some_structs){
 }
 
 int destructify(test[] structs){
-  int[] result = parallel (i <- tabulate(0,dim0(structs),1)){
+  int[] result = parallel (int i <- tabulate(0,dim0(structs),1)){
     test s = structs[i];
     return s.a + s.b + s.c;
   };

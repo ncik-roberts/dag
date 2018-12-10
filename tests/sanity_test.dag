@@ -4,17 +4,17 @@
 
 int[] saxpy_DAG(int[] a, int[] b, int[] c){
   int[] indexes = tabulate(0,dim0(a),1);
-  return parallel(i <- indexes){
+  return parallel(int i <- indexes){
     return a[i] * b[i] + c[i];
-  }
+  };
 }
 
 // Float equivalent.
 float[] saxpy_float_DAG(float[] a, float[] b, float[] c){
   int[] indexes = tabulate(0,dim0(a),1);
-  return parallel(i <- indexes){
+  return parallel(int i <- indexes){
     return a[i] * b[i] + c[i];
-  }
+  };
 }
 
 // Test language primitives, like zipwith and reduce.

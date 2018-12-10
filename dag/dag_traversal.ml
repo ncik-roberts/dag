@@ -64,17 +64,9 @@ let transitive_predecessor_closure (dag : Dag.dag) : Vertex.Set.t Vertex.Map.t =
     if !any_changed then loop m' else m
   in loop init
 
-let traversals_with_filter (dag : Dag.dag) ~n : traversal list =
+let traversals_with_filter (dag : Dag.dag) ~seed : traversal =
 
-  let filter = match n with
-    | None -> Fn.id
-    | Some n -> fun x -> List.take x n
-  in
-
-  let within_bound = match n with
-    | None -> fun _ -> true
-    | Some n -> fun x -> x <= n
-  in
+  Random.init seed;
 
   let predecessors = transitive_predecessor_closure dag in
 
@@ -85,7 +77,7 @@ let traversals_with_filter (dag : Dag.dag) ~n : traversal list =
   in
 
   (* How do I evaluate a vertex? *)
-  let rec loop_of_vertex ?(curr=None) (vertex : Vertex.t) : (traversal * Vertex.Set.t) list =
+  let rec loop_of_vertex ?(curr=None) (vertex : Vertex.t) : (traversal * Vertex.Set.t) =
     loop ~acc:[] {
       curr_bound_parallel_vertex = curr;
       direct_predecessors = Vertex.Set.singleton vertex;
@@ -93,69 +85,60 @@ let traversals_with_filter (dag : Dag.dag) ~n : traversal list =
     }
 
   (* Arbitrarily find a way to evaluate starting from a context. *)
-  and loop ~(acc : traversal) (ctx : context) : (traversal * Vertex.Set.t) list =
+  and loop ~(acc : traversal) (ctx : context) : (traversal * Vertex.Set.t) =
     let candidates = Set.filter ctx.direct_predecessors ~f:(fun v ->
       isn't_value v && Set.is_subset (Dag.successors dag v) ~of_:ctx.evaluated
     ) in
-    let loop_with (vertex : Vertex.t) (subtraversals : (traversal * Vertex.Set.t) list) : (traversal * Vertex.Set.t) list =
+    let loop_with (vertex : Vertex.t) (subtraversal, remaining : traversal * Vertex.Set.t) : (traversal * Vertex.Set.t) =
       let predecessors_minus_vertex = Set.remove ctx.direct_predecessors vertex in
       let direct_predecessors =
         Vertex.Set.of_list (Dag.predecessors dag vertex)
           |> Set.union predecessors_minus_vertex
       in
-      let total = ref 0 in
-      List.concat_map subtraversals ~f:(fun (subtraversal, remaining) ->
-        if not (within_bound !total) then [] else
-        let ctx' = {
-          curr_bound_parallel_vertex = ctx.curr_bound_parallel_vertex;
-          direct_predecessors = Set.union direct_predecessors remaining;
-          evaluated =
-            Set.union
-              ctx.evaluated
-              (Vertex.Set.of_list (vertex :: traversal_to_list subtraversal));
-        } in
-        let xs = loop ctx' ~acc:(
-          let elem = match Dag.view dag vertex with
-            | Vertex_view.Parallel_block _ -> Block (vertex, subtraversal)
-            | _ -> Just vertex
-          in elem :: acc)
-        in
-        total := !total + List.length xs;
-        xs)
+      let ctx' = {
+        curr_bound_parallel_vertex = ctx.curr_bound_parallel_vertex;
+        direct_predecessors = Set.union direct_predecessors remaining;
+        evaluated =
+          Set.union
+            ctx.evaluated
+            (Vertex.Set.of_list (vertex :: traversal_to_list subtraversal));
+      } in
+      loop ctx' ~acc:(
+        let elem = match Dag.view dag vertex with
+          | Vertex_view.Parallel_block _ -> Block (vertex, subtraversal)
+          | _ -> Just vertex
+        in elem :: acc)
     in
-    filter begin
-      match Set.to_list candidates |> filter with
-      | [] -> [(acc, Vertex.Set.empty)]
-      | candidate_list ->
-          List.concat_map candidate_list ~f:(fun vertex ->
-            let subtraversals =
-              Option.value_map (Dag.unroll dag vertex) ~default:[([], Vertex.Set.empty)]
-                ~f:(loop_of_vertex ~curr:(
-                  begin
-                    match Dag.view dag vertex with
-                    | Vertex_view.Parallel_block (bd_vtx, _) -> Some bd_vtx
-                    | _ -> None
-                  end))
-            in
-            let results = loop_with vertex (filter subtraversals) in
+    begin
+      match Set.to_list candidates |> List.random_element with
+      | None -> (acc, Vertex.Set.empty)
+      | Some vertex ->
+          let subtraversals =
+            Option.value_map (Dag.unroll dag vertex) ~default:([], Vertex.Set.empty)
+              ~f:(loop_of_vertex ~curr:(
+                begin
+                  match Dag.view dag vertex with
+                  | Vertex_view.Parallel_block (bd_vtx, _) -> Some bd_vtx
+                  | _ -> None
+                end))
+          in
+          let result = loop_with vertex subtraversals in
+          begin
             match ctx.curr_bound_parallel_vertex with
-            | Some pvtx when not (Set.mem (Map.find_exn predecessors vertex) pvtx) && within_bound (List.length results) ->
+            | Some pvtx when not (Set.mem (Map.find_exn predecessors vertex) pvtx) ->
                 let results2 = loop ~acc { ctx with direct_predecessors = Set.remove ctx.direct_predecessors vertex } in
-                results @ (List.map results2 ~f:(Tuple2.map_snd ~f:(Fn.flip Vertex.Set.add vertex)))
-            | _ -> results)
+                List.random_element_exn [ result; Tuple2.map_snd results2 ~f:(Fn.flip Vertex.Set.add vertex); ]
+            | _ -> result
+          end
     end
   in
-  List.filter_map (loop_of_vertex (Dag.return_vertex dag)) ~f:(fun (result, set) ->
-    Option.some_if (Set.is_empty set) result)
+  fst (loop_of_vertex (Dag.return_vertex dag))
 
-let any_traversal (dag : Dag.dag) : traversal =
-  traversals_with_filter dag ~n:(Some 1) |> function
-  | [] -> failwith "No traversal found?"
-  | [x] -> x
-  | _ -> failwith "Too many traversals found?"
+let any_traversal (dag : Dag.dag) ~seed : traversal =
+  traversals_with_filter dag ~seed
 
-let all_traversals ?(n=`Take_all_of_'em) =
+(*let all_traversals ?(n=`Take_all_of_'em) =
   traversals_with_filter ~n:(match n with
     | `Take_all_of_'em -> None
     | `Actually_I_don't_want_all_of_them
-        (`Please_stop_at n) -> Some n)
+        (`Please_stop_at n) -> Some n)*)

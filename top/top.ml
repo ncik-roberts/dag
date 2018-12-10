@@ -13,55 +13,78 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
       ~default:((=) Ast.(last_fn.fun_name))
       ~f:((=))
   in
-  say (fun () -> ["Typechecking succeeded."]);
-  let dag = Dag.of_ast ast in
-  List.concat_map dag ~f:(fun dag_fun ->
-    if mem Dag.(dag_fun.dag_name) then begin
-      say (fun() -> [
-        "Original dag:";
-        Sexp.to_string_hum (Dag.sexp_of_dag_fun dag_fun);
-      ]);
-      let inline = Dag.inline dag_fun dag in
-      say (fun () -> [
-        "Inlined:";
-        Sexp.to_string_hum (Dag.sexp_of_dag_fun inline);
-      ]);
-      let traversals = Dag_traversal.all_traversals inline.Dag.dag_graph
-        ~n:(`Actually_I_don't_want_all_of_them (`Please_stop_at 10))
-      in
-      List.iter traversals ~f:(fun traversal -> say (fun () -> [
-        "Traversal:";
-        Sexp.to_string_hum (Dag_traversal.sexp_of_traversal traversal);
-      ]));
-      let airs = List.concat_map traversals ~f:(fun traversal ->
-        let (ir, temp_dag) = Dag_to_ir.run inline traversal in
-        say (fun () -> [
-          "IR:";
-          Sexp.to_string_hum (Ir.sexp_of_t ir);
+  let timing = ref [] in
+  let prev = ref (Time.now ()) in
+  let note msg =
+    let now = Time.now () in
+    let span = Time.diff !prev now in
+    prev := now;
+    timing := !timing @ [(msg, span)]
+  in
+  try
+    say (fun () -> ["Typechecking succeeded."]);
+    let dag = Dag.of_ast ast in
+    List.concat_map dag ~f:(fun dag_fun ->
+      if mem Dag.(dag_fun.dag_name) then begin
+        note "start";
+        say (fun() -> [
+          "Original dag:";
+          Sexp.to_string_hum (Dag.sexp_of_dag_fun dag_fun);
         ]);
-        Ir_to_air.all ir temp_dag)
-      in
-      let cudas = List.mapi airs ~f:(fun i air ->
+        let inline = Dag.inline dag_fun dag in
+        note "inline";
         say (fun () -> [
-          Printf.sprintf "AIR #%d" i;
-          Air.Pretty_print.pp_t air;
+          "Inlined:";
+          Sexp.to_string_hum (Dag.sexp_of_dag_fun inline);
         ]);
-        let ann = Annotate.annotate air in (* Annotations *)
+        let traversal = Dag_traversal.any_traversal inline.Dag.dag_graph ~seed:101
+        in
+        note "traversal";
         say (fun () -> [
-          Sexp.to_string_hum (Annotated_air.sexp_of_result ann);
+          "Traversal:";
+          Sexp.to_string_hum (Dag_traversal.sexp_of_traversal traversal);
         ]);
+        let airs =
+          let (ir, temp_dag) = Dag_to_ir.run inline traversal in
+          say (fun () -> [
+            "IR:";
+            Sexp.to_string_hum (Ir.sexp_of_t ir);
+          ]);
+          Ir_to_air.all ir temp_dag ~n:(Some 4)
+        in
+        note "ir_to_air";
+        let cudas = List.mapi airs ~f:(fun i air ->
+          say (fun () -> [
+            Printf.sprintf "AIR #%d" i;
+            Air.Pretty_print.pp_t air;
+          ]);
+          let ann = Annotate.annotate air in (* Annotations *)
+          say (fun () -> [
+            Sexp.to_string_hum (Annotated_air.sexp_of_result ann);
+          ]);
 
-        let cuda = Cuda_trans.trans air Tc.(ctx.struct_ctx) ann in
-        say (fun () -> [
-          Printf.sprintf "Cuda:";
-          Cuda_ir.fmt_gstmts cuda;
-        ]);
-        cuda
-      ) in cudas
-    end else []) |>
-  function
-    | [] -> failwith "Could not find function to compile."
-    | x :: _ -> x
+          let cuda = Cuda_trans.trans air Tc.(ctx.struct_ctx) ann in
+          say (fun () -> [
+            Printf.sprintf "Cuda:";
+            Cuda_ir.fmt_gstmts cuda;
+          ]);
+          cuda
+        ) in
+
+        note "annotation + trans";
+        cudas
+      end else []) |>
+    function
+      | [] -> failwith "Could not find function to compile."
+      | x :: _ ->
+          List.iter !timing ~f:(fun (msg, ts) ->
+            Printf.printf "%s: %s\n" msg (Time.Span.to_string_hum ts));
+          x
+
+  with e ->
+    List.iter !timing ~f:(fun (msg, ts) ->
+      Printf.printf "%s: %s\n" msg (Time.Span.to_string_hum ts));
+    raise e
 
 let run_on_file
  ?(verbose : bool = false)

@@ -274,8 +274,8 @@ and fmt_stmt n stm =
    guard ^ fmt_block n b
 
  | Condition (c, b1, b2) ->
-   let guard = sprintf "%sif(%s)\n" sp (fmt_expr c) in
-   guard ^ fmt_block n b1 ^ "else" ^ fmt_block n b2
+   let guard = sprintf "%sif (%s)" sp (fmt_expr c) in
+   guard ^ fmt_block n b1 ^ " else" ^ fmt_block n b2
 
  | Cuda_malloc (typ, dest, size) ->
    let decl = sprintf "%s%s %s;\n" sp (fmt_typ typ) (dest) in

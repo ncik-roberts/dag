@@ -3,4 +3,4 @@
  *)
 
 val any : Ir.t -> Temp_dag.dag -> Air.t
-val all : Ir.t -> Temp_dag.dag -> Air.t list
+val all : Ir.t -> ?n : int option -> Temp_dag.dag -> Air.t list

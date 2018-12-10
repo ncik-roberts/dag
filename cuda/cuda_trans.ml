@@ -67,7 +67,7 @@ let rec trans_type (typ : Tc.typ) : CU.cuda_type =
   | Tc.Struct i -> CU.Struct i
   | Tc.Array t -> CU.Pointer (remove_arrays t)
   | Tc.Pointer t -> CU.Pointer (trans_type t)
-  | Tc.Bool -> CU.Integer
+  | Tc.Bool -> CU.Boolean
   | _ -> failwith "Don't currently support other types"
 
 (* Remove outermost arrays. *)
@@ -175,7 +175,7 @@ and make_reduce op args =
 and trans_len_expr : Length_expr.t -> CU.cuda_expr = function
   | Length_expr.Temp t -> temp_to_var t
   | Length_expr.Mult (e1, e2) -> CU.Binop (CU.MUL, trans_len_expr e1, trans_len_expr e2)
-  | Length_expr.Plus (e1, e2) -> CU.Binop (CU.ADD, trans_len_expr e1, trans_len_expr e2)
+  | Length_expr.Minus (e1, e2) -> CU.Binop (CU.SUB, trans_len_expr e1, trans_len_expr e2)
   | Length_expr.Div (e1, e2) -> CU.Binop (CU.DIV, trans_len_expr e1, trans_len_expr e2)
 
 and build_index_expr lens init =
@@ -261,12 +261,12 @@ let create_loop ~counter:loop_temp (hi : CU.cuda_expr) =
     ~stride:(CU.IConst 1L)
 
 (* Used to perform operations with length expressions. *)
-let build_cached_reduce_expr (op : CU.binop) (exprs : CU.cuda_expr list) =
+let multiply_cuda_exprs (exprs : CU.cuda_expr list) =
   let rec reduce_expr exprs =
     match exprs with
-    | [] -> failwith "Cannot bootstrap empty expression."
+    | [] -> failwith "There is absolutely no way that this is what you wanted to do."
     | [expr] -> expr
-    | ex :: xs -> (CU.Binop (op, ex, reduce_expr xs))
+    | ex :: xs -> (CU.Binop (CU.MUL, ex, reduce_expr xs))
   in
   reduce_expr exprs
 
@@ -309,7 +309,7 @@ let rec trans_a_stmt : type a. (context -> a -> CU.cuda_stmt list) -> context ->
            try get_lengths ctx dest
            with _ -> get_lengths ctx src
          in
-         let len = CU.Binop (CU.MUL, build_cached_reduce_expr CU.MUL lengths, CU.Size_of (remove_arrays typ)) in
+         let len = CU.Binop (CU.MUL, multiply_cuda_exprs lengths, CU.Size_of (remove_arrays typ)) in
          CU.Transfer (temp_to_var dest, temp_to_var src, len, tfr))
        in
 
@@ -448,6 +448,8 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
   (* TODO: Make these actually run in parallel. *)
   | Air.Par_stmt (Air.Run (a, b)) -> trans_seq_stmt ctx (Air.Seq_stmt (Air.Run (a, b)))
   | Air.Par_stmt (Air.Reduce (a, b, c, d)) -> trans_seq_stmt ctx (Air.Seq_stmt (Air.Reduce (a, b, c, d)))
+  | Air.Par_stmt (Air.Filter_with (a, b, c)) -> trans_seq_stmt ctx (Air.Seq_stmt (Air.Filter_with (a, b, c)))
+  | Air.Par_stmt (Air.Scan (a, b, c, d)) -> trans_seq_stmt ctx (Air.Seq_stmt (Air.Scan (a, b, c, d)))
   | Air.Par_stmt par_stmt -> trans_par_stmt_stmt ctx par_stmt
 
   | Air.Parallel (dest, id, bound_array_views, body) ->
@@ -458,15 +460,17 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       in
 
       List.iter bound_array_views ~f:(fun (_, _, av) ->
-        fix (fun loop (_, av) -> match av with
-          | Air.Array t -> ()
-          | Air.Zip_with (_, avs) -> List.iter ~f:loop avs
-          | Air.Reverse av -> loop av
-          | Air.Transpose av -> loop av
-          | Air.Tabulate _ -> ()
-          | Air.Array_index (t, _) ->
-              if Map.mem ctx.result.Ano.backing_temps t then Hash_set.add ctx.backed_temps t) av
-      );
+        fix
+          (fun loop (_, av) -> match av with
+            | Air.Array t -> ()
+            | Air.Zip_with (_, avs) -> List.iter ~f:loop avs
+            | Air.Reverse av -> loop av
+            | Air.Transpose av -> loop av
+            | Air.Tabulate _ -> ()
+            | Air.Array_index (t, _) ->
+                if Map.mem ctx.result.Ano.backing_temps t
+                then Hash_set.add ctx.backed_temps t)
+          av);
 
       (* Get the temps of the array views to pass to the kernel launch. *)
       let rec temps_in_array_view (av : Air.array_view) : Temp.Set.t =
@@ -577,7 +581,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       List.iter bound_temps ~f:(fun key ->
         Temp.Table.set ctx.allocation_method ~key ~data:`Unallocated);
       let lengths = List.map ~f:(get_length ctx) bound_temps in
-      let total_length = build_cached_reduce_expr CU.MUL lengths in
+      let total_length = multiply_cuda_exprs lengths in
 
       let gdim = (CU.IConst 256L, CU.IConst 1L, CU.IConst 1L) in
       let bdim = (CU.Binop (CU.DIV, total_length, CU.IConst 256L), CU.IConst 1L, CU.IConst 1L) in (* Todo: make this blocks/thrd  *)
@@ -636,9 +640,9 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
               try get_lengths ctx dest
               with _ -> get_lengths ctx src
             in
-            let len = CU.Binop (CU.MUL, build_cached_reduce_expr CU.MUL lengths, CU.Size_of (remove_arrays typ)) in
+            let len = CU.Binop (CU.MUL, multiply_cuda_exprs lengths, CU.Size_of (remove_arrays typ)) in
             Some (CU.Transfer (temp_to_var dest, temp_to_var src, len, tfr))
-        | Tc.Int -> None
+        | Tc.Int | Tc.Float | Tc.Bool -> None
         | _ -> failwith "Not yet."
       ) |> List.filter_opt in
 
@@ -648,11 +652,12 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         [CU.Launch (gdim, bdim, kernel, kernel_args)];
         CU.[Transfer (
           dest_to_lvalue_exn ctx dest,
-          trans_expr ctx (List.fold_left start_indices ~init:(Expr.Temp device_dest_temp) ~f:(fun acc i -> Expr.Index (acc, Expr.Temp i))),
+          trans_expr ctx (List.fold_right start_indices ~init:(Expr.Temp device_dest_temp) ~f:(fun i acc -> Expr.Index (acc, Expr.Temp i))),
           CU.Binop (CU.MUL, CU.Size_of (remove_arrays (Ir.type_of_dest dest)),
-            build_cached_reduce_expr MUL (get_lengths ctx (match dest with
-            | Ir.Return _ -> Option.value_exn ctx.out_param
-            | Ir.Dest t -> t) |> Fn.flip List.drop (List.length start_indices))),
+            multiply_cuda_exprs (match dest with
+            | Ir.Return _ -> get_lengths ctx (Option.value_exn ctx.out_param)
+                |> Fn.flip List.drop (List.length start_indices)
+            | Ir.Dest t -> get_lengths ctx t)),
           (Device, Host))
         ]
       ]
@@ -738,7 +743,7 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t) (resul
           trans_type typ,
           temp_name t,
           Binop (MUL,
-            build_cached_reduce_expr MUL (List.map ~f:trans_len_expr Ano.(bi.length)),
+            multiply_cuda_exprs (List.map ~f:trans_len_expr Ano.(bi.length)),
             Size_of (remove_arrays typ)))
       in
       match Temp.Table.find allocation_method t with

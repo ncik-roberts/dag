@@ -101,7 +101,7 @@ let annotate_array_view
         { typ = Tc.(Array Int);
           dim = 1;
           filtered_lengths = None;
-          length = List.return Length_expr.(Div (Plus (Temp b, Temp e), Temp s));
+          length = List.return Length_expr.(Div (Minus (Temp e, Temp b), Temp s));
           index = Many_fn.Fun (fun expr -> Many_fn.Result begin
             Expr.Call (Ir.Operator.Binop Ast.Plus, [
               Expr.Temp b;
@@ -141,7 +141,7 @@ let rec used_of_length_expr : Length_expr.t -> Temp.Set.t =
   function
     | Length_expr.Temp t -> Temp.Set.singleton t
     | Length_expr.Mult (e1, e2) -> Set.union (used_of_length_expr e1) (used_of_length_expr e2)
-    | Length_expr.Plus (e1, e2) -> Set.union (used_of_length_expr e1) (used_of_length_expr e2)
+    | Length_expr.Minus (e1, e2) -> Set.union (used_of_length_expr e1) (used_of_length_expr e2)
     | Length_expr.Div (e1, e2) -> Set.union (used_of_length_expr e1) (used_of_length_expr e2)
 
 let rec used_of_array_view (ctx : context) (av : Air.array_view) : Temp.Set.t = match snd av with

@@ -167,7 +167,12 @@ let rec make_parallel
       ]
   )
 
-let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
+let upto (ir : Ir.t) (dag : Temp_dag.dag) ~n : Air.t list =
+
+  let limit = match n with
+    | None -> Fn.id
+    | Some n -> Fn.flip List.take n
+  in
 
   (* Returned list is the various ways of parallelizing this statement. *)
   let rec loop (ctx : context) (stmt : Ir.stmt) : (context * Air.par_stmt) list = match stmt with
@@ -203,7 +208,7 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
       Air.[(ctx, Seq (Unop (dest, unop, convert_operand ctx src)))]
   | Ir.Struct_Init (typ,dest,fxp) ->
     let conv't_exps = List.map fxp ~f:(fun (n,o) -> (n,convert_operand ctx o)) in
-    Air.[(ctx, Seq (Struct_Init(dest,typ,conv't_exps)))] 
+    Air.[(ctx, Seq (Struct_Init(dest,typ,conv't_exps)))]
   | Ir.Fun_call (dest, Ir.Reduce op, srcs) ->
     begin
       match List.map ~f:(canonicalize ctx) srcs with
@@ -316,6 +321,7 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
       match stmts with
       | [stmt] -> List.map ~f:snd (loop ctx stmt)
       | _ ->
+          (* TODO: rename *)
           let rec f (ctx : context) (stmts : Ir.stmt list) (acc : Air.par_stmt list) : Air.par_stmt list =
             match stmts with
             | [] -> [Air.(Par_stmt (Block (List.rev acc)))]
@@ -345,7 +351,7 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
           body = alt;
           return_type = Ir.(ir.return_type);
           fn_name = Ir.(ir.fn_name);
-        })
+        }) |> limit
 
-(* This is... awful. Generate all options and then take the head. *)
-let any (ir : Ir.t) (dag : Temp_dag.dag) : Air.t = List.hd_exn (all ir dag)
+let all (ir : Ir.t) ?(n=None) (dag : Temp_dag.dag) : Air.t list = upto ir dag ~n
+let any (ir : Ir.t) (dag : Temp_dag.dag) : Air.t = upto ir dag ~n:(Some 1) |> List.hd_exn

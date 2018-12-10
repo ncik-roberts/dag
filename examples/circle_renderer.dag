@@ -65,10 +65,10 @@ int numSquaresPerSide(int num_circles) {
 square[][] partitionImage(int width, int height, int num_squares, int num_circles) {
   // We want to perform this sequentially, as in almost all cases the parallel overhead
   // will be far too high. We encode number of divisions as a byproduct of the length
-  // of the square 2D array, pending us having multiple return types. 
+  // of the square 2D array, pending us having multiple return types.
 
   // Assuming a definition of (exclusive) tabulate something along the lines of:
-  // tabulate (start,stop,?stride) -> [start,start+stride,...,stop-stride] 
+  // tabulate (start,stop,?stride) -> [start,start+stride,...,stop-stride]
   // Note: this requires some casting from int -> float at some point.
   int[] xs = tabulate(0, width / num_squares, 1);
   int[] ys = tabulate(0, height / num_squares, 1);
@@ -90,32 +90,29 @@ square[][] partitionImage(int width, int height, int num_squares, int num_circle
   };
 }
 
-/*
-
 // We parallelise over everything, because we can. GPUs, baby.
 // This function contains a lot of options on how the operation can be performed
 // based off of the existing language primitives and a range of memory efficiency.
-
-int[][][] scanCircles (square[][] squares, circle[] circles) {
-  return parallel(sub_squares <- squares) {
-    return parallel(square <- sub_squares) {
+int[][][] scanCircles(square[][] squares, circle[] circles) {
+  return parallel (square[] sub_squares <- squares) {
+    return parallel (square square <- sub_squares) {
 
       // Option 1: perform testing and filter in two passes, making the most
       // use of our current primitives and requiring minimal modifications.
-      bool[] intersections = parallel (circle <- circles){
-        return circleIntersectsSquare(circle,square);
+      bool[] intersections = parallel (circle c <- circles) {
+        return circleIntersectsSquare(c,square);
       };
 
       // We explicitly allocate an array. Enumerate is the list of indices.
-      int[] unfiltered_IDs = tabulate(0,dim0(circles),1);
+      int[] unfiltered_IDs = tabulate(0, dim0(circles), 1);
 
       // ('a [] * bool [] -> 'a []) "Maps" a filter out of an array of boolans.
-      return filterWith(unfiltered_IDs,intersections);
+      return filterWith(unfiltered_IDs, intersections);
     };
   };
 }
 
-
+/*
 
 // RGBA colors represented as ints, you know, implicitly.
 int getColor(int x,int offset){

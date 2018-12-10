@@ -1,4 +1,4 @@
-#include <sanity_test.h>
+#include "sanity_test.h"
 
 // Tests a variety of simple dag functions.
 // 
@@ -42,33 +42,33 @@ float sum_float(float* a, float* b, int len){
 
 
 int main(){
-  int NUM_ELEMS = 1 << 20; // A solid million.
+  int NUM_ELEMS = 1 << 10; // (not) A solid million.
 
-  int* iarray1 = initRandomArrayi(NUM_ELEMS);
-  int* iarray2 = initRandomArrayi(NUM_ELEMS);
-  int* iarray3 = initRandomArrayi(NUM_ELEMS);
-  float* farray1 = initRandomArrayf(NUM_ELEMS);
-  float* farray2 = initRandomArrayf(NUM_ELEMS);
-  float* farray3 = initRandomArrayf(NUM_ELEMS);
+  int* iarray1 = initRandomArrayiRange(NUM_ELEMS,0,5);
+  int* iarray2 = initRandomArrayiRange(NUM_ELEMS,0,5);
+  int* iarray3 = initRandomArrayiRange(NUM_ELEMS,0,5);
+  float* farray1 = initRandomArrayfRange(NUM_ELEMS,0.f,5.f);
+  float* farray2 = initRandomArrayfRange(NUM_ELEMS,0.f,5.f);
+  float* farray3 = initRandomArrayfRange(NUM_ELEMS,0.f,5.f);
 
   int* saxpyCi = saxpy_int(iarray1,iarray2,iarray3,NUM_ELEMS);
   float* saxpyCf = saxpy_float(farray1,farray2,farray3,NUM_ELEMS);
   int sumCi = sum_int(iarray1,iarray2,NUM_ELEMS);
   float sumCf = sum_float(farray1,farray2,NUM_ELEMS);
 
-  int* saxpyDAGi = (int*) malloc(NUM_ELEMS * sizeof(int));
-  dag_saxpy_int(saxpyDAGi,NUM_ELEMS,
+  int* saxpyDAGi = (int*) calloc(NUM_ELEMS,sizeof(int));
+  dag_saxpy(saxpyDAGi,NUM_ELEMS,
                 iarray1,NUM_ELEMS,
                 iarray2,NUM_ELEMS,
                 iarray3,NUM_ELEMS);
 
-  float* saxpyDAGf = (float*) malloc(NUM_ELEMS * sizeof(float));                   
+  float* saxpyDAGf = (float*) calloc(NUM_ELEMS,sizeof(float));                   
   dag_saxpy_float(saxpyDAGf,NUM_ELEMS,
-                farray1,NUM_ELEMS,
-                farray2,NUM_ELEMS,
-                farray3,NUM_ELEMS);
+                  farray1,NUM_ELEMS,
+                  farray2,NUM_ELEMS,
+                  farray3,NUM_ELEMS);
 
-  int sumDAGi = dag_sum_int(iarray1,NUM_ELEMS,iarray2,NUM_ELEMS);
+  int sumDAGi = dag_sum(iarray1,NUM_ELEMS,iarray2,NUM_ELEMS);
   float sumDAGf = dag_sum_float(farray1,NUM_ELEMS,farray2,NUM_ELEMS);
 
   verifyArrays("saxpy",saxpyCi,saxpyDAGi,NUM_ELEMS);

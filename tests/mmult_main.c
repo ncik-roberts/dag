@@ -1,5 +1,5 @@
 #include "mmult_test.h"
-
+#include <time.h>
 
 // Naive Matrix Multiply in C.
 int* multiplyMatrixMatrix(int* m1, int* m2, int n)
@@ -23,11 +23,20 @@ int main(){
   int* m1 = initRandomArrayi(len);
   int* m2 = initRandomArrayi(len);
 
+  printf("Multiplying Matrix (C)\n");
+  clock_t start_c = clock();
   int* m3_c = multiplyMatrixMatrix(m1,m2,NUM_ELEMS);
+  clock_t end_c = clock();
+  printf("Time %f (s)\n",1000.0 * (double) (end_c - start_c) / CLOCKS_PER_SEC);
 
+  printf("Multiplying Matrix (DAG)\n");
+  clock_t start_dag = clock();
   dag_multiplyMatrixMatrix(m3_dag,NUM_ELEMS,NUM_ELEMS,
                             m1,NUM_ELEMS,NUM_ELEMS,
                             m2,NUM_ELEMS,NUM_ELEMS);
+  clock_t end_dag = clock();
+  printf("Time %f (ss)\n",(double) (end_dag - start_dag) / CLOCKS_PER_SEC);
+
 
   verifyArrays("mmult",m3_c,m3_dag,len);
 }

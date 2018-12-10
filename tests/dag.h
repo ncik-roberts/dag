@@ -22,17 +22,22 @@ float* initRandomArrayf(int NUM_ELEMS)
 
 // Useful in a variety of testing scenarios.
 void verifyArrays(const char* name, int* standard, int* test, int len){
-  int passed = 1;
+  int passed = 0;
   for (int i = 0; i < len; i++){
       if (standard[i] != test[i]){
         printf("(%s) MISMATCH: Expected %d, Got %d\n",name,standard[i],test[i]);
-        passed = 0;
+        passed += 1;
+      }
+      if(passed >= 10){
+        printf("Too many failures encountered, breaking.");
+        printf("(%s) Test FAILED.\n", name);
+        return;
       }
   }
 
-  if (passed){
+  if (passed == 0){
     printf("(%s) Test Passed.\n", name);
-  } else{
+  } else {
     printf("(%s) Test FAILED.\n", name);
   }
 }
@@ -42,15 +47,20 @@ int almostEquals(float a, float b){
 }
 
 void verifyFloatArrays(const char* name, float* standard, float* test, int len){
-  int passed = 1;
+  int passed = 0;
   for (int i = 0; i < len; i++){
       if (!almostEquals(standard[i],test[i])){
         printf("(%s) MISMATCH: Expected %f, Got %f\n",name,standard[i],test[i]);
-        passed = 0;
+        passed += 1;
+      }
+      if(passed >= 10){
+        printf("Too many failures encountered, breaking.");
+        printf("(%s) Test FAILED.\n", name);
+        return;
       }
   }
 
-  if (passed){
+  if (passed == 0){
     printf("(%s) Test Passed.\n", name);
   } else{
     printf("(%s) Test FAILED.\n", name);

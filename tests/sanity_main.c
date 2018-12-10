@@ -11,7 +11,7 @@
 int* saxpy_int(int* a,int* b,int* c, int len){
   int* result = (int*) malloc(len * sizeof(int));
   for (int i = 0; i < len; i++){
-    result[i] = a[i]*b[i] + c[i];
+    result[i] = (a[i]*b[i]) + c[i];
   }
   return result;
 }
@@ -19,7 +19,7 @@ int* saxpy_int(int* a,int* b,int* c, int len){
 float* saxpy_float(float* a,float* b,float* c, int len){
   float* result = (float*) malloc(len * sizeof(float));
   for (int i = 0; i < len; i++){
-    result[i] = a[i]*b[i] + c[i];
+    result[i] = (a[i]*b[i]) + c[i];
   }
   return result;
 }
@@ -27,7 +27,7 @@ float* saxpy_float(float* a,float* b,float* c, int len){
 int sum_int(int* a, int* b, int len){
   int result = 0;
   for (int i = 0; i < len; i++){
-    result += a[i] = b[i];
+    result += a[i] + b[i];
   }
   return result;
 }
@@ -35,14 +35,14 @@ int sum_int(int* a, int* b, int len){
 float sum_float(float* a, float* b, int len){
   float result = 0;
   for (int i = 0; i < len; i++){
-    result += a[i] = b[i];
+    result += a[i] + b[i];
   }
   return result;
 }
 
 
 int main(){
-  int NUM_ELEMS = 1 << 10; // (not) A solid million.
+  int NUM_ELEMS = 256; // (not) A solid million.
 
   int* iarray1 = initRandomArrayiRange(NUM_ELEMS,0,5);
   int* iarray2 = initRandomArrayiRange(NUM_ELEMS,0,5);

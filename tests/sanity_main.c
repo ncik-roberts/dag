@@ -1,4 +1,4 @@
-#include <sanity_test.h>
+#include "sanity_test.h"
 
 // Tests a variety of simple dag functions.
 // 

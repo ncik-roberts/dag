@@ -1,0 +1,3 @@
+int length(int[] xs) {
+  return dim0(xs);
+}

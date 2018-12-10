@@ -10,11 +10,31 @@ int* initRandomArrayi(int NUM_ELEMS)
   return array;
 }
 
+int* initRandomArrayiRange(int NUM_ELEMS,int min, int max)
+{
+  int* array = (int*) malloc(NUM_ELEMS * sizeof (int));
+  for (int i=0; i<NUM_ELEMS; i++){
+    int sample = min + (rand() % (max - min + 1));
+    array[i] = sample;
+  }
+  return array;
+}
+
 float* initRandomArrayf(int NUM_ELEMS)
 {
   float* array = (float*) malloc(NUM_ELEMS * sizeof (float));
   for (int i=0; i<NUM_ELEMS; i++){
     array[i] = (float) rand();
+  }
+  return array;
+}
+
+float* initRandomArrayfRange(int NUM_ELEMS,int min, int max)
+{
+  float* array = (float*) malloc(NUM_ELEMS * sizeof (float));
+  for (int i=0; i<NUM_ELEMS; i++){
+    int sample = min + (rand() % (max - min + 1));
+    array[i] = (float) sample;
   }
   return array;
 }
@@ -54,7 +74,7 @@ void verifyFloatArrays(const char* name, float* standard, float* test, int len){
         passed += 1;
       }
       if(passed >= 10){
-        printf("Too many failures encountered, breaking.");
+        printf("Too many failures encountered, breaking.\n");
         printf("(%s) Test FAILED.\n", name);
         return;
       }
@@ -69,14 +89,14 @@ void verifyFloatArrays(const char* name, float* standard, float* test, int len){
 
 void verifyInt(const char* name, int a, int b){
   if (a != b){
-    printf("%s) mismatch, expected %d, got %d\n",name,a,b);
+    printf("(%s) mismatch, expected %d, got %d\n",name,a,b);
     return;
   }
 }
 
 void verifyFloat(const char* name, float a, float b){
   if (!almostEquals(a,b)){
-    printf("%s) mismatch, expected %f, got %f\n",name,a,b);
+    printf("(%s) mismatch, expected %f, got %f\n",name,a,b);
     return;
   }
 }

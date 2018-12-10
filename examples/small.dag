@@ -73,3 +73,12 @@ int[][] f10(int[][] xss) {
   };
 }
 
+int[][][] f11(int[][][] xsss) {
+  return parallel(int[][] xss <- xsss) {
+    return parallel(int[] xs <- xss) {
+      return parallel(int x <- xs) {
+	return x;
+      };
+    };
+  };
+}

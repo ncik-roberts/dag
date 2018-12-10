@@ -1,0 +1,12 @@
+int nextPowerTwo(int x) {
+  return x;
+}
+
+int f(int num_circles) {
+  // We also assume (as we did in assignment 2) that the image is sized as a power
+  // of two, and thus dividing the side dimension by the number of squares is sound.
+  // We assume the existence of "log2". (We built it in to our language.)
+  return nextPowerTwo(log2(num_circles));
+  // Or some other function. Of our choosing.
+}
+

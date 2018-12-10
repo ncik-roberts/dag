@@ -132,6 +132,7 @@ and cuda_stmt =
   [@@deriving sexp]
 
 type cuda_gstmt =
+  | Include of string
   | Function of cuda_func
   | Decl of cuda_stmt
   | StructDecl of cuda_struct
@@ -318,6 +319,7 @@ let fmt_struct (id,fields) =
   header ^ block'
 
 let fmt_gstmt = function
+  | Include str -> "#include " ^ str
   | Function f -> fmt_func f
   | Decl d -> fmt_stmt 0 d ^ ";"
   | StructDecl (id, fields) -> fmt_struct (id, fields)

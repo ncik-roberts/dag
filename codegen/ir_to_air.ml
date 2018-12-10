@@ -57,7 +57,9 @@ let canonicalize (ctx : context) : Ir.operand -> 'a = function
   | Ir.Temp t ->
       let array_view_opt = Map.find ctx.array_views t in
       Option.value_map array_view_opt
-        ~default:(`Array_view (Temp.to_type t, Air.Array t))
+        ~default:(match Temp.to_type t with
+          | Tc.Array _ -> `Array_view (Temp.to_type t, Air.Array t)
+          | _ -> `Operand (Air.Temp t))
         ~f:(fun array_view -> `Array_view array_view) (* Eta-expansion necessary *)
 
 let rec to_seq_stmt : Air.par_stmt -> Air.seq_stmt =
@@ -212,6 +214,13 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
       | [ `Operand a; ] ->
           [(ctx, Air.(Seq (Primitive (dest, F2I (a)))))]
       | _ -> failwith "Invalid Int of Float."
+    end
+   | Ir.Fun_call (dest, Ir.Log2, srcs) ->
+    begin
+      match List.map ~f:(canonicalize ctx) srcs with
+      | [ `Operand a; ] ->
+          [(ctx, Air.(Seq (Primitive (dest, Log2 (a)))))]
+      | _ -> failwith "Invalid log2"
     end
   | Ir.Fun_call (dest, fun_call, srcs) ->
       (* Canonical srcs (i.e. if it is an array view) *)

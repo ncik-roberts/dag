@@ -2,4 +2,5 @@ _build
 *.native
 *.byte
 *.swp
+*.cu
 dagc

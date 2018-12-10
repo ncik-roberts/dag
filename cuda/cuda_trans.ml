@@ -67,6 +67,7 @@ let rec trans_type (typ : Tc.typ) : CU.cuda_type =
   | Tc.Struct i -> CU.Struct i
   | Tc.Array t -> CU.Pointer (remove_arrays t)
   | Tc.Pointer t -> CU.Pointer (trans_type t)
+  | Tc.Bool -> CU.Integer
   | _ -> failwith "Don't currently support other types"
 
 (* Remove outermost arrays. *)
@@ -117,15 +118,22 @@ let rec trans_op ctx = function
 
 and trans_op_exn ctx = Fn.compose (Many_fn.result_exn ~msg:":(") (trans_op ctx)
 
-and trans_prim ctx =
-  let trans_cmp op a b =
-    let a,b = trans_op_exn ctx a,
-              trans_op_exn ctx b in
-    CU.Ternary(CU.Binop(op,a,b),a,b)
-  in
-  function
-  | Air.Min (a,b) -> trans_cmp CU.LT a b
-  | Air.Max (a,b) -> trans_cmp CU.GT a b
+and trans_prim ctx m = match m with
+  | Air.Max (a, b)
+  | Air.Min (a, b) -> begin
+      let name = match m with Air.Max _ -> "max" | _ -> "min" in
+      let operands = List.map ~f:(trans_op_exn ctx) [a; b;] in
+      match Air.type_of_operand a with
+      | Tc.Int -> CU.FnCall (sprintf "_dag_i%s" name, operands)
+      | Tc.Float -> CU.FnCall (sprintf "_dag_f%s" name, operands)
+      | _ -> failwith "I don't know how to take a max."
+    end
+  | Air.Log2 a -> begin
+      match Air.type_of_operand a with
+      | Tc.Int -> CU.FnCall ("_dag_ilog2", [trans_op_exn ctx a])
+      | Tc.Float -> CU.FnCall ("log2f", [trans_op_exn ctx a])
+      | _ -> failwith "I don't know what a log 2 is."
+    end
   | Air.I2F a -> CU.Cast(CU.Float, trans_op_exn ctx a)
   | Air.F2I a -> CU.Cast(CU.Integer, trans_op_exn ctx a)
 
@@ -228,7 +236,7 @@ let dest_to_stmt (ctx : context) (dest : Ir.dest) (rhs : CU.cuda_expr) : CU.cuda
   match dest, ctx.lvalue with
   | Ir.Return _, None -> CU.Return rhs
   | Ir.Return _, Some lhs -> CU.Assign (trans_expr ctx lhs, rhs)
-  | Ir.Dest t, _ -> CU.Assign (temp_to_var t, rhs)
+  | Ir.Dest t, _ -> CU.DeclareAssign (trans_type (Temp.to_type t), temp_name t, rhs)
 
 let app index t = Many_fn.app index t ~default:(fun arr -> Expr.Index (arr, t))
 let rec app_expr ctx f e = Many_fn.compose (trans_expr ctx) (app f e)
@@ -315,6 +323,8 @@ let rec trans_a_stmt : type a. (context -> a -> CU.cuda_stmt list) -> context ->
 (* Translate a sequential statement *)
 and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
   let (<--) d src = match dest_to_lvalue ctx d with
+    | Some (CU.Var dest) ->
+        CU.DeclareAssign (trans_type (Ir.type_of_dest d), dest, src)
     | Some dest -> CU.Assign (dest, src)
     | None -> CU.Return src
   in
@@ -748,6 +758,7 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t) (resul
   let struct_decls = Map.mapi ~f:trans_struct_decl struct_decls |> Map.to_alist |> List.map ~f:snd in
   let gdecls = extract_kernel_launches body in
   List.concat [
+    [ CU.Include "dag_utils.cpp"; ];
     struct_decls;
     gdecls |> List.map ~f:(fun x -> CU.Function x);
     List.return
@@ -761,10 +772,3 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t) (resul
             params;
             body = malloc'ing @ body; });
   ]
-
-  (* sexp if you need it :)
-        printf "%s\n" (Sexp.to_string_hum (Temp.Table.sexp_of_t (function
-          | `Host_and_device t -> Tuple2.sexp_of_t Sexp.of_string Temp.sexp_of_t ("host_and_device", t)
-          | `Just_device -> Sexp.of_string "just_device"
-          | `Unallocated -> Sexp.of_string "unallocated"
-        ) ctx.allocation_method)); *)

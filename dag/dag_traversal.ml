@@ -136,4 +136,8 @@ let any_traversal (dag : Dag.dag) : traversal =
   | [x] -> x
   | _ -> failwith "Too many traversals found?"
 
-let all_traversals = traversals_with_filter ~filter:Fn.id
+let all_traversals ?(n=`Take_all_of_'em) =
+  traversals_with_filter ~filter:(match n with
+    | `Take_all_of_'em -> Fn.id
+    | `Actually_I_don't_want_all_of_them
+        (`Please_stop_at n) -> Fn.flip List.take n)

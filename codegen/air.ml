@@ -121,11 +121,11 @@ end = struct
           (Sexp.to_string_hum (Ir.Operator.sexp_of_t o))
           (String.concat ~sep:", " (List.map avs ~f:pp_array_view))
     | Reverse av -> sprintf "reverse(%s)" (pp_array_view av)
-    | Tabulate (b,e,s) -> sprintf "tabulate(%d,%d,%d)"
+    | Tabulate (b, e, s) -> sprintf "tabulate(%%%d, %%%d, %%%d)"
         (Temp.to_int b) (Temp.to_int e) (Temp.to_int s)
     | Transpose av -> sprintf "transpose(%s)" (pp_array_view av)
 
-  let rec pp_operand = function
+  let pp_operand = function
     | Const c -> Int32.to_string_hum c
     | Float f -> string_of_float f
     | Bool b -> string_of_bool b

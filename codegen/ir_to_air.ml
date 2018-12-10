@@ -32,12 +32,23 @@ let not_in (ctx : context) (op : Ir.operand) : bool =
 
 let make_array_view
   (fun_call : Ir.fun_call)
-  (srcs : [ `Array_view of Air.array_view | `Operand of Air.operand ] list) : Air.array_view' =
+  (srcs : [ `Array_view of Air.array_view | `Operand of Air.operand ] list) : Air.par_stmt * Air.array_view' =
+    let nop = Tuple2.create nop in
     match fun_call, srcs with
-    | Ir.Zip_with f, [ `Array_view view1; `Array_view view2; ] -> Air.Zip_with (f, [ view1; view2; ])
-    | Ir.Transpose, [ `Array_view view ] -> Air.Transpose view
-    | Ir.Map f, [ `Array_view view ] -> Air.Zip_with (f, [ view ])
-    | Ir.Tabulate, [`Operand (Air.Temp b); `Operand (Air.Temp e); `Operand (Air.Temp s);] -> Air.Tabulate (b,e,s)
+    | Ir.Zip_with f, [ `Array_view view1; `Array_view view2; ] -> Air.Zip_with (f, [ view1; view2; ]) |> nop
+    | Ir.Transpose, [ `Array_view view ] -> Air.Transpose view |> nop
+    | Ir.Map f, [ `Array_view view ] -> Air.Zip_with (f, [ view ]) |> nop
+    | Ir.Tabulate, [`Operand o1; `Operand o2; `Operand o3;] ->
+        let t1 = Temp.next Tc.Int () in
+        let t2 = Temp.next Tc.Int () in
+        let t3 = Temp.next Tc.Int () in
+        let assts =
+          [ Air.Assign (Ir.Dest t1, o1);
+            Air.Assign (Ir.Dest t2, o2);
+            Air.Assign (Ir.Dest t3, o3);
+          ] |> fun x -> Air.Seq (Air.Seq_stmt (Air.Block x))
+        in
+        (assts, Air.Tabulate (t1, t2, t3))
     | Ir.Int_of_float, _ -> failwith "I <- F is not an array view."
     | Ir.Float_of_int, _ -> failwith "F <- I is not an array view."
     | Ir.Reduce _, _ -> failwith "Reduce is not an array view."
@@ -54,12 +65,12 @@ let make_array_view
 
 let canonicalize (ctx : context) : Ir.operand -> 'a = function
   | (Ir.Const _|Ir.Float _|Ir.Bool _) as op ->  `Operand (convert_operand ctx op )
-  | Ir.Temp t ->
+  | Ir.Temp t as op ->
       let array_view_opt = Map.find ctx.array_views t in
       Option.value_map array_view_opt
         ~default:(match Temp.to_type t with
           | Tc.Array _ -> `Array_view (Temp.to_type t, Air.Array t)
-          | _ -> `Operand (Air.Temp t))
+          | _ -> `Operand (convert_operand ctx op))
         ~f:(fun array_view -> `Array_view array_view) (* Eta-expansion necessary *)
 
 let rec to_seq_stmt : Air.par_stmt -> Air.seq_stmt =
@@ -232,15 +243,17 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
           match dest with
           | Ir.Return _ -> []
           | Ir.Dest key ->
-              let array_view = (Ir.type_of_dest dest, make_array_view fun_call csrcs) in
+              let (stmt, av') = make_array_view fun_call csrcs in
+              let array_view = (Ir.type_of_dest dest, av') in
               let ctx' = { ctx with array_views = Map.add_exn ctx.array_views ~key ~data:array_view } in
-              List.return (ctx', nop)
+              List.return (ctx', stmt)
         end;
 
         (* Option 2: run array view right away. *)
         begin
-          let array_view = (Ir.type_of_dest dest, make_array_view fun_call csrcs) in
-          List.return (ctx, Air.(Par_stmt (Run (dest, array_view))))
+          let (stmt, av') = make_array_view fun_call csrcs in
+          let array_view = (Ir.type_of_dest dest, av') in
+          List.return (ctx, Air.(Par_stmt (Block [ stmt; Par_stmt (Run (dest, array_view)) ])))
         end;
       ]
   | Ir.Parallel (dest, src, t_src, stmts) ->

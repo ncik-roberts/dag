@@ -175,6 +175,8 @@ and make_reduce op args =
 and trans_len_expr : Length_expr.t -> CU.cuda_expr = function
   | Length_expr.Temp t -> temp_to_var t
   | Length_expr.Mult (e1, e2) -> CU.Binop (CU.MUL, trans_len_expr e1, trans_len_expr e2)
+  | Length_expr.Plus (e1, e2) -> CU.Binop (CU.ADD, trans_len_expr e1, trans_len_expr e2)
+  | Length_expr.Div (e1, e2) -> CU.Binop (CU.DIV, trans_len_expr e1, trans_len_expr e2)
 
 and build_index_expr lens init =
   List.fold_left lens ~init ~f:(fun acc x -> CU.Binop (CU.MUL, acc, x))

@@ -97,10 +97,20 @@ let annotate_array_view
               Many_fn.Fun (fun expr ->
                 app bi.index (Expr.Call (Ir.Operator.Binop Ast.Minus, [ n_minus_1; expr; ])))
         }
-    | (typ, Air.Tabulate (b,e,s)) ->
-        let bi = loop av in
-        assert (typ = bi.typ);
-        bi (* Todo: What should go here? *)
+    | (typ, Air.Tabulate (b, e, s)) ->
+        { typ = Tc.(Array Int);
+          dim = 1;
+          filtered_lengths = None;
+          length = List.return Length_expr.(Div (Plus (Temp b, Temp e), Temp s));
+          index = Many_fn.Fun (fun expr -> Many_fn.Result begin
+            Expr.Call (Ir.Operator.Binop Ast.Plus, [
+              Expr.Temp b;
+              Expr.Call (Ir.Operator.Binop Ast.Times, [
+                Expr.Temp s;
+                expr;
+            ])])
+          end);
+        }
 
     | (typ, Air.Zip_with (op, avs)) ->
         let hd, bis = match avs with
@@ -131,6 +141,8 @@ let rec used_of_length_expr : Length_expr.t -> Temp.Set.t =
   function
     | Length_expr.Temp t -> Temp.Set.singleton t
     | Length_expr.Mult (e1, e2) -> Set.union (used_of_length_expr e1) (used_of_length_expr e2)
+    | Length_expr.Plus (e1, e2) -> Set.union (used_of_length_expr e1) (used_of_length_expr e2)
+    | Length_expr.Div (e1, e2) -> Set.union (used_of_length_expr e1) (used_of_length_expr e2)
 
 let rec used_of_array_view (ctx : context) (av : Air.array_view) : Temp.Set.t = match snd av with
     | Air.Zip_with (_, avs) -> List.fold_left avs ~init:Temp.Set.empty ~f:(fun s av -> Set.union s (used_of_array_view ctx av))

@@ -20,17 +20,22 @@ module Length_expr = struct
   type t =
     | Temp of Temp.t
     | Mult of t * t
+    | Div of t * t
+    | Plus of t * t
     [@@deriving sexp]
 
   let rec to_expr : t -> Expr.t = function
     | Temp t -> Expr.Temp t
     | Mult (t1, t2) -> Expr.Call (Ir.Operator.Binop Ast.Times, [ to_expr t1; to_expr t2; ])
+    | Plus (t1, t2) -> Expr.Call (Ir.Operator.Binop Ast.Plus, [ to_expr t1; to_expr t2; ])
+    | Div (t1, t2) -> Expr.Call (Ir.Operator.Binop Ast.Div, [ to_expr t1; to_expr t2; ])
 
   let equals : t -> t -> bool =
     let rec collect_temps (acc : Temp.t list) : t -> Temp.t list =
       function
         | Temp t -> t :: acc
-        | Mult (t1, t2) -> collect_temps (collect_temps acc t1) t2
+        | Mult (t1, t2) | Div (t1, t2) | Plus (t1, t2) ->
+              collect_temps (collect_temps acc t1) t2
     in
     fun t1 t2 ->
       let canonicalize t = List.sort (collect_temps [] t) ~compare:Temp.compare in

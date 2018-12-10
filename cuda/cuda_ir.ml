@@ -319,7 +319,7 @@ let fmt_struct (id,fields) =
   header ^ block'
 
 let fmt_gstmt = function
-  | Include str -> "#include " ^ str
+  | Include str -> "#include \"" ^ str ^"\""
   | Function f -> fmt_func f
   | Decl d -> fmt_stmt 0 d ^ ";"
   | StructDecl (id, fields) -> fmt_struct (id, fields)

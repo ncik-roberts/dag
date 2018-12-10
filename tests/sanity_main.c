@@ -46,7 +46,7 @@ int main(){
 
   int* iarray1 = initRandomArrayiRange(NUM_ELEMS,0,5);
   int* iarray2 = initRandomArrayiRange(NUM_ELEMS,0,5);
-  int* iarray3 = initRandomArrayiRAnge(NUM_ELEMS,0,5);
+  int* iarray3 = initRandomArrayiRange(NUM_ELEMS,0,5);
   float* farray1 = initRandomArrayfRange(NUM_ELEMS,0.f,5.f);
   float* farray2 = initRandomArrayfRange(NUM_ELEMS,0.f,5.f);
   float* farray3 = initRandomArrayfRange(NUM_ELEMS,0.f,5.f);

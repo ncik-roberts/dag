@@ -421,7 +421,7 @@ and annotate_stmt
                     ~data:(mk_buffer_info_out_of_temp t kernel_ctx' [buffer_info]) }; }
       in
       ({ defined = Set.union defined (Set.union kernel_ctx.defined kernel_ctx'.defined);
-         used = Set.union kernel_ctx.used kernel_ctx'.used;
+         used = Set.union (Set.union kernel_ctx.used kernel_ctx'.used) (used_of_array_view ctx av);
          additional_buffers = Set.union kernel_ctx.additional_buffers kernel_ctx'.additional_buffers;
          return_buffer_info = None;
        }, ctx')

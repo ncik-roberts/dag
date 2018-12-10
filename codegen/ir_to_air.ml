@@ -11,6 +11,27 @@ type context = {
 
 let nop : Air.par_stmt = Air.Par_stmt Air.Nop
 
+let rec simplify (stmt : Air.par_stmt) : Air.par_stmt option = match stmt with
+  | Air.Par_stmt stmt -> Option.map (simplify_stmt simplify stmt) ~f:(fun x -> Air.Par_stmt x)
+  | Air.Seq stmt -> Option.map (simplify_seq stmt) ~f:(fun x -> Air.Seq x)
+  | Air.Parallel (x, y, z, stmt) ->
+      Option.map (simplify_seq stmt) ~f:(fun w -> Air.Parallel (x, y, z, w))
+
+and simplify_seq (stmt : Air.seq_stmt) : Air.seq_stmt option = match stmt with
+  | Air.Seq_stmt stmt -> Option.map (simplify_stmt simplify_seq stmt) ~f:(fun x -> Air.Seq_stmt x)
+  | stmt -> Some stmt
+
+and simplify_stmt : type a. (a -> a option) -> a Air.stmt -> a Air.stmt option =
+  fun f x -> match x with
+    | Air.Reduce _ | Air.Run _ | Air.Scan _ | Air.Filter_with _ -> Some x
+    | Air.Nop -> None
+    | Air.Block stmts -> begin
+        match List.filter_map stmts ~f:f with
+        | [] -> None
+        | xs -> Some (Air.Block xs)
+      end
+    | Air.For (a, b, stmt) -> Option.map (f stmt) ~f:(fun x -> Air.For (a, b, x))
+
 let convert_operand : context -> Ir.operand -> Air.operand =
   fun ctx -> function
     | Ir.Const i -> Air.Const i
@@ -282,17 +303,19 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
   (* List is all possible options *)
   and loop_stmts (ctx : context) (stmts : Ir.stmt list) : Air.par_stmt list =
     let stmts = List.filter stmts ~f:(function Ir.Nop -> false | _ -> true) in
-    match stmts with
-    | [stmt] -> List.map ~f:snd (loop ctx stmt)
-    | _ ->
-        let rec f (ctx : context) (stmts : Ir.stmt list) (acc : Air.par_stmt list) : Air.par_stmt list =
-          match stmts with
-          | [] -> [Air.(Par_stmt (Block (List.rev acc)))]
-          | s :: ss ->
-              let ctx_stmt_pairs = loop ctx s in
-              List.concat_map ctx_stmt_pairs ~f:(fun (ctx, stmt) -> f ctx ss (stmt :: acc))
-        in
-        f ctx stmts []
+    begin
+      match stmts with
+      | [stmt] -> List.map ~f:snd (loop ctx stmt)
+      | _ ->
+          let rec f (ctx : context) (stmts : Ir.stmt list) (acc : Air.par_stmt list) : Air.par_stmt list =
+            match stmts with
+            | [] -> [Air.(Par_stmt (Block (List.rev acc)))]
+            | s :: ss ->
+                let ctx_stmt_pairs = loop ctx s in
+                List.concat_map ctx_stmt_pairs ~f:(fun (ctx, stmt) -> f ctx ss (stmt :: acc))
+          in
+          f ctx stmts []
+    end |> List.filter_map ~f:simplify
   in
 
   let init_ctx = { array_views =

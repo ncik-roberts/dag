@@ -212,6 +212,15 @@ let all (ir : Ir.t) (dag : Temp_dag.dag) : Air.t list =
           [(ctx, Air.(Par_stmt (Reduce (dest, op, o, (reduce_temp, v)))))]
       | _ -> failwith "Invalid reduce."
     end
+  | Ir.Fun_call (dest, Ir.Filter_with, srcs) ->
+    begin
+      match List.map ~f:(canonicalize ctx) srcs with
+      | [ `Array_view v1; `Array_view v2; ] ->
+          let t1 = Temp.next (fst v1) () in
+          let t2 = Temp.next (fst v2) () in
+          [(ctx, Air.(Par_stmt (Filter_with (dest, (t1, v1), (t2, v2)))))]
+      | _ -> failwith "Invalid filter_with."
+    end
   | Ir.Fun_call (dest, Ir.Dim n, srcs) ->
     begin
       match List.map ~f:(canonicalize ctx) srcs with

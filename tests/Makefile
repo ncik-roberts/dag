@@ -1,10 +1,10 @@
 EXECUTABLE := dagtest
 
-CU_FILES   := copy_test.cu
+CU_FILES   := mmult_test.cu
 
 CU_DEPS    :=
 
-CC_FILES   := copy_test.h copy_main.c
+CC_FILES   := mmult_test.h mmult_main.c
 
 all: $(EXECUTABLE) $(REFERENCE)
 
@@ -17,10 +17,10 @@ CXX=g++ -m64
 CXXFLAGS=-O3 -Wall
 LDFLAGS=-L/usr/local/cuda/lib64/ -lcudart
 NVCC=nvcc
-NVCCFLAGS=-O3 -m64 --gpu-architecture compute_35
+NVCCFLAGS=-O3 -m64 --gpu-architecture compute_20
 
 
-OBJS=$(OBJDIR)/copy_main.o  $(OBJDIR)/copy_test.o
+OBJS=$(OBJDIR)/mmult_main.o  $(OBJDIR)/mmult_test.o
 
 
 .PHONY: dirs clean

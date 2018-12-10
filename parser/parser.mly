@@ -243,7 +243,7 @@ _expr :
             let open Core in
             let dim =
               if String.is_prefix s ~prefix:"dim"
-                then int_of_string_opt (String.suffix s (String.length "dim"))
+                then int_of_string_opt (Core.String.drop_prefix s (String.length "dim"))
                 else None
             in Option.value_map dim ~f:(fun n -> Ast.Dim n)
                   ~default:(Ast.Fun_ident call_ident)

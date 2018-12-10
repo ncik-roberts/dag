@@ -4,7 +4,7 @@ CU_FILES   := mmult_test.cu
 
 CU_DEPS    :=
 
-CC_FILES   := mmult_main.c
+CC_FILES   := mmult_test.h mmult_main.c
 
 all: $(EXECUTABLE) $(REFERENCE)
 

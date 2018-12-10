@@ -1,10 +1,10 @@
 EXECUTABLE := dagtest
 
-CU_FILES   := mmult_test.cu
+CU_FILES   := copy_test.cu
 
 CU_DEPS    :=
 
-CC_FILES   := mmult_test.h mmult_main.c
+CC_FILES   := copy_test.h copy_main.c
 
 all: $(EXECUTABLE) $(REFERENCE)
 
@@ -20,7 +20,7 @@ NVCC=nvcc
 NVCCFLAGS=-O3 -m64 --gpu-architecture compute_35
 
 
-OBJS=$(OBJDIR)/mmult_main.o  $(OBJDIR)/mmult_test.o
+OBJS=$(OBJDIR)/copy_main.o  $(OBJDIR)/copy_test.o
 
 
 .PHONY: dirs clean

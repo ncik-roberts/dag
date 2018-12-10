@@ -57,19 +57,19 @@ int main(){
   float sumCf = sum_float(farray1,farray2,NUM_ELEMS);
 
   int* saxpyDAGi = (int*) malloc(NUM_ELEMS * sizeof(int));
-  saxpy_int_DAG(saxpyDAGi,NUM_ELEMS,
+  dag_saxpy_int(saxpyDAGi,NUM_ELEMS,
                 iarray1,NUM_ELEMS,
                 iarray2,NUM_ELEMS,
                 iarray3,NUM_ELEMS);
 
   float* saxpyDAGf = (float*) malloc(NUM_ELEMS * sizeof(float));                   
-  saxpy_int_DAG(saxpyDAGf,NUM_ELEMS,
+  dag_saxpy_float(saxpyDAGf,NUM_ELEMS,
                 farray1,NUM_ELEMS,
                 farray2,NUM_ELEMS,
                 farray3,NUM_ELEMS);
 
-  int sumDAGi = sum_int_DAG(iarray1,NUM_ELEMS,iarray2,NUM_ELEMS);
-  float sumDAGf = sum_float_DAG(farray1,NUM_ELEMS,farray2,NUM_ELEMS);
+  int sumDAGi = dag_sum_int(iarray1,NUM_ELEMS,iarray2,NUM_ELEMS);
+  float sumDAGf = dag_sum_float(farray1,NUM_ELEMS,farray2,NUM_ELEMS);
 
   verifyArrays("saxpy",saxpyCi,saxpyDAGi,NUM_ELEMS);
   verifyFloatArrays("saxpyf",saxpyCf,saxpyDAGf,NUM_ELEMS);

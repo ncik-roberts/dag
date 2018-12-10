@@ -26,6 +26,16 @@ type operand =
   | Dim of int * array_view (* Nth dimension of an array *)
   [@@deriving sexp]
 
+let type_of_operand : operand -> Tc.typ = function
+  | Const _ -> Tc.Int
+  | Float _ -> Tc.Float
+  | Bool _ -> Tc.Bool
+  | Temp t -> Temp.to_type t
+  | IndexOp (t, _) -> (match Temp.to_type t with
+                       | Tc.Array typ -> typ
+                       | _ -> failwith "Oops.")
+  | Dim _ -> Tc.Int
+
 type primitive =
   | Log2 of operand
   | Max of operand * operand

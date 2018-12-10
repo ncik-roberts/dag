@@ -27,10 +27,7 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
         Sexp.to_string_hum (Dag.sexp_of_dag_fun inline);
       ]);
       let traversals =
-        Dag_traversal.all_traversals inline.Dag.dag_graph
-          ~n:
-            (`Actually_I_don't_want_all_of_them
-              (`Please_stop_at 100))
+        [ Dag_traversal.any_traversal inline.Dag.dag_graph ]
       in
       List.iter traversals ~f:(fun traversal -> say (fun () -> [
         "Traversal:";
@@ -61,7 +58,10 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
         ]);
         cuda
       ) in cudas
-    end else []) |> List.hd_exn
+    end else []) |>
+  function
+    | [] -> failwith "Could not find function to compile."
+    | x :: _ -> x
 
 let run_on_file
  ?(verbose : bool = false)

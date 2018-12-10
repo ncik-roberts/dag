@@ -17,4 +17,18 @@ static unsigned int _dag_ilog2(unsigned int x) {
   return result;
 }
 
-static unsigned int
+static int _dag_imin(int x, int y) {
+  return x <= y ? x : y;
+}
+
+static int _dag_imax(int x, int y) {
+  return x >= y ? x : y;
+}
+
+static float _dag_fmin(float x, float y) {
+  return x <= y ? x : y;
+}
+
+static float _dag_fmax(float x, float y) {
+  return x >= y ? x : y;
+}

@@ -388,7 +388,6 @@ let rec trans_a_stmt : type a. (context -> a -> CU.cuda_stmt list) -> context ->
          CU.Transfer (temp_to_var dest, temp_to_var src, len, tfr))
        in
 
-
        hd @ [ CU.Loop (hdr, body); ]
 
     | Air.Block s -> List.concat_map ~f:(continuation ctx) s
@@ -695,7 +694,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
             let i = temp_to_var i_temp in
             let acc_temp = Temp.next Tc.Int () in
             let acc = temp_to_var acc_temp in
-            let lvalue = List.fold_left (start_indices @ indices)
+            let lvalue = List.fold_left indices
               ~init:output_buffer_param ~f:(fun acc i -> Expr.Index (acc, Expr.Temp i)) in
             List.concat [
               [ CU.DeclareAssign (CU.Integer, temp_name i_temp, index_expr);

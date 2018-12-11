@@ -60,7 +60,7 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
           ]);
           let ann = Annotate.annotate air in (* Annotations *)
           say (fun () -> [
-            Sexp.to_string_hum (Annotated_air.sexp_of_result ann);
+            (*Sexp.to_string_hum (Annotated_air.sexp_of_result ann);*)
           ]);
 
           let cuda = Cuda_trans.trans air Tc.(ctx.struct_ctx) ann in

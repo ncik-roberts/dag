@@ -37,3 +37,10 @@ int f7(int[] xs, bool[] bs) {
   int[] ys = filter_with(xs, bs);
   return reduce(+, 0, ys);
 }
+
+int[] f8(int[] xs, bool[] bs) {
+  int[] ys = filter_with(xs, bs);
+  return for (int y : ys) {
+    return y + 1;
+  };
+}

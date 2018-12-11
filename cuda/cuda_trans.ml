@@ -140,13 +140,16 @@ let trans_params (extra_lengths : CU.cuda_expr list Temp.Table.t) (ctx : Ano.res
 
    (params, !return_type, Temp.Map.of_hashtbl_exn hashtbl)
 
-let get_filtered_lengths ctx dest =
-  let bi = match Map.find Ano.(ctx.result.buffer_infos) (Ir.temp_of_dest dest) with
-    | None -> Map.find Ano.(ctx.result.returned_buffer_infos) (Ir.temp_of_dest dest)
+let get_filtered_lengths ctx temp =
+  let bi = match Map.find Ano.(ctx.result.buffer_infos) temp with
+    | None -> Map.find Ano.(ctx.result.returned_buffer_infos) temp
     | Some bi -> Some bi
   in
   let bi = Option.value_exn bi in
   Ano.(bi.filtered_lengths)
+
+let get_filtered_lengths_of_dest ctx dest =
+  get_filtered_lengths ctx (Ir.temp_of_dest dest)
 
 let rec update_lvalue ctx dest bound_array_views =
   let bi = match Map.find Ano.(ctx.result.buffer_infos) (Ir.temp_of_dest dest) with
@@ -397,7 +400,11 @@ let dest_to_stmt (ctx : context) (dest : Ir.dest) (rhs : CU.cuda_expr) : CU.cuda
 let app index t = Many_fn.app index t ~default:(fun arr -> Expr.Index (arr, t))
 let rec app_expr ctx f e = Many_fn.compose (trans_expr ctx) (app f e)
 
-let get_length ctx t = List.hd_exn (get_lengths ctx t)
+let get_length ctx t =
+  match List.hd_exn (get_filtered_lengths ctx t) with
+  | None -> List.hd_exn (get_lengths ctx t)
+  | Some t ->
+      trans_expr ctx (Map.find_exn (fst ctx.lvalue_filter) t)
 
 let get_expr_index (ctx : context) (t : Temp.t) : Temp.t -> (Expr.t, Expr.t) Many_fn.t =
   match Map.find Ano.(ctx.result.buffer_infos) t with
@@ -799,7 +806,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       Temp.Table.add_exn ctx.extra_lengths ~key:output_buffer_param ~data:lengths;
 
       (* :( *)
-      let filtered_lengths = get_filtered_lengths ctx dest in
+      let filtered_lengths = get_filtered_lengths_of_dest ctx dest in
       let rec typ_diff typ1 typ2 = match typ1, typ2 with
         | Tc.Array typ1, Tc.Array typ2 -> typ_diff typ1 typ2
         | Tc.Array typ1, _ -> 1 + typ_diff typ1 typ2
@@ -890,7 +897,11 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
                 ]
               );
               trans_seq_stmt { ctx with lvalue = Some lvalue; lvalue_filter =
-                update_lvalue_with ctx lengths (get_filtered_lengths ctx dest) lvalue_filter bound_array_views; } body;
+                update_lvalue_with ctx lengths
+                  (get_filtered_lengths_of_dest ctx dest)
+                  lvalue_filter
+                  bound_array_views;
+              } body;
             ]
           end;
       }) in
@@ -1062,7 +1073,8 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t)
           List.exists Ano.(result.params)
           ~f:(function | (Ano.Param.Array (t', _)) -> Temp.equal t t'
                        | _ -> false) -> f t' (fun (a, b, c) -> [ CU.Cuda_malloc (a, b, c) ])
-      | Some `Host_and_device t' -> f t (fun (a, b, c) -> f t' (fun (a', b', c') -> [ CU.Malloc (a, b, c); CU.Cuda_malloc (a', b', c'); ])))
+      | Some `Host_and_device t' -> f t (fun (a, b, c) ->
+          f t' (fun (a', b', c') -> [ CU.Malloc (a, b, c); CU.Cuda_malloc (a', b', c'); ])))
   in
 
   let struct_decls = Map.mapi ~f:trans_struct_decl struct_decls |> Map.to_alist |> List.map ~f:snd in

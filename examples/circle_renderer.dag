@@ -17,11 +17,11 @@ struct square {
 };
 
 bool circleIntersectsSquare(circle c, square box) {
-    float closestX = max(min(c.x, box.right), box.left);
-    float closestY = max(min(c.y, box.top), box.bottom);
-    float distX = closestX - c.x;
-    float distY = closestY - c.y;
-    return distX * distX + distY * distY <= c.radius * c.radius;
+  float closestX = max(min(c.x, box.right), box.left);
+  float closestY = max(min(c.y, box.top), box.bottom);
+  float distX = closestX - c.x;
+  float distY = closestY - c.y;
+  return distX * distX + distY * distY <= c.radius * c.radius;
 }
 
 int nextPowerTwo(int n0) {
@@ -69,34 +69,33 @@ int[][][] scanCircles(square[][] squares, circle[] circles) {
   };
 }
 
-/*
 int getColor(int x, int offset) {
   return (x >> offset) & 0xFF;
 }
 
-int setColor(int x, int offset, int color){
-   int y = x & (~(0xFF << offset));
-   return y & (color << offset);
+int setColor(int x, int offset, int color) {
+  int y = x & ~(0xFF << offset);
+  return y & (color << offset);
 }
 
 int setRed(int x, int red) {
   return setColor(x, 24, red);
 }
 
-int setGreen(int x, int green){
+int setGreen(int x, int green) {
   return setColor(x, 16, green);
 }
 
-int setBlue(int x, int blue){
+int setBlue(int x, int blue) {
   return setColor(x, 8, blue);
 }
 
-int setAlpha(int x, int alpha){
+int setAlpha(int x, int alpha) {
   return setColor(x, 0, alpha);
 }
 
 // Blends a channel (offset) of two colors with two alpha values.
-int blendColor(float a1, float a2, int c1, int c2, int offset){
+int blendColor(float a1, float a2, int c1, int c2, int offset) {
   //@ requires offset in {0, 8, 16, 24};
   float blend = (a1 * float_of_int(getColor(c1, offset)) +
                  a2 * float_of_int(getColor(c2, offset)))
@@ -115,13 +114,13 @@ int addPixels(int pixelColor, int newColor) {
   return setRed(setGreen(setBlue(setAlpha(pixelColor, a), b), g), r);
 }
 
-bool pixelInCircle(circle c, float normX, float normY)
-{
+bool pixelInCircle(circle c, float normX, float normY) {
   float dx = (c.x - normX) * (c.x - normX);
   float dy = (c.y - normY) * (c.y - normY);
   return dx*dx + dy*dy <= c.radius * c.radius;
 }
 
+/*
 int[][][][] renderSquares(square[][] squares, int[][][] scanned, circle[] circles, int num_squares, int width, int height) {
   return for (sub_squares : squares) {
     return for (square : sub_squares) {
@@ -174,7 +173,7 @@ int[][] concatPixelSubarrays (int[][][][] pixels, int width, int height) {
 }
 
 // Main function.
-int[][] renderImage(int image_width, int image_height, circle[] circles){
+int[][] renderImage(int image_width, int image_height, circle[] circles) {
   int num_squares = numSquaresPerSide(dim0(circles));
   square[][] squares = partitionImage(image_width, image_height, dim0(circles));
   int[][][] scanned = scanCircles(squares, circles);

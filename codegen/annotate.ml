@@ -470,10 +470,38 @@ and annotate_seq_stmt
   in
 
   (* Copy over aliases as necessary. *)
-  let ctx = match stmt with
+  let (ctx, kernel_ctx) = match stmt with
     | Air.Assign (Ir.Dest t_dst, Air.Temp t_src) ->
-        { ctx with aliases = Map.add_exn ctx.aliases ~key:t_dst ~data:t_src }
-    | _ -> ctx
+        ({ ctx with aliases = Map.add_exn ctx.aliases ~key:t_dst ~data:t_src }, kernel_ctx)
+    | Air.Index (dest, Air.Temp t_src, op) when (match Temp.to_type t_src with | Tc.Array Tc.Array _ -> true | _ -> false) ->
+        let open A_air in
+        let bi = lookup_exn ctx t_src in
+        let bi' = {
+          dim = bi.dim - 1;
+          length = List.tl_exn bi.length;
+          filtered_lengths = List.tl_exn bi.filtered_lengths;
+          typ = Ir.type_of_dest dest;
+          index =
+            begin
+            let e = match op with
+              | Air.Temp t -> Expr.Temp t
+              | Air.Const i -> Expr.Const i
+              | Air.Float _ | Air.Bool _ | Air.Dim _ -> failwith "no"
+              | Air.IndexOp (t1, t2) -> Expr.Index (Expr.Temp t1, Expr.Temp t2)
+            in
+            match bi.index with
+            | Many_fn.Result expr -> Many_fn.Result (Expr.Index (expr, e))
+            | Many_fn.Fun f -> f e
+            end;
+        } in
+        begin
+          match dest with
+          | Ir.Return _ -> (ctx, { kernel_ctx with return_buffer_info = Some bi' })
+          | Ir.Dest t ->
+              ({ ctx with result =
+                { ctx.result with buffer_infos = Map.add_exn ctx.result.buffer_infos ~key:t ~data:bi' }}, kernel_ctx)
+        end
+    | _ -> (ctx, kernel_ctx)
   in
 
   (kernel_ctx, ctx)

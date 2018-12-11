@@ -415,7 +415,18 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
   match stmt with
   | Air.Binop (d, op, s1, s2) ->
       [ d <-- CU.Binop (trans_binop op, trans_op_exn ctx s1, trans_op_exn ctx s2) ]
-  | Air.Index (d, src, i) -> [ d <-- CU.Index (trans_op_exn ctx src, trans_op_exn ctx i) ]
+  | Air.Index (d, src, i) ->
+      begin
+        match src with
+        | Air.Temp t ->
+            let lengths = List.tl_exn (get_lengths ctx t) in
+            begin
+              match lengths with
+              | [] -> [ d <-- CU.Index (temp_to_var t, build_index_expr lengths (trans_op_exn ctx i)) ]
+              | _ -> [ d <-- CU.Address (CU.Index (temp_to_var t, build_index_expr lengths (trans_op_exn ctx i))) ]
+            end
+        | _ -> [ d <-- CU.Index (trans_op_exn ctx src, trans_op_exn ctx i) ]
+      end
   | Air.Access (d,src,f) ->
       [ d <-- CU.Field (trans_op_exn ctx src, f)]
   | Air.Unop (d, op, s) ->

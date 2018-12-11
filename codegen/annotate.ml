@@ -246,14 +246,18 @@ and annotate_par_stmt (ctx : context) (stmt : Air.par_stmt) : kernel_context * c
         acc |> Fn.flip Set.add t1
             |> Fn.flip Set.add t2) }
       in
-      (empty_kernel_ctx, { ctx with result = A_air.
+      let bi = match dest with
+        | Ir.Return t | Ir.Dest t ->
+            mk_buffer_info_out_of_temp t kernel_ctx buffer_infos
+      in
+      ({ empty_kernel_ctx with return_buffer_info = Some bi }, { ctx with result = A_air.
           { ctx.result with
               kernel_infos = Map.add_exn ctx.result.kernel_infos ~key:id ~data:(kernel_ctx_to_kernel_info kernel_ctx);
               buffer_infos = ctx.result.buffer_infos |>
                 (* only update buffer infos as necessary *)
                 (match dest with
                  | Ir.Return _ -> Fn.id
-                 | Ir.Dest t -> Map.add_exn ~key:t ~data:(mk_buffer_info_out_of_temp t kernel_ctx buffer_infos));
+                 | Ir.Dest t -> Map.add_exn ~key:t ~data:bi);
           };
       })
   | Air.Seq stmt -> annotate_seq_stmt ctx stmt

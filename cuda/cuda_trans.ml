@@ -24,7 +24,7 @@ type context = {
    * the previous step, give the current lvalue corresponding to the
    * place where that temp is to be saved.
    *)
-  lvalue_filter : (CU.cuda_expr * CU.cuda_expr) Temp.Map.t;
+  lvalue_filter : (CU.cuda_expr * CU.cuda_expr) Temp.Map.t * Temp.t option;
 
   out_param : Temp.t option;
 
@@ -110,7 +110,7 @@ let update_lvalue ctx dest bound_array_views =
   | None -> ctx.lvalue_filter
   | Some bi ->
 
-  let (_, result) = List.fold Ano.(bi.filtered_lengths) ~init:(Tc.Int, ctx.lvalue_filter)
+  let (_, result) = List.fold Ano.(bi.filtered_lengths) ~init:(Tc.Int, fst ctx.lvalue_filter)
     ~f:(fun (typ, acc) t_opt ->
       let typ' = Tc.Array typ in
       let acc' = match t_opt with
@@ -127,7 +127,11 @@ let update_lvalue ctx dest bound_array_views =
           in
           Map.set acc ~key:t ~data:(elem, ls')
       in (typ', acc'))
-  in result
+  in
+
+  let temp = List.nth_exn Ano.(bi.filtered_lengths) (List.length bound_array_views) in
+
+  (result, temp)
 
 let rec lengths ctx (_, av) = match av with
   | Air.Array t -> get_lengths ctx t
@@ -234,20 +238,28 @@ and get_lengths (ctx : context) (t : Temp.t) : CU.cuda_expr list =
   | Some v -> List.map ~f:trans_len_expr v
 
 and get_filter_lvalue (ctx : context) (t : Temp.t) : CU.cuda_expr =
-  match Map.find Ano.(ctx.result.buffer_infos) t with
-  | Some bi ->
-    begin
-      match Ano.(bi.filtered_lengths) with
-      | Some t :: _ ->
-        begin
-          match Map.find ctx.lvalue_filter t with
-          | Some (expr1, expr2) -> CU.Index (expr1, expr2)
-          | None -> temp_to_var t
-        end
-      | None :: _ -> failwith "I don't know how this is possible -- 1."
-      | [] -> failwith "I don't know how this is possible -- 2."
-    end
-  | None -> failwith "Can't currently return a filtered thing from the main function."
+  let t =
+    match Map.find Ano.(ctx.result.buffer_infos) t with
+    | Some bi ->
+      begin
+        match Ano.(bi.filtered_lengths) with
+        | Some t :: _ -> t
+        | None :: _ -> failwith "I don't know how this is possible -- 1."
+        | [] -> failwith "I don't know how this is possible -- 2."
+      end
+    | None ->
+
+    match snd ctx.lvalue_filter with
+    | None -> failwith "Don't currently support returning filtered thing from main."
+    | Some t -> t
+  in
+
+  begin
+    match Map.find (fst ctx.lvalue_filter) t with
+    | Some (expr1, expr2) -> CU.Index (expr1, expr2)
+    | None -> temp_to_var t
+  end
+
 
 and trans_index_expr
   (ctx : context)
@@ -526,7 +538,6 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         | None -> failwith "Failed to find kernel info. (trans_stmt_par)"
       in
 
-
       List.iter bound_array_views ~f:(fun (_, _, av) ->
         fix
           (fun loop (_, av) -> match av with
@@ -598,9 +609,9 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
 
       let device_dest_temp =
         let new_temp = Temp.next (Ir.type_of_dest dest) () in
-        Temp.Table.add ctx.allocation_method ~key:(match dest with
-          | Ir.Return _ -> Option.value_exn ctx.out_param
-          | Ir.Dest t -> t) ~data:(`Host_and_device new_temp) |> dedup __LINE__;
+        Option.iter (match dest with Ir.Return _ -> None | Ir.Dest t -> Some t)
+          ~f:(fun key -> Temp.Table.add ctx.allocation_method ~key
+             ~data:(`Host_and_device new_temp) |> dedup __LINE__);
         new_temp
       in
 
@@ -633,12 +644,13 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       (* We can re-use argument names as parameter names since all the arguments
        * are unique temps (and therefore will have unique parameter names).
        *)
-      let output_buffer_param = Ir.temp_of_dest dest in
+      let output_buffer_param = dest_to_expr_lvalue ctx dest in
+      let new_temp = Temp.next (Ir.type_of_dest dest) () in
       let (kernel_params, kernel_args) =
         (* List of tuples of types, params, and args *)
         let tpas = List.concat [
           (* Don't forget to include as a parameter the dest. *)
-          List.return ((trans_type (Ir.type_of_dest dest), temp_name output_buffer_param), temp_to_var device_dest_temp);
+          List.return ((trans_type (Ir.type_of_dest dest), temp_name new_temp), trans_expr ctx output_buffer_param);
           List.map2_exn args args_with_host_args ~f:(fun t t' -> ((trans_type (Temp.to_type t), temp_name t'), temp_to_var t));
         ]
         in List.unzip tpas
@@ -684,7 +696,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
             let acc_temp = Temp.next Tc.Int () in
             let acc = temp_to_var acc_temp in
             let lvalue = List.fold_left (start_indices @ indices)
-              ~init:(Expr.Temp output_buffer_param) ~f:(fun acc i -> Expr.Index (acc, Expr.Temp i)) in
+              ~init:output_buffer_param ~f:(fun acc i -> Expr.Index (acc, Expr.Temp i)) in
             List.concat [
               [ CU.DeclareAssign (CU.Integer, temp_name i_temp, index_expr);
                 CU.DeclareAssign (CU.Integer, temp_name acc_temp, i);
@@ -788,7 +800,7 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t) (resul
   let body = trans_par_stmt {
     result;
     allocation_method;
-    lvalue_filter = Temp.Map.empty;
+    lvalue_filter = (Temp.Map.empty, None); (*TODO*)
     lvalue = Option.map ~f:(fun t -> Expr.Temp t) lvalue;
     lvalue_lengths =
       begin

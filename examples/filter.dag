@@ -1,6 +1,8 @@
-int f(int[][] xss, int[] bs) {
-  int[][] zss = parallel (int[] xs <- xss) {
-      return xs;
+int f(int[][][] xsss, bool[] bs) {
+  int[][][] ysss = parallel (int[][] xss <- xsss) {
+    return parallel (int[] xs <- xss) {
+      return filterWith(xs, bs);
+    };
   };
-  return dim0(zss);
+  return dim0(ysss);
 }

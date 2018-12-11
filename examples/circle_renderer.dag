@@ -177,24 +177,17 @@ int[][][][] renderSquares(square[][] squares, int[][][] scanned, circle[] circle
       int[] xPixels = tabulate(width * square.left, width * square.right,1);
       int[] yPixels = tabulate(height * square.top, height * square.bottom,1);
 
-      return parallel (y <- yPixels) {
-        return parallel (x <- xPixels) {
-          float normX = float_of_int(x) / fWidth;
-          float normY = float_of_int(y) / fHeight;
+      return parallel (int y <- tabulate(0,dim0(yPixels),1)) {
+        return parallel (int x <- tabulate(0,dim0(xPixels),1)) {
+          float normX = float_of_int(xPixels[x]) / fWidth;
+          float normY = float_of_int(yPixels[y]) / fHeight;
 
-          // We need some sort of indexing primitive provided by the parallel block if
-          // these are going to be processed in parallel. The ZipWith is limited by the
-          // fact that the function cannot be processed inline:
-          // Proposition: Parallel_Zip (x <- xs; y <- ys) (xs,ys must have = length.)
-          // Alternative: keyword: index0, index1, .. etc
-          //              (index of the outermost level of nesting, second, etc.)
-
-          int[] ids = scanned[index0][index1];
-          bool[] ix = parallel (id <- ids) {
-            return pixelInCircle(c,normX,normY);
+          int[] ids = scanned[x][y];
+          bool[] ix = parallel (int id <- ids) {
+            return pixelInCircle(circles[id],normX,normY);
           }
 
-          int[] colors = parallel (id <- ids) {
+          int[] colors = parallel (int id <- ids) {
             return circles[id].color;
           }
 
@@ -215,8 +208,8 @@ int[][] concatPixelSubarrays (int[][][][] pixels, int width, int height) {
 
   int[] xs = tabulate(0,width,1);
   int[] ys = tabulate(0,height,1);
-  return parallel (y <- ys){
-    return parallel (x <- xs){
+  return parallel (int y <- ys){
+    return parallel (int x <- xs){
       int i = y / squareHeight;
       int j = x / squareWidth;
       int k = y % squareHeight;

@@ -232,7 +232,6 @@ and get_lengths (ctx : context) (t : Temp.t) : CU.cuda_expr list =
   match ctx.lvalue_lengths with
   | None -> failwithf "`%d`" (Temp.to_int t) ()
   | Some v -> List.map ~f:trans_len_expr v
-      (* failwithf "Couldn't find buffer size for `%d`" (Temp.to_int t) () *)
 
 and get_filter_lvalue (ctx : context) (t : Temp.t) : CU.cuda_expr =
   match Map.find Ano.(ctx.result.buffer_infos) t with

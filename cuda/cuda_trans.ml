@@ -110,7 +110,12 @@ let trans_params (params : Ano.Param.t list) : (CU.cuda_type * CU.cuda_ident) li
      | Ano.Param.Not_array t -> List.return (trans_type (Temp.to_type t), temp_name t))
 
 let update_lvalue ctx dest bound_array_views =
-  match Map.find Ano.(ctx.result.buffer_infos) (Ir.temp_of_dest dest) with
+  let bi = match Map.find Ano.(ctx.result.buffer_infos) (Ir.temp_of_dest dest) with
+    | None -> Map.find Ano.(ctx.result.returned_buffer_infos) (Ir.temp_of_dest dest)
+    | Some bi -> Some bi
+  in
+
+  match bi with
   | None -> ctx.lvalue_filter
   | Some bi ->
 
@@ -127,7 +132,8 @@ let update_lvalue ctx dest bound_array_views =
             | Some expr -> expr
           in
           let ls' =
-            List.fold_left bound_array_views ~init:ls ~f:(fun ls (_, t_idx, _) -> CU.Binop (CU.ADD, temp_to_var t_idx, ls))
+            List.fold_left bound_array_views ~init:ls ~f:(fun ls (_, t_idx, _) ->
+              CU.Binop (CU.ADD, temp_to_var t_idx, ls))
           in
           Map.set acc ~key:t ~data:(elem, ls')
       in (typ', acc'))
@@ -838,7 +844,8 @@ let trans_struct_decl ~(key : Tc.ident) ~(data : Tc.struct_type) : CU.cuda_gstmt
  * These kernel launches actually include the kernel DEFINITION.
  * It's up to a later phase to float all these kernel definitions to the top level.
  *)
-let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t) (result : Ano.result) : CU.cuda_gstmt list =
+let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t)
+  (result : Ano.result) : CU.cuda_gstmt list =
   let params = trans_params Ano.(result.params) in
   let lvalue = Ano.(result.out_param) in
   let allocation_method = Temp.Table.create () in

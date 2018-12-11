@@ -253,6 +253,10 @@ and annotate_par_stmt (ctx : context) (stmt : Air.par_stmt) : kernel_context * c
       ({ empty_kernel_ctx with return_buffer_info = Some bi }, { ctx with result = A_air.
           { ctx.result with
               kernel_infos = Map.add_exn ctx.result.kernel_infos ~key:id ~data:(kernel_ctx_to_kernel_info kernel_ctx);
+              returned_buffer_infos = ctx.result.returned_buffer_infos |>
+               (match dest with
+                | Ir.Return t -> Map.add_exn ~key:t ~data:bi
+                | _ -> Fn.id);
               buffer_infos = ctx.result.buffer_infos |>
                 (* only update buffer infos as necessary *)
                 (match dest with
@@ -293,8 +297,8 @@ and annotate_stmt
       ({ kernel_ctx with used; return_buffer_info = Some buffer_info },
        { ctx with result = A_air.
            { ctx.result with
-               buffer_infos =
-                 Map.add_exn ctx.result.buffer_infos ~key:t ~data:buffer_info;
+               returned_buffer_infos =
+                 Map.add_exn ctx.result.returned_buffer_infos ~key:t ~data:buffer_info;
            }
        })
   | Air.Run (Ir.Dest t, av) ->
@@ -341,6 +345,11 @@ and annotate_stmt
        },
        { ctx with result = A_air.
            { ctx.result with
+               returned_buffer_infos =
+                 ctx.result.returned_buffer_infos |>
+                   (match dest with
+                    | Ir.Return t -> Map.add_exn ~key:t ~data:my_buffer_info
+                    | _ -> Fn.id);
                buffer_infos =
                  Map.add_exn ctx.result.buffer_infos ~key:t1 ~data:buffer_info1
                    |> Map.add_exn ~key:t2 ~data:buffer_info2
@@ -496,7 +505,7 @@ and annotate_seq_stmt
         } in
         begin
           match dest with
-          | Ir.Return _ -> (ctx, { kernel_ctx with return_buffer_info = Some bi' })
+          | Ir.Return t -> ({ ctx with result = {ctx.result with returned_buffer_infos = Map.add_exn ctx.result.returned_buffer_infos ~key:t ~data:bi' }}, { kernel_ctx with return_buffer_info = Some bi' })
           | Ir.Dest t ->
               ({ ctx with result =
                 { ctx.result with buffer_infos = Map.add_exn ctx.result.buffer_infos ~key:t ~data:bi' }}, kernel_ctx)
@@ -537,12 +546,14 @@ let annotate (air : Air.t) : A_air.result =
           buffer_infos = Map.add_exn buffer_infos ~key:t ~data:bi;
           kernel_infos = Id.Map.empty;
           out_param = Some t;
+          returned_buffer_infos = Temp.Map.empty;
           backing_temps = Temp.Map.empty;
         }
 
       (* No need to have a separate parameter at all if the function returns directly. *)
       | _ -> A_air.{
         params;
+        returned_buffer_infos = Temp.Map.empty;
         backing_temps = Temp.Map.empty;
         buffer_infos;
         kernel_infos = Id.Map.empty;
@@ -550,5 +561,5 @@ let annotate (air : Air.t) : A_air.result =
       }
     in
     let ctx = { result; aliases = Temp.Map.empty; } in
-    let ctx' = annotate_par_stmt ctx Air.(air.body) in
-    (snd ctx').result
+    let (_, ctx') = annotate_par_stmt ctx Air.(air.body) in
+    ctx'.result

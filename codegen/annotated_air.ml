@@ -82,6 +82,8 @@ type result = {
   (* TODO: May need to eventually know whether a buffer is inside a kernel launch? *)
   buffer_infos : buffer_info Temp.Map.t;
 
+  returned_buffer_infos : buffer_info Temp.Map.t;
+
   (* You can determine current lvalue during translation. *)
 
   (* e.g. x <- parallel(y <- ys) { ... } with id I; the key of this map is I.

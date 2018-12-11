@@ -53,7 +53,7 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
           Ir_to_air.all ir temp_dag ~n:(Some 4)
         in
         note "ir_to_air";
-        let cudas = List.mapi airs ~f:(fun i air ->
+        let cudas = List.filter_mapi airs ~f:(fun i air ->
           say (fun () -> [
             Printf.sprintf "AIR #%d" i;
             Air.Pretty_print.pp_t air;
@@ -66,7 +66,11 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
           let cuda = Cuda_trans.trans air Tc.(ctx.struct_ctx) ann in
           say (fun () -> [
             Printf.sprintf "Cuda:";
-            Cuda_ir.fmt_gstmts cuda;
+            begin
+              match cuda with
+              | None -> "None"
+              | Some cuda -> Cuda_ir.fmt_gstmts cuda
+            end;
           ]);
           cuda
         ) in

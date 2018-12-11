@@ -276,18 +276,18 @@ and empty_kernel_ctx : kernel_context =
 
 and annotate_par_stmt_stmt (ctx : context) (par : Air.par_stmt Air.stmt) : kernel_context * context =
    annotate_stmt empty_kernel_ctx ctx
-      (fun ?(kernel_ctx = empty_kernel_ctx) ctx x -> annotate_par_stmt ctx x)
+      (fun ~kernel_ctx ctx x -> annotate_par_stmt ctx x)
       par
 
 and annotate_seq_stmt_stmt (kernel_ctx : kernel_context) (ctx : context) (seq : Air.seq_stmt Air.stmt)
   : kernel_context * context =
-    annotate_stmt kernel_ctx ctx annotate_seq_stmt seq
+    annotate_stmt kernel_ctx ctx (fun ~kernel_ctx ctx -> annotate_seq_stmt ctx) seq
 
 and annotate_stmt
   : type a.
       kernel_context
         -> context
-        -> (?kernel_ctx : kernel_context -> context -> a -> kernel_context * context)
+        -> (kernel_ctx : kernel_context -> context -> a -> kernel_context * context)
         -> a Air.stmt
         -> kernel_context * context = fun kernel_ctx ctx recur stmt ->
   match stmt with
@@ -427,7 +427,10 @@ and annotate_stmt
         in mk_buffer_info_out_of_temp t kernel_ctx' [buffer_info]
       in
       let ctx' = match dest with
-        | Ir.Return _ -> ctx
+        | Ir.Return t ->
+            { ctx with result = A_air.
+                { ctx.result with returned_buffer_infos =
+                    Map.add_exn ctx.result.returned_buffer_infos ~key:t ~data:bi }}
         | Ir.Dest t ->
             { ctx with result = A_air.
                 { ctx.result with buffer_infos =
@@ -437,7 +440,7 @@ and annotate_stmt
          used = Set.union (Set.union kernel_ctx.used kernel_ctx'.used) (used_of_array_view ctx av);
          additional_buffers = Set.union kernel_ctx.additional_buffers kernel_ctx'.additional_buffers;
          return_buffer_info = (match dest with
-           | Ir.Return _ -> Some bi;
+           | Ir.Return _ -> Some bi
            | _ -> None);
        }, ctx')
 

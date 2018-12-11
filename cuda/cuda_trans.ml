@@ -36,8 +36,7 @@ type context = {
   (* Map from temps to kind of allocation necessary *)
   (* If it's not in here, it's just on the host. *)
   allocation_method :
-    [ `Just_device (* additional_buffers *)
-    | `Host_and_device of Temp.t (* temp is the device temp *)
+    [ `Host_and_device of Temp.t (* temp is the device temp *)
     | `Host_and_device_no_malloc_on_host of Temp.t (* temp is the device temp *)
     | `Unallocated
     ] Temp.Table.t;
@@ -705,7 +704,6 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       let device_args =
         List.map host_args ~f:(fun host_t ->
           match Temp.Table.find ctx.allocation_method host_t with
-          | Some `Just_device  -> failwithf "I don't think this is possible (jd) `%d`" (Temp.to_int host_t) ()
           | Some (`Host_and_device t) -> t
           | Some (`Host_and_device_no_malloc_on_host t) -> t
           | Some `Unallocated ->
@@ -754,24 +752,19 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
               ~data:lengths;
             Expr.Temp new_temp
       in
-      (* Mark additional buffers as just-device. *)
-      let additional_buffers = Set.to_list Ano.(kernel_info.additional_buffers) in
-      List.iter additional_buffers ~f:(fun key ->
-        Temp.Table.add ctx.allocation_method ~key ~data:`Just_device |> dedup __LINE__);
 
       (* In addition to the array view args, also get the args for the
-       * additional buffers and free variables to pass to the kernel launch.
+       * free variables to pass to the kernel launch.
        *)
       let args = List.concat [
         device_args;
-        additional_buffers;
 
         (* We also need to pass in the dimensions of the original parameters! :) *)
         ctx.dims_of_params;
       ] in
 
       (* we need this for naming parameters *)
-      let args_with_host_args = List.concat [ host_args; additional_buffers; ctx.dims_of_params; ] in
+      let args_with_host_args = List.concat [ host_args; ctx.dims_of_params; ] in
 
       (* Process:
        - Allocate what needs to be allocated of them on the device.
@@ -923,7 +916,13 @@ let trans_struct_decl ~(key : Tc.ident) ~(data : Tc.struct_type) : CU.cuda_gstmt
  * It's up to a later phase to float all these kernel definitions to the top level.
  *)
 let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t)
-  (result : Ano.result) : CU.cuda_gstmt list =
+  (result : Ano.result) : CU.cuda_gstmt list option =
+  if not
+    begin
+      Map.for_all
+        ~f:(fun ki -> Set.is_empty Ano.(ki.additional_buffers))
+        Ano.(result.kernel_infos)
+    end then None else
   let extra_lengths = Temp.Table.create () in
   let (params, ret_ty, init_map) = trans_params extra_lengths result in
   let init_filter_map = Map.map init_map ~f:(fun x -> Expr.Temp x) in
@@ -989,7 +988,6 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t)
                        | _ -> false) -> []
       | Some `Unallocated -> []
       | None -> f t (fun (a, b, c) -> [ CU.Malloc (a, b, c) ])
-      | Some `Just_device -> f t (fun (a, b, c) -> [ CU.Cuda_malloc (a, b, c) ])
       | Some `Host_and_device_no_malloc_on_host t' -> f t' (fun (a, b, c) -> [ CU.Cuda_malloc (a, b, c) ])
       | Some `Host_and_device t' when
           List.exists Ano.(result.params)
@@ -1014,4 +1012,4 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t)
             name = "dag_" ^ Air.(program.fn_name);
             params;
             body = hd @ malloc'ing @ body @ tl; });
-  ]
+  ] |> Option.some

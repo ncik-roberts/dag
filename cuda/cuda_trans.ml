@@ -584,12 +584,28 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         | Air.Array_index (t1, t2) -> Temp.Set.of_list [t1; t2;]
       in
 
+      (* Ok, so we must split the index_expr into the corresponding indices for each of the
+       * bound_temps. *)
+      let indices = List.map bound_array_views ~f:Tuple3.get2 in
+      let (start, start_indices) =
+        match dest with
+        | Ir.Dest t -> (t, [])
+        | Ir.Return _ ->
+            Option.value_map ctx.lvalue
+              ~default:(Temp.next Tc.Int (), [])
+              ~f:(fix (fun loop -> function
+                    | Expr.Index (e, Expr.Temp t) -> let (w, es) = loop e in (w, t :: es)
+                    | Expr.Temp t -> (t, [])
+                    | _ -> failwith ":("))
+      in
+
       let don't_ask = Temp.Hash_set.create () in
       let array_view_host_args =
         let x = List.folding_map bound_array_views
           ~init:Temp.Set.empty
           ~f:(fun ctx (t1, t2, av) -> (Set.add (Set.add ctx t1) t2, Set.diff (temps_in_array_view av) ctx))
           |> Temp.Set.union_list
+          |> Temp.Set.union (Temp.Set.of_list start_indices)
         in
         let y =
           Hash_set.fold ctx.backed_temps ~init:x ~f:(fun acc elem ->
@@ -627,22 +643,6 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
               new_temp
           | Tc.Int | Tc.Float (*TODO: which others?*) -> host_t
           | _ -> failwith "not yet")
-      in
-
-
-      (* Ok, so we must split the index_expr into the corresponding indices for each of the
-       * bound_temps. *)
-      let indices = List.map bound_array_views ~f:Tuple3.get2 in
-      let (start, start_indices) =
-        match dest with
-        | Ir.Dest t -> (t, [])
-        | Ir.Return _ ->
-            Option.value_map ctx.lvalue
-              ~default:(Temp.next Tc.Int (), [])
-              ~f:(fix (fun loop -> function
-                    | Expr.Index (e, Expr.Temp t) -> let (w, es) = loop e in (w, t :: es)
-                    | Expr.Temp t -> (t, [])
-                    | _ -> failwith ":("))
       in
 
       let lengths =

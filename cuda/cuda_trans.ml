@@ -24,7 +24,7 @@ type context = {
    * the previous step, give the current lvalue corresponding to the
    * place where that temp is to be saved.
    *)
-  lvalue_filter : (CU.cuda_expr * CU.cuda_expr) Temp.Map.t * Temp.t option;
+  lvalue_filter : Expr.t Temp.Map.t * Temp.t option;
 
   out_param : Temp.t option;
 
@@ -95,7 +95,7 @@ and remove_arrays =
  * added to the parameter list in the context, so it too is translated by the
  * concat_map.
  *)
-let trans_params (ctx : Ano.result) :
+let trans_params (extra_lengths : CU.cuda_expr list Temp.Table.t) (ctx : Ano.result) :
   (CU.cuda_type * CU.cuda_ident) list
     * CU.cuda_type (* return type *)
     * Temp.t Temp.Map.t (* placeholder temps -> real temp *)
@@ -121,8 +121,11 @@ let trans_params (ctx : Ano.result) :
                  | Tc.Int -> return_type := CU.Integer;
                              None
                  | typ ->
+                     let lens = List.take dims i in
                      let temp = Temp.next typ () in
                      Temp.Table.add_exn hashtbl ~key:t ~data:temp;
+                     Temp.Table.add_exn extra_lengths ~key:temp
+                       ~data:(List.map ~f:temp_to_var lens);
                      Some (trans_type typ, temp_name temp)
               end)
          in
@@ -141,8 +144,6 @@ let update_lvalue ctx dest bound_array_views =
     | None -> Map.find Ano.(ctx.result.returned_buffer_infos) (Ir.temp_of_dest dest)
     | Some bi -> Some bi
   in
-  Printf.printf "%s: %s\n" (Ir.sexp_of_dest dest |> Sexp.to_string_hum)
-    (Option.sexp_of_t Ano.sexp_of_buffer_info bi |> Sexp.to_string_hum);
 
   match bi with
   | None -> ctx.lvalue_filter
@@ -154,17 +155,17 @@ let update_lvalue ctx dest bound_array_views =
       let acc' = match t_opt with
         | None -> acc
         | Some t ->
-          let (elem, ls) = match Map.find acc t with
+          let elem = match Map.find acc t with
             | None ->
                 let t = Temp.next typ () in
-                (temp_to_var t, CU.IConst 0L)
+                Expr.Temp t
             | Some expr -> expr
           in
-          let ls' =
-            List.fold_left bound_array_views ~init:ls ~f:(fun ls (_, t_idx, _) ->
-              CU.Binop (CU.ADD, temp_to_var t_idx, ls))
+          let elem' =
+            List.fold_left bound_array_views ~init:elem ~f:(fun e (_, t_idx, _) ->
+              Expr.Index (e, Expr.Temp t_idx))
           in
-          Map.set acc ~key:t ~data:(elem, ls')
+          Map.set acc ~key:t ~data:elem'
       in (typ', acc'))
   in
 
@@ -300,6 +301,16 @@ and get_filter_lvalue (ctx : context) (t : Temp.t) : CU.cuda_expr =
       end
     | None ->
 
+    match Map.find Ano.(ctx.result.returned_buffer_infos) t with
+    | Some bi ->
+      begin
+        match Ano.(bi.filtered_lengths) with
+        | Some t :: _ -> t
+        | None :: _ -> failwith "I don't know how this is possible -- 1."
+        | [] -> failwith "I don't know how this is possible -- 2."
+      end
+    | None ->
+
     match snd ctx.lvalue_filter with
     | None -> failwith "Don't currently support returning filtered thing from main."
     | Some t -> t
@@ -307,10 +318,9 @@ and get_filter_lvalue (ctx : context) (t : Temp.t) : CU.cuda_expr =
 
   begin
     match Map.find (fst ctx.lvalue_filter) t with
-    | Some (expr1, expr2) -> CU.Index (expr1, expr2)
+    | Some expr -> trans_expr ctx expr
     | None -> temp_to_var t
   end
-
 
 and trans_index_expr
   (ctx : context)
@@ -914,8 +924,9 @@ let trans_struct_decl ~(key : Tc.ident) ~(data : Tc.struct_type) : CU.cuda_gstmt
  *)
 let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t)
   (result : Ano.result) : CU.cuda_gstmt list =
-  let (params, ret_ty, init_map) = trans_params result in
-  let init_filter_map = Map.map init_map ~f:(fun x -> (temp_to_var x, CU.IConst 0L)) in
+  let extra_lengths = Temp.Table.create () in
+  let (params, ret_ty, init_map) = trans_params extra_lengths result in
+  let init_filter_map = Map.map init_map ~f:(fun x -> Expr.Temp x) in
   let (init_lvalue_filter, hd, tl) = match ret_ty with
     | CU.Integer ->
         let t = Temp.next Tc.Int () in
@@ -934,7 +945,7 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t)
     lvalue_filter = (init_filter_map, init_lvalue_filter);
     lvalue = Option.map ~f:(fun t -> Expr.Temp t) lvalue;
     bear_with_me;
-    extra_lengths = Temp.Table.create ();
+    extra_lengths;
     lvalue_lengths =
       begin
         let open Option.Monad_infix in

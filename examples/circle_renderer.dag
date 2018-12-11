@@ -1,9 +1,6 @@
 // Assignment 2 (CUDA Circle Renderer Implementation) in DAG.
 // Nick Roberts and Dan Cascaval, 2018
 
-// Needs to interoperate with a C++ struct to make sense of the input data.
-// Alternatively, we have a function that generates one of these from
-// five arrays (float[] xs, float[] ys, float[] zs, float[] rs, int[] color)
 struct circle {
   float x;
   float y;
@@ -12,8 +9,6 @@ struct circle {
   int color;
 };
 
-// Represents one "square" unit that we used to cache circles in our CUDA translation.
-// Used for intersection testing and for resolving which circles must be rendered.
 struct square {
   float top;
   float bottom;
@@ -21,25 +16,14 @@ struct square {
   float right;
 };
 
-// Language features we need to get this implementation to work:
-//   Additional primitives: filter_with, scan
-//   Nice To Have: if then else (expressions, not statements.) -- thoughts from Nick?
-
-// Current this is ported in from the assignment 2 starter code.
-// It makes use of ternary expressions. We could implement (if then else) syntax.
 bool circleIntersectsSquare(circle c, square box) {
-    // Clamp circle center to box (finds the closest point on the box)
     float closestX = max(min(c.x, box.right), box.left);
     float closestY = max(min(c.y, box.top), box.bottom);
-
-    // Is circle radius less than the distance to the closest point on the box?
     float distX = closestX - c.x;
     float distY = closestY - c.y;
-
     return distX * distX + distY * distY <= c.radius * c.radius;
 }
 
-// Stolen from assignment 2 starter code.
 int nextPowerTwo(int n0) {
   int n1 = n0 - 1;
   int n2 = n1 | (n1 >> 1);
@@ -52,34 +36,17 @@ int nextPowerTwo(int n0) {
 
 
 int numSquaresPerSide(int num_circles) {
-  // We also assume (as we did in assignment 2) that the image is sized as a power
-  // of two, and thus dividing the side dimension by the number of squares is sound.
-  // We assume the existence of "log2". (We built it in to our language.)
   return nextPowerTwo(log2(num_circles));
-  // Or some other function. Of our choosing.
 }
 
-// Partition image into squares, with the circleID portion unallocated.
-// Note that this isn't super memory-efficient if we aren't reusing the circle structs.
-// They aren't modifiable other than intialising fields.
 square[][] partitionImage(int width, int height, int num_squares, int num_circles) {
-  // We want to perform this sequentially, as in almost all cases the parallel overhead
-  // will be far too high. We encode number of divisions as a byproduct of the length
-  // of the square 2D array, pending us having multiple return types.
-
-  // Assuming a definition of (exclusive) range something along the lines of:
-  // range (start,stop,?stride) -> [start,start+stride,...,stop-stride]
-  // Note: this requires some casting from int -> float at some point.
   int[] xs = range(0, width / num_squares, 1);
   int[] ys = range(0, height / num_squares, 1);
 
-  // We use the parallel block to define a map.
   float fnum = float_of_int(num_squares);
 
-  // We nest parallel maps to "graft" an array implicitly
   return for (int h : ys) {
     return for (int w : xs) {
-      // New struct initialization syntax in action. All fields must be filled.
       return struct square {
 	left = float_of_int(w) * fnum;
         right = float_of_int(w + 1) * fnum;
@@ -90,76 +57,64 @@ square[][] partitionImage(int width, int height, int num_squares, int num_circle
   };
 }
 
-// We parallelise over everything, because we can. GPUs, baby.
-// This function contains a lot of options on how the operation can be performed
-// based off of the existing language primitives and a range of memory efficiency.
 int[][][] scanCircles(square[][] squares, circle[] circles) {
   return for (square[] sub_squares : squares) {
     return for (square square : sub_squares) {
-
-      // Option 1: perform testing and filter in two passes, making the most
-      // use of our current primitives and requiring minimal modifications.
       bool[] intersections = for (circle c : circles) {
-        return circleIntersectsSquare(c,square);
+        return circleIntersectsSquare(c, square);
       };
-
-      // We explicitly allocate an array. Enumerate is the list of indices.
       int[] unfiltered_IDs = range(0, dim0(circles), 1);
-
-      // ('a [] * bool [] -> 'a []) "Maps" a filter out of an array of boolans.
       return filter_with(unfiltered_IDs, intersections);
     };
   };
 }
 
 /*
-
-// RGBA colors represented as ints, you know, implicitly.
-int getColor(int x,int offset){
+int getColor(int x, int offset) {
   return (x >> offset) & 0xFF;
 }
-// Gotta be able to set them, too.
-int setColor(int x,int offset,int color){
+
+int setColor(int x, int offset, int color){
    int y = x & (~(0xFF << offset));
    return y & (color << offset);
 }
-// Convenience wrappers. 
-int setRed(int x,int red){
-  return setColor(x,24,red);
+
+int setRed(int x, int red) {
+  return setColor(x, 24, red);
 }
-int setGreen(int x,int green){
-  return setColor(x,16,green);
+
+int setGreen(int x, int green){
+  return setColor(x, 16, green);
 }
-int setBlue(int x,int blue){
-  return setColor(x,8,blue);
+
+int setBlue(int x, int blue){
+  return setColor(x, 8, blue);
 }
-int setAlpha(int x,int alpha){
-  return setColor(x,0,alpha);
+
+int setAlpha(int x, int alpha){
+  return setColor(x, 0, alpha);
 }
 
 // Blends a channel (offset) of two colors with two alpha values.
-int blendColor(float a1,float a2,int c1,int c2,int offset){
-  //@ requires offset in {0,8,16,24};
-  float blend = (a1 * float_of_int(getColor(c1,offset)) +
-                 a2 * float_of_int(getColor(c2,offset)))
+int blendColor(float a1, float a2, int c1, int c2, int offset){
+  //@ requires offset in {0, 8, 16, 24};
+  float blend = (a1 * float_of_int(getColor(c1, offset)) +
+                 a2 * float_of_int(getColor(c2, offset)))
   return int_of_float(blend) & 0xFF;
 }
 
-// Merges two pixels.
 int addPixels(int pixelColor, int newColor) {
-  float alpha = 0.5; // Constants from assignment 2. Modify?
+  float alpha = 0.5;
   float oneMinusAlpha = 1.0 - alpha;
 
-  int r = blendColor(alpha,oneMinusAlpha,pixelColor,newColor,24);
-  int g = blendColor(alpha,oneMinusAlpha,pixelColor,newColor,16);
-  int b = blendColor(alpha,oneMinusAlpha,pixelColor,newColor,8);
+  int r = blendColor(alpha, oneMinusAlpha, pixelColor, newColor, 24);
+  int g = blendColor(alpha, oneMinusAlpha, pixelColor, newColor, 16);
+  int b = blendColor(alpha, oneMinusAlpha, pixelColor, newColor, 8);
   int a = int_of_float(alpha*255.0) + (pixelColor & 0xFF);
 
-  //Chain it up.
-  return setRed(setGreen(setBlue(setAlpha(pixelColor,a),b),g),r);
+  return setRed(setGreen(setBlue(setAlpha(pixelColor, a), b), g), r);
 }
 
-// Distance check. An example of why we need float comparisons and binops.
 bool pixelInCircle(circle c, float normX, float normY)
 {
   float dx = (c.x - normX) * (c.x - normX);
@@ -167,15 +122,14 @@ bool pixelInCircle(circle c, float normX, float normY)
   return dx*dx + dy*dy <= c.radius * c.radius;
 }
 
-// Is the nesting a little ridiculous? Yes. Yes it is. Fully 4D parallelism.
 int[][][][] renderSquares(square[][] squares, int[][][] scanned, circle[] circles, int num_squares, int width, int height) {
   return for (sub_squares : squares) {
     return for (square : sub_squares) {
 
       float fWidth = float_of_int(width);
       float fHeight = float_of_int(height);
-      int[] xPixels = range(width * square.left, width * square.right,1);
-      int[] yPixels = range(height * square.top, height * square.bottom,1);
+      int[] xPixels = range(width * square.left, width * square.right, 1);
+      int[] yPixels = range(height * square.top, height * square.bottom, 1);
 
       return for (int y : range(0, dim0(yPixels), 1)) {
         return for (int x : range(0, dim0(xPixels), 1)) {
@@ -184,17 +138,17 @@ int[][][][] renderSquares(square[][] squares, int[][][] scanned, circle[] circle
 
           int[] ids = scanned[x][y];
           bool[] ix = for (int id : ids) {
-            return pixelInCircle(circles[id],normX,normY);
+            return pixelInCircle(circles[id], normX, normY);
           }
 
           int[] colors = for (int id : ids) {
             return circles[id].color;
           }
 
-          int[] ix_colors = filter_with(colors,ix);
+          int[] ix_colors = filter_with(colors, ix);
 
           // Black background comes from here. Would make it 0xFFFFFFFF for white.
-          return reduce(addPixels,0,ix_colors);
+          return reduce(addPixels, 0, ix_colors);
         };
       };
     };
@@ -219,12 +173,12 @@ int[][] concatPixelSubarrays (int[][][][] pixels, int width, int height) {
   };
 }
 
-// Wrap it all together and export it to C++!
 // Main function.
 int[][] renderImage(int image_width, int image_height, circle[] circles){
   int num_squares = numSquaresPerSide(dim0(circles));
-  square[][] squares = partitionImage(image_width,image_height,dim0(circles));
-  int[][][] scanned = scanCircles(squares,circles);
-  int[][][][] pixels = renderSquares(squares,scanned,circles,num_squares,image_width,image_height);
-  return concatPixelSubarrays(pixels,image_width,image_height);
-}*/
+  square[][] squares = partitionImage(image_width, image_height, dim0(circles));
+  int[][][] scanned = scanCircles(squares, circles);
+  int[][][][] pixels = renderSquares(squares, scanned, circles, num_squares, image_width, image_height);
+  return concatPixelSubarrays(pixels, image_width, image_height);
+}
+*/

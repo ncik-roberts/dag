@@ -55,7 +55,7 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
           ]);*)
           Ir_to_air.all ir temp_dag ~n:(Some 4)
         in
-        let fn_ptr_airs = List.map2 fn_ptrs fn_ptr_traversals ~f:(fun inline t ->
+        let fn_ptr_airs = List.map2_exn fn_ptrs fn_ptr_traversals ~f:(fun inline t ->
           let (ir, temp_dag) = Dag_to_ir.run inline t in
           Ir_to_air.any ir temp_dag)
         in

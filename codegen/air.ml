@@ -135,7 +135,7 @@ end = struct
 
   let pp_dest = function
     | Ir.Dest t -> sprintf "%%%d" (Temp.to_int t)
-    | Ir.Return _ -> "ret"
+    | Ir.Return t -> sprintf "ret[%d]" (Temp.to_int t)
 
   let rec pp_par_stmt ?(indent="") = function
     | Parallel (dst, id, tavs, seq_stmt) ->

@@ -106,31 +106,28 @@ let trans_params (params : Ano.Param.t list) : (CU.cuda_type * CU.cuda_ident) li
      | Ano.Param.Not_array t -> List.return (trans_type (Temp.to_type t), temp_name t))
 
 let update_lvalue ctx dest bound_array_views =
-  let (_, lvalue_filter) =
-    begin
-      match Map.find Ano.(ctx.result.buffer_infos) (Ir.temp_of_dest dest) with
-        | None -> failwith "Didn't find that."
-        | Some bi ->
+  match Map.find Ano.(ctx.result.buffer_infos) (Ir.temp_of_dest dest) with
+  | None -> ctx.lvalue_filter
+  | Some bi ->
 
-      List.fold Ano.(bi.filtered_lengths) ~init:(Tc.Int, ctx.lvalue_filter)
-        ~f:(fun (typ, acc) t_opt ->
-          let typ' = Tc.Array typ in
-          let acc' = match t_opt with
-            | None -> acc
-            | Some t ->
-              let (elem, ls) = match Map.find acc t with
-                | None ->
-                    let t = Temp.next typ () in
-                    (temp_to_var t, CU.IConst 0L)
-                | Some expr -> expr
-              in
-              let ls' =
-                List.fold_left bound_array_views ~init:ls ~f:(fun ls (_, t_idx, _) -> CU.Binop (CU.ADD, temp_to_var t_idx, ls))
-              in
-              Map.set acc ~key:t ~data:(elem, ls')
-          in (typ', acc'))
-    end
-  in lvalue_filter
+  let (_, result) = List.fold Ano.(bi.filtered_lengths) ~init:(Tc.Int, ctx.lvalue_filter)
+    ~f:(fun (typ, acc) t_opt ->
+      let typ' = Tc.Array typ in
+      let acc' = match t_opt with
+        | None -> acc
+        | Some t ->
+          let (elem, ls) = match Map.find acc t with
+            | None ->
+                let t = Temp.next typ () in
+                (temp_to_var t, CU.IConst 0L)
+            | Some expr -> expr
+          in
+          let ls' =
+            List.fold_left bound_array_views ~init:ls ~f:(fun ls (_, t_idx, _) -> CU.Binop (CU.ADD, temp_to_var t_idx, ls))
+          in
+          Map.set acc ~key:t ~data:(elem, ls')
+      in (typ', acc'))
+  in result
 
 let rec lengths ctx (_, av) = match av with
   | Air.Array t -> get_lengths ctx t
@@ -406,6 +403,9 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
   | Air.Unop (d, op, s) ->
       [ d <-- CU.Unop (trans_unop op, trans_op_exn ctx s) ]
   | Air.Assign (d, s) ->
+      prerr_endline (match ctx.lvalue with
+        | None -> "None"
+        | Some lv -> Expr.sexp_of_t lv |> Sexp.to_string_hum);
       [ d <-- trans_op_exn ctx s ]
   | Air.Primitive (d, s) ->
       [ d <-- trans_prim ctx s]
@@ -633,7 +633,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       (* We can re-use argument names as parameter names since all the arguments
        * are unique temps (and therefore will have unique parameter names).
        *)
-      let output_buffer_param = Temp.next (Ir.type_of_dest dest) () in
+      let output_buffer_param = Ir.temp_of_dest dest in
       let (kernel_params, kernel_args) =
         (* List of tuples of types, params, and args *)
         let tpas = List.concat [

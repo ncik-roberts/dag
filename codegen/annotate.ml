@@ -222,10 +222,10 @@ let update_backing_temps
   in
   Map.add_exn backing_temps ~key:t ~data:(loop av)
 
-let rec annotate_par_stmts (ctx : context) (stmts : Air.par_stmt list) : context =
-  List.fold_left stmts ~init:ctx ~f:annotate_par_stmt
+let rec annotate_par_stmts (ctx : context) (stmts : Air.par_stmt list) : kernel_context * context =
+  List.fold_left stmts ~init:(empty_kernel_ctx, ctx) ~f:(fun (_, acc) x -> annotate_par_stmt acc x)
 
-and annotate_par_stmt (ctx : context) (stmt : Air.par_stmt) : context =
+and annotate_par_stmt (ctx : context) (stmt : Air.par_stmt) : kernel_context * context =
   match stmt with
   | Air.Parallel (dest, id, tavs, body) ->
       let (ctx, buffer_infos) = List.fold_map tavs ~init:ctx ~f:(fun ctx (key, _, av) ->
@@ -246,7 +246,7 @@ and annotate_par_stmt (ctx : context) (stmt : Air.par_stmt) : context =
         acc |> Fn.flip Set.add t1
             |> Fn.flip Set.add t2) }
       in
-      { ctx with result = A_air.
+      (empty_kernel_ctx, { ctx with result = A_air.
           { ctx.result with
               kernel_infos = Map.add_exn ctx.result.kernel_infos ~key:id ~data:(kernel_ctx_to_kernel_info kernel_ctx);
               buffer_infos = ctx.result.buffer_infos |>
@@ -255,8 +255,8 @@ and annotate_par_stmt (ctx : context) (stmt : Air.par_stmt) : context =
                  | Ir.Return _ -> Fn.id
                  | Ir.Dest t -> Map.add_exn ~key:t ~data:(mk_buffer_info_out_of_temp t kernel_ctx buffer_infos));
           };
-      }
-  | Air.Seq stmt -> snd (annotate_seq_stmt ctx stmt)
+      })
+  | Air.Seq stmt -> annotate_seq_stmt ctx stmt
   | Air.Par_stmt par_stmt -> annotate_par_stmt_stmt ctx par_stmt
 
 and empty_kernel_ctx : kernel_context =
@@ -266,11 +266,10 @@ and empty_kernel_ctx : kernel_context =
     return_buffer_info = None;
   }
 
-and annotate_par_stmt_stmt (ctx : context) (par : Air.par_stmt Air.stmt) : context =
-  snd
-    (annotate_stmt empty_kernel_ctx ctx
-      (fun ?(kernel_ctx = empty_kernel_ctx) ctx x -> (kernel_ctx, annotate_par_stmt ctx x))
-      par)
+and annotate_par_stmt_stmt (ctx : context) (par : Air.par_stmt Air.stmt) : kernel_context * context =
+   annotate_stmt empty_kernel_ctx ctx
+      (fun ?(kernel_ctx = empty_kernel_ctx) ctx x -> annotate_par_stmt ctx x)
+      par
 
 and annotate_seq_stmt_stmt (kernel_ctx : kernel_context) (ctx : context) (seq : Air.seq_stmt Air.stmt)
   : kernel_context * context =
@@ -406,7 +405,7 @@ and annotate_stmt
               update_backing_temps ctx.result.backing_temps t av;
         };
       } in
-      let (kernel_ctx', ctx) = recur ctx body in
+      let (kernel_ctx', ctx) = recur ~kernel_ctx:kernel_ctx ctx body in
       let ctx' =
         match dest with
         | Ir.Return _ -> ctx
@@ -520,4 +519,4 @@ let annotate (air : Air.t) : A_air.result =
     in
     let ctx = { result; aliases = Temp.Map.empty; } in
     let ctx' = annotate_par_stmt ctx Air.(air.body) in
-    ctx'.result
+    (snd ctx').result

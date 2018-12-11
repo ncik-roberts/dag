@@ -260,7 +260,8 @@ and trans_index_expr
       | (result_arr, index_expr, _ :: lens) ->
           let index_expr' = CU.Binop (CU.ADD, index_expr, build_index_expr lens (trans_expr ctx i)) in
           (result_arr, index_expr', lens)
-      | _ -> failwith "No more lengths :("
+      | _ -> failwithf "No more lengths :( `%s[%s]`" (Expr.sexp_of_t arr |> Sexp.to_string_hum)
+               (Expr.sexp_of_t i |> Sexp.to_string_hum) ()
     end
   | Expr.Temp t ->
       let lengths = List.tl_exn (get_lengths ctx t) in

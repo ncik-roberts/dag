@@ -114,6 +114,8 @@ let update_lvalue ctx dest bound_array_views =
     | None -> Map.find Ano.(ctx.result.returned_buffer_infos) (Ir.temp_of_dest dest)
     | Some bi -> Some bi
   in
+  Printf.printf "%s: %s\n" (Ir.sexp_of_dest dest |> Sexp.to_string_hum)
+    (Option.sexp_of_t Ano.sexp_of_buffer_info bi |> Sexp.to_string_hum);
 
   match bi with
   | None -> ctx.lvalue_filter
@@ -139,7 +141,11 @@ let update_lvalue ctx dest bound_array_views =
       in (typ', acc'))
   in
 
-  let temp = List.nth_exn Ano.(bi.filtered_lengths) (List.length bound_array_views) in
+  let temp = match List.length Ano.(bi.filtered_lengths), List.length bound_array_views with
+    | m, n when n < m -> List.nth_exn Ano.(bi.filtered_lengths) n
+    | m, n when n = m -> None
+    | _ -> failwith "I don't think this is right."
+  in
 
   (result, temp)
 

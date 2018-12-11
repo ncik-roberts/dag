@@ -1,15 +1,15 @@
 
 // Convolves with a filter.
-float[][] convolve (float[][] source,float[][] mask){
-  return parallel (int i <- tabulate(1,dim0(source) - 1,1)){
-    return parallel (int j <- tabulate(1,dim1(source) - 1,1)){
-      float[] temp = parallel (int k <- tabulate (-1,2,1)) {
+float[][] convolve(float[][] source,float[][] mask) {
+  return for (int i : range(1, dim0(source) - 1, 1)) {
+    return for (int j : range(1, dim1(source) - 1, 1)) {
+      float[] temp = for (int k : range(-1, 2, 1)) {
         float ii = source[i+k][j-1] * mask[k+1][0];
         float ij = source[i+k][j]   * mask[k+1][1];
         float ik = source[i+k][j+1] * mask[k+1][2];
         return ii + ij + ik;
       };
-      return reduce(+,0.0,temp);
+      return reduce(+, 0.0, temp);
     };
   };
 }

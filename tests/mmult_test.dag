@@ -1,13 +1,11 @@
 
 int dotProduct(int[] v1, int[] v2) {
-  return reduce(+, 0, zipWith(*, v1, v2));
+  return reduce(+, 0, zip_with(*, v1, v2));
 }
 
-// We annotate to interoperate with C++. 
-//@EntryPoint
 int[][] multiplyMatrixMatrix(int[][] m1, int[][] m2) {
-  return parallel (int[] row <- m1) {
-    return parallel (int[] col <- transpose(m2)) {
+  return for (int[] row : m1) {
+    return for (int[] col : transpose(m2)) {
       return dotProduct(row, col);
     };
   };

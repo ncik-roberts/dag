@@ -22,7 +22,7 @@ struct square {
 };
 
 // Language features we need to get this implementation to work:
-//   Additional primitives: filterWith, scan
+//   Additional primitives: filter_with, scan
 //   Nice To Have: if then else (expressions, not statements.) -- thoughts from Nick?
 
 // Current this is ported in from the assignment 2 starter code.
@@ -67,18 +67,18 @@ square[][] partitionImage(int width, int height, int num_squares, int num_circle
   // will be far too high. We encode number of divisions as a byproduct of the length
   // of the square 2D array, pending us having multiple return types.
 
-  // Assuming a definition of (exclusive) tabulate something along the lines of:
-  // tabulate (start,stop,?stride) -> [start,start+stride,...,stop-stride]
+  // Assuming a definition of (exclusive) range something along the lines of:
+  // range (start,stop,?stride) -> [start,start+stride,...,stop-stride]
   // Note: this requires some casting from int -> float at some point.
-  int[] xs = tabulate(0, width / num_squares, 1);
-  int[] ys = tabulate(0, height / num_squares, 1);
+  int[] xs = range(0, width / num_squares, 1);
+  int[] ys = range(0, height / num_squares, 1);
 
   // We use the parallel block to define a map.
   float fnum = float_of_int(num_squares);
 
   // We nest parallel maps to "graft" an array implicitly
-  return parallel (int h <- ys) {
-    return parallel (int w <- xs) {
+  return for (int h : ys) {
+    return for (int w : xs) {
       // New struct initialization syntax in action. All fields must be filled.
       return struct square {
 	left = float_of_int(w) * fnum;
@@ -94,20 +94,20 @@ square[][] partitionImage(int width, int height, int num_squares, int num_circle
 // This function contains a lot of options on how the operation can be performed
 // based off of the existing language primitives and a range of memory efficiency.
 int[][][] scanCircles(square[][] squares, circle[] circles) {
-  return parallel (square[] sub_squares <- squares) {
-    return parallel (square square <- sub_squares) {
+  return for (square[] sub_squares : squares) {
+    return for (square square : sub_squares) {
 
       // Option 1: perform testing and filter in two passes, making the most
       // use of our current primitives and requiring minimal modifications.
-      bool[] intersections = parallel (circle c <- circles) {
+      bool[] intersections = for (circle c : circles) {
         return circleIntersectsSquare(c,square);
       };
 
       // We explicitly allocate an array. Enumerate is the list of indices.
-      int[] unfiltered_IDs = tabulate(0, dim0(circles), 1);
+      int[] unfiltered_IDs = range(0, dim0(circles), 1);
 
       // ('a [] * bool [] -> 'a []) "Maps" a filter out of an array of boolans.
-      return filterWith(unfiltered_IDs, intersections);
+      return filter_with(unfiltered_IDs, intersections);
     };
   };
 }
@@ -169,29 +169,29 @@ bool pixelInCircle(circle c, float normX, float normY)
 
 // Is the nesting a little ridiculous? Yes. Yes it is. Fully 4D parallelism.
 int[][][][] renderSquares(square[][] squares, int[][][] scanned, circle[] circles, int num_squares, int width, int height) {
-  return parallel (sub_squares <- squares) {
-    return parallel (square <- sub_squares) {
+  return for (sub_squares : squares) {
+    return for (square : sub_squares) {
 
       float fWidth = float_of_int(width);
       float fHeight = float_of_int(height);
-      int[] xPixels = tabulate(width * square.left, width * square.right,1);
-      int[] yPixels = tabulate(height * square.top, height * square.bottom,1);
+      int[] xPixels = range(width * square.left, width * square.right,1);
+      int[] yPixels = range(height * square.top, height * square.bottom,1);
 
-      return parallel (int y <- tabulate(0,dim0(yPixels),1)) {
-        return parallel (int x <- tabulate(0,dim0(xPixels),1)) {
+      return for (int y : range(0, dim0(yPixels), 1)) {
+        return for (int x : range(0, dim0(xPixels), 1)) {
           float normX = float_of_int(xPixels[x]) / fWidth;
           float normY = float_of_int(yPixels[y]) / fHeight;
 
           int[] ids = scanned[x][y];
-          bool[] ix = parallel (int id <- ids) {
+          bool[] ix = for (int id : ids) {
             return pixelInCircle(circles[id],normX,normY);
           }
 
-          int[] colors = parallel (int id <- ids) {
+          int[] colors = for (int id : ids) {
             return circles[id].color;
           }
 
-          int[] ix_colors = filterWith(colors,ix);
+          int[] ix_colors = filter_with(colors,ix);
 
           // Black background comes from here. Would make it 0xFFFFFFFF for white.
           return reduce(addPixels,0,ix_colors);
@@ -206,10 +206,10 @@ int[][] concatPixelSubarrays (int[][][][] pixels, int width, int height) {
   int squareHeight = dim2(pixels);
   int squareWidth  = dim3(pixels);
 
-  int[] xs = tabulate(0,width,1);
-  int[] ys = tabulate(0,height,1);
-  return parallel (int y <- ys){
-    return parallel (int x <- xs){
+  int[] xs = range(0, width, 1);
+  int[] ys = range(0, height, 1);
+  return for (int y : ys) {
+    return for (int x : xs) {
       int i = y / squareHeight;
       int j = x / squareWidth;
       int k = y % squareHeight;

@@ -1,7 +1,7 @@
 int f(int[][][] xsss, bool[] bs) {
-  int[][][] ysss = parallel (int[][] xss <- xsss) {
-    return parallel (int[] xs <- xss) {
-      return filterWith(xs, bs);
+  int[][][] ysss = for (int[][] xss : xsss) {
+    return for (int[] xs : xss) {
+      return filter_with(xs, bs);
     };
   };
   return dim0(ysss);

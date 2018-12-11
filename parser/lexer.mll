@@ -56,7 +56,7 @@ rule initial =
   | ';' { P.SEMICOLON }
 
   | '='  { P.ASSIGN }
-  | "<-" { P.BIND }
+  | ":" { P.BIND }
 
   | '+'  { P.PLUS }
   | '-'  { P.MINUS }
@@ -76,7 +76,7 @@ rule initial =
   | '^'  { P.BITWISE_XOR }
 
   | "return"   { P.RETURN }
-  | "parallel" { P.PARALLEL }
+  | "for" { P.PARALLEL }
   | "struct"   { P.STRUCT }
 
   | "true"      { P.BOOLCONST true }

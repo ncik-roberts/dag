@@ -1,6 +1,6 @@
 int[][][] f(int[][] y) {
   int[][] x = transpose(y);
-  return parallel(int[] z <- y) {
+  return for(int[] z : y) {
     return x;
   };
 }

@@ -30,7 +30,7 @@ int f4() {
 }
 
 circle[] f5(int[] xs) {
-  return parallel(int x <- xs) {
+  return for (int x : xs) {
     return struct circle {
       x = 0;
       y = 0;
@@ -40,43 +40,43 @@ circle[] f5(int[] xs) {
 }
 
 int[] f6(int[] xs) {
-  return parallel(int x <- xs) {
+  return for (int x : xs) {
     return x;
   };
 }
 
 int[][] f7(int[][] xss) {
-  return parallel(int[] xs <- xss) {
-    return parallel(int x <- xs) {
+  return for (int[] xs : xss) {
+    return for (int x : xs) {
       return x;
     };
   };
 }
 
 int[][] f8(int[][] xss) {
-  return parallel(int[] xs <- transpose(xss)) {
+  return for (int[] xs : transpose(xss)) {
     return xs;
   };
 }
 
 int[][] f9(int[][] xss) {
-  return parallel(int[] xs <- transpose(xss)) {
-    return parallel(int x <- xs) {
+  return for (int[] xs : transpose(xss)) {
+    return for (int x : xs) {
       return x;
     };
   };
 }
 
 int[][] f10(int[][] xss) {
-  return parallel(int[] xs <- xss) {
+  return for (int[] xs <- xss) {
     return xs;
   };
 }
 
 int[][][] f11(int[][][] xsss) {
-  return parallel(int[][] xss <- xsss) {
-    return parallel(int[] xs <- xss) {
-      return parallel(int x <- xs) {
+  return for (int[][] xss : xsss) {
+    return for (int[] xs : xss) {
+      return for (int x : xs) {
 	return x;
       };
     };

@@ -1,9 +1,8 @@
-
 int[][] copyTwo(int[][] input){
-  int[] is = tabulate(0,dim0(input),1);
-  int[] js = tabulate(0,dim1(input),1);
-  return parallel(int i <- is){
-    return parallel(int j <- js){
+  int[] is = range(0, dim0(input), 1);
+  int[] js = range(0, dim1(input), 1);
+  return for (int i : is){
+    return for (int j : js){
       return input[i][j];
     };
   };

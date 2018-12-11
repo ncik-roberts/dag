@@ -232,11 +232,11 @@ _expr :
           | "map" -> Ast.Map
           | "max" -> Ast.Max
           | "min" -> Ast.Min
-          | "zipWith" -> Ast.Zip_with
-          | "tabulate" -> Ast.Tabulate
+          | "zip_with" -> Ast.Zip_with
+          | "range" -> Ast.Tabulate
           | "float_of_int" -> Ast.Float_of_int
           | "int_of_float" -> Ast.Int_of_float
-          | "filterWith" -> Ast.Filter_with
+          | "filter_with" -> Ast.Filter_with
           | "scan" -> Ast.Scan
           | "log2" -> Ast.Log2
           | s ->

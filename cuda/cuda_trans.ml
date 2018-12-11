@@ -95,19 +95,46 @@ and remove_arrays =
  * added to the parameter list in the context, so it too is translated by the
  * concat_map.
  *)
-let trans_params (params : Ano.Param.t list) : (CU.cuda_type * CU.cuda_ident) list =
-   List.concat_map params ~f:(fun t ->
+let trans_params (ctx : Ano.result) :
+  (CU.cuda_type * CU.cuda_ident) list
+    * CU.cuda_type (* return type *)
+    * Temp.t Temp.Map.t (* placeholder temps -> real temp *)
+  =
+   let return_type = ref CU.Void in
+   let hashtbl = Temp.Table.create () in
+   let params = List.concat_map Ano.(ctx.params) ~f:(fun t ->
      match t with
      (* An array parameter is accompanied by `n` dimension parameters, where n is the
       * dimensionality of the array. *)
      | Ano.Param.Array (t, dims) ->
          let array_param = (trans_type (Temp.to_type t), temp_name t) in
+         let filtered_lengths =
+           match Map.find Ano.(ctx.buffer_infos) t with
+           | None -> failwith ":("
+           | Some bi -> Ano.(bi.filtered_lengths)
+         in
+         let filtered_length_params =
+           List.filter_mapi filtered_lengths ~f:(fun i -> function
+             | None -> None
+             | Some t -> begin
+                 match Fn.apply_n_times ~n:i (fun x -> Tc.Array x) Tc.Int with
+                 | Tc.Int -> return_type := CU.Integer;
+                             None
+                 | typ ->
+                     let temp = Temp.next typ () in
+                     Temp.Table.add_exn hashtbl ~key:t ~data:temp;
+                     Some (trans_type typ, temp_name temp)
+              end)
+         in
          let dim_params = List.map dims ~f:(fun t -> (CU.Integer, temp_name t)) in
-         array_param :: dim_params
+         array_param :: filtered_length_params @ dim_params
 
 
      (* A non-array parameter, sadly, is not. *)
      | Ano.Param.Not_array t -> List.return (trans_type (Temp.to_type t), temp_name t))
+   in
+
+   (params, !return_type, Temp.Map.of_hashtbl_exn hashtbl)
 
 let update_lvalue ctx dest bound_array_views =
   let bi = match Map.find Ano.(ctx.result.buffer_infos) (Ir.temp_of_dest dest) with
@@ -852,14 +879,24 @@ let trans_struct_decl ~(key : Tc.ident) ~(data : Tc.struct_type) : CU.cuda_gstmt
  *)
 let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t)
   (result : Ano.result) : CU.cuda_gstmt list =
-  let params = trans_params Ano.(result.params) in
+  let (params, ret_ty, init_map) = trans_params result in
+  let init_filter_map = Map.map init_map ~f:(fun x -> (temp_to_var x, CU.IConst 0L)) in
+  let (init_lvalue_filter, hd, tl) = match ret_ty with
+    | CU.Integer ->
+        let t = Temp.next Tc.Int () in
+        (Some t,
+          [CU.DeclareAssign (CU.Integer, temp_name t, CU.IConst 0L)],
+          [CU.Return (temp_to_var t)]
+        )
+    | _ -> (None, [], [])
+  in
   let lvalue = Ano.(result.out_param) in
   let allocation_method = Temp.Table.create () in
   let bear_with_me = Temp.Table.create () in
   let body = trans_par_stmt {
     result;
     allocation_method;
-    lvalue_filter = (Temp.Map.empty, None); (*TODO*)
+    lvalue_filter = (init_filter_map, init_lvalue_filter);
     lvalue = Option.map ~f:(fun t -> Expr.Temp t) lvalue;
     bear_with_me;
     extra_lengths = Temp.Table.create ();
@@ -926,9 +963,9 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t)
             ret = begin
               match Ano.(result.out_param) with
               | None -> trans_type Air.(program.return_type)
-              | Some _ -> Void
+              | Some _ -> ret_ty
             end;
             name = "dag_" ^ Air.(program.fn_name);
             params;
-            body = malloc'ing @ body; });
+            body = hd @ malloc'ing @ body @ tl; });
   ]

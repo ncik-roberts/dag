@@ -1,3 +1,13 @@
+int[] f1(int[] xs, bool[] bs) {
+  return filter_with(xs, bs);
+}
+
+int[][] f2(int[][] xss, bool[] bs) {
+  return for (int[] xs : xss) {
+    return filter_with(xs, bs);
+  };
+}
+
 int f(int[][][] xsss, bool[] bs) {
   int[][][] ysss = for (int[][] xss : xsss) {
     return for (int[] xs : xss) {

@@ -319,6 +319,7 @@ and annotate_stmt
   | Air.Nop -> (kernel_ctx, ctx)
   | Air.Filter_with (dest, (t1, av1), (t2, av2)) ->
       let defined = defined_of_dest dest in
+      let used = Set.union (used_of_array_view ctx av1) (used_of_array_view ctx av2) in
       let buffer_info1 = annotate_array_view ctx av1 in
       let buffer_info2 = annotate_array_view ctx av2 in
       let my_buffer_info =
@@ -330,7 +331,7 @@ and annotate_stmt
           filtered_lengths = Some temp :: List.tl_exn buffer_info1.filtered_lengths;
         }
       in
-      ({ used = kernel_ctx.used;
+      ({ used = Set.union used kernel_ctx.used;
          defined = Set.union defined kernel_ctx.defined;
          additional_buffers =
            (match dest with
@@ -419,19 +420,25 @@ and annotate_stmt
         };
       } in
       let (kernel_ctx', ctx) = recur ~kernel_ctx:kernel_ctx ctx body in
-      let ctx' =
-        match dest with
+      let bi =
+        let t = match dest with
+          | Ir.Return t -> t
+          | Ir.Dest t -> t
+        in mk_buffer_info_out_of_temp t kernel_ctx' [buffer_info]
+      in
+      let ctx' = match dest with
         | Ir.Return _ -> ctx
         | Ir.Dest t ->
             { ctx with result = A_air.
                 { ctx.result with buffer_infos =
-                  Map.add_exn ctx.result.buffer_infos ~key:t
-                    ~data:(mk_buffer_info_out_of_temp t kernel_ctx' [buffer_info]) }; }
+                  Map.add_exn ctx.result.buffer_infos ~key:t ~data:bi }; }
       in
       ({ defined = Set.union defined (Set.union kernel_ctx.defined kernel_ctx'.defined);
          used = Set.union (Set.union kernel_ctx.used kernel_ctx'.used) (used_of_array_view ctx av);
          additional_buffers = Set.union kernel_ctx.additional_buffers kernel_ctx'.additional_buffers;
-         return_buffer_info = None;
+         return_buffer_info = (match dest with
+           | Ir.Return _ -> Some bi;
+           | _ -> None);
        }, ctx')
 
 and annotate_seq_stmt
@@ -537,29 +544,31 @@ let annotate (air : Air.t) : A_air.result =
       | (p', Some bi) -> (Map.add_exn ctx ~key:p ~data:bi, p'))
     in
 
+    let result = A_air.{
+      params;
+      returned_buffer_infos = Temp.Map.empty;
+      backing_temps = Temp.Map.empty;
+      buffer_infos;
+      kernel_infos = Id.Map.empty;
+      out_param = None;
+    } in
+
+    let ctx = { result; aliases = Temp.Map.empty; } in
+    let (kernel_ctx, ctx') = annotate_par_stmt ctx Air.(air.body) in
+    let result = ctx'.result in
+
     (* Whether or not there is an out-buffer as a param depends on whether
      * the return type is an array. *)
     let t = Temp.next Air.(air.return_type) () in
-    let result = match param_of_temp t with
-      | (p, Some bi) -> A_air.{
-          params = p :: params;
-          buffer_infos = Map.add_exn buffer_infos ~key:t ~data:bi;
-          kernel_infos = Id.Map.empty;
+    let result = match param_of_temp t, kernel_ctx.return_buffer_info with
+      | ((p, Some _), Some bi) -> A_air.{ result with
+          params = p :: result.params;
+          buffer_infos = Map.add_exn result.buffer_infos ~key:t ~data:bi;
           out_param = Some t;
-          returned_buffer_infos = Temp.Map.empty;
-          backing_temps = Temp.Map.empty;
         }
 
+      | ((p, Some _), None) -> failwith "???"
+
       (* No need to have a separate parameter at all if the function returns directly. *)
-      | _ -> A_air.{
-        params;
-        returned_buffer_infos = Temp.Map.empty;
-        backing_temps = Temp.Map.empty;
-        buffer_infos;
-        kernel_infos = Id.Map.empty;
-        out_param = None;
-      }
-    in
-    let ctx = { result; aliases = Temp.Map.empty; } in
-    let (_, ctx') = annotate_par_stmt ctx Air.(air.body) in
-    ctx'.result
+      | _ -> result in
+    result

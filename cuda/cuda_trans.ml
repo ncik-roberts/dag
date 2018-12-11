@@ -198,7 +198,6 @@ and get_lengths (ctx : context) (t : Temp.t) : CU.cuda_expr list =
   match Map.find Ano.(ctx.result.buffer_infos) t with
   | Some inf -> List.map ~f:trans_len_expr Ano.(inf.length)
   | None -> List.map ~f:trans_len_expr (Option.value_exn ctx.lvalue_lengths)
-      (* failwithf "Couldn't find buffer size for `%d`" (Temp.to_int t) () *)
 
 and trans_index_expr
   (ctx : context)

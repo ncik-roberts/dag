@@ -126,7 +126,7 @@ let unroll dag key =
   | Input _  | Index | Struct_Init _ | Access _ -> None
 
 type 'a counter = unit -> 'a
-let make_counter ~(seed:'a) ~(next:'a -> 'a) : 'a counter =
+let make_counter ~(seed:'a) ~(next:'a -> 'a) =
   let ctr = ref seed in
   fun () -> Ref.replace ctr next; !ctr
 
@@ -316,7 +316,7 @@ let of_ast : Tc.typ Ast.fun_defn list -> t =
     (* Returns the vertex of the expression involved in the binding or return. *)
     let rec loop_stmt (ctx : Context.t) (stmt : Tc.typ Ast.stmt) : Result.t =
       match stmt with
-      | Ast.Let let_stmt -> loop_expr ctx let_stmt.let_expr
+      | Ast.Let lstmt -> loop_expr ctx lstmt.let_expr
       | Ast.Return expr -> loop_expr ctx expr
     in
     let (_ctx, return_result) =

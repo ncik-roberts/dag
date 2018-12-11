@@ -1,16 +1,4 @@
 
-// Is this what idiomatic DAG looks like? 
-// Who knows.
-// Indexing is a part of life, as it turns out.
-// We can't really get around it. 
-// Except that we _can_ require it to be computable at compile time.
-// 
-// All arguments to tabulate must be either a compile time constant 
-// or an expression composed only of constants and dim_ calls. 
-// *Maybe* temps with constant values. No function calls.
-// 
-// Why is this comment in this test?
-
 // Convolves with a filter.
 float[][] convolve (float[][] source,float[][] mask){
   return parallel (int i <- tabulate(1,dim0(source) - 1,1)){

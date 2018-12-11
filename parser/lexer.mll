@@ -74,6 +74,7 @@ rule initial =
   | '&'  { P.BITWISE_AND }
   | '|'  { P.BITWISE_OR }
   | '^'  { P.BITWISE_XOR }
+  | '~'  { P.BITWISE_NOT }
 
   | "return"   { P.RETURN }
   | "for" { P.PARALLEL }

@@ -19,6 +19,7 @@ type context = {
 
   lvalue : Expr.t option; (* this is an lvalue and its lengths *)
   lvalue_lengths : Length_expr.t list option;
+  in_kernel : bool;
 
   (* Given one of those "placeholder" temps (with int type) saved from
    * the previous step, give the current lvalue corresponding to the
@@ -82,7 +83,6 @@ let rec trans_type (typ : Tc.typ) : CU.cuda_type =
 (* Remove outermost arrays. *)
 and remove_arrays =
   function Tc.Array typ -> remove_arrays typ | typ -> trans_type typ
-
 
 (* Translate an AIR parameter list into a list of CUDA parameters.
  *
@@ -265,6 +265,7 @@ and trans_binop = function
 and trans_unop = function
   | Ast.Negate -> CU.NEG
   | Ast.Logical_not -> CU.NOT
+  | Ast.Bitwise_not -> CU.BNOT
 
 (* Creates the loop header (initial value, max value, and increment stride)
  * -> for (var = init;var < limit; var += stride) *)
@@ -273,11 +274,15 @@ and trans_incr_loop_hdr ~loop_var ~lo ~hi ~stride =
    CU.Cmpop (CU.LT, CU.Var loop_var, hi), CU.AssignOp (CU.ADD, CU.Var loop_var, stride))
 
 (* Actually perform the reduction! *)
-and make_reduce op args =
+and make_reduce op args ~(in_kernel : bool) =
   match (op, args) with
     | Op.Binop bin, [a;b] -> CU.AssignOp (trans_binop bin, a, b)
+    | Op.Fn_ptr f, [a;b;] -> if in_kernel
+        then CU.Assign (a, CU.FnCall ("dag_device_" ^ f, [ a; b; ]))
+        else CU.Assign (a, CU.FnCall ("dag_host_" ^ f, [ a; b; ]))
     | Op.Binop _, _ -> failwith "Binary operators have two arguments."
     | Op.Unop _, _ -> failwith "Cannot reduce with a unary operator."
+    | Op.Fn_ptr _, _ -> failwith "Cannot reduce with THAT function pointer."
 
 and trans_len_expr : Length_expr.t -> CU.cuda_expr = function
   | Length_expr.Temp t -> temp_to_var t
@@ -572,7 +577,7 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       let hdr = create_loop ~counter:loop_temp (get_length ctx t) in
       Temp.Table.add ctx.allocation_method ~key:t ~data:`Unallocated
         |> dedup __LINE__;
-      let assign_stmt = make_reduce op
+      let assign_stmt = make_reduce op ~in_kernel:(ctx.in_kernel)
         [ temp_to_var lvalue;
           Many_fn.result_exn ~msg:"Reduce result_exn." (index_fn loop_temp);
         ]
@@ -626,7 +631,7 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       let hdr = create_loop ~counter:loop_temp (get_length ctx t) in
       Temp.Table.add ctx.allocation_method ~key:t ~data:`Unallocated
         |> dedup __LINE__;
-      let assign_stmt = make_reduce op
+      let assign_stmt = make_reduce op ~in_kernel:ctx.in_kernel
         [ temp_to_var acc;
           Many_fn.result_exn ~msg:"Reduce result_exn." (index_fn loop_temp);
         ]
@@ -896,7 +901,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
                   CU.Assign (acc, CU.Binop (CU.DIV, acc, len));
                 ]
               );
-              trans_seq_stmt { ctx with lvalue = Some lvalue; lvalue_filter =
+              trans_seq_stmt { ctx with in_kernel = true; lvalue = Some lvalue; lvalue_filter =
                 update_lvalue_with ctx lengths
                   (get_filtered_lengths_of_dest ctx dest)
                   lvalue_filter
@@ -995,7 +1000,9 @@ let trans_struct_decl ~(key : Tc.ident) ~(data : Tc.struct_type) : CU.cuda_gstmt
  * These kernel launches actually include the kernel DEFINITION.
  * It's up to a later phase to float all these kernel definitions to the top level.
  *)
-let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t)
+let trans (fn_ptr_programs : (Air.t * Ano.result) list)
+  (program : Air.t)
+  (struct_decls : Tc.struct_type Tc.IdentMap.t)
   (result : Ano.result) : CU.cuda_gstmt list option =
   if not
     begin
@@ -1003,6 +1010,7 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t)
         ~f:(fun ki -> Set.is_empty Ano.(ki.additional_buffers))
         Ano.(result.kernel_infos)
     end then None else
+
   let extra_lengths = Temp.Table.create () in
   let (params, ret_ty, init_map) = trans_params extra_lengths result in
   let init_filter_map = Map.map init_map ~f:(fun x -> Expr.Temp x) in
@@ -1018,8 +1026,9 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t)
   let lvalue = Ano.(result.out_param) in
   let allocation_method = Temp.Table.create () in
   let bear_with_me = Temp.Table.create () in
-  let body = trans_par_stmt {
+  let ctx = {
     result;
+    in_kernel = false;
     allocation_method;
     lvalue_filter = (init_filter_map, init_lvalue_filter);
     lvalue = Option.map ~f:(fun t -> Expr.Temp t) lvalue;
@@ -1037,7 +1046,27 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t)
     dims_of_params = List.concat_map Ano.(result.params) ~f:(function
       | Ano.Param.Array (_, dims) -> dims
       | Ano.Param.Not_array _ -> []);
-  } Air.(program.body) in
+  } in
+  let body = trans_par_stmt ctx Air.(program.body) in
+  let zipped_fn_ptr_definitions = List.map fn_ptr_programs ~f:(fun (p, r) ->
+    let (ps, _, _) = trans_params (Temp.Table.create ()) r in
+    let b = trans_par_stmt { ctx with out_param = Ano.(r.out_param) } Air.(p.body) in
+    (Air.(p.fn_name),
+      CU.(Function {
+            typ = Host;
+            ret = trans_type Air.(p.return_type);
+            name = "dag_host_" ^ Air.(program.fn_name);
+            params = ps;
+            body = b;
+      }),
+      CU.(Function {
+            typ = Device;
+            ret = trans_type Air.(p.return_type);
+            name = "dag_device_" ^ Air.(program.fn_name);
+            params = ps;
+            body = b;
+      }))
+  ) in
 
   (* Malloc on the device and on the host. *)
   let malloc'ing =
@@ -1083,6 +1112,7 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t)
     [ CU.Include "dag_utils.cpp"; ];
     struct_decls;
     gdecls |> List.map ~f:(fun x -> CU.Function x);
+    List.concat_map zipped_fn_ptr_definitions ~f:(fun (_, f1, f2) -> [f1; f2;]);
     List.return
       CU.(Function { typ = Host;
             ret = begin

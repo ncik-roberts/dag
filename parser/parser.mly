@@ -21,8 +21,10 @@
 %token BITWISE_AND
 %token BITWISE_XOR
 %token BITWISE_OR
+%token BITWISE_NOT
 %token LOGICAL_AND
 %token LOGICAL_OR
+%token LOGICAL_NOT
 
 %token ASSIGN BIND
 %token SEMICOLON COMMA
@@ -287,6 +289,10 @@ _expr :
 unop :
   | MINUS;
       { Ast.Negate }
+  | BITWISE_NOT;
+      { Ast.Bitwise_not }
+  | LOGICAL_NOT;
+      { Ast.Logical_not }
   ;
 
 %inline

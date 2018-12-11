@@ -4,6 +4,7 @@ module Operator = struct
   type t =
     | Binop of Ast.binop
     | Unop of Ast.unop
+    | Fn_ptr of Ast.ident
     [@@deriving sexp]
 end
 

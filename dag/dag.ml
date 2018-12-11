@@ -9,6 +9,7 @@ module Vertex_view = struct
     | Bool of bool
     | Bare_binop of Ast.binop
     | Bare_unop of Ast.unop
+    | Fn_ptr of Ast.ident
     [@@deriving sexp]
 
   type t =
@@ -299,6 +300,11 @@ let of_ast : Tc.typ Ast.fun_defn list -> t =
         List.fold_left results_to_add ~init ~f:(Result.union_with_bias ~bias:`Left)
 
   and loop_arg (ctx : Context.t) (arg : Tc.typ Ast.arg) : Result.t = match arg with
+    | Ast.Fn_ptr (typ, fn_ptr) ->
+        let vertex = next_vertex () in
+        let view = Vertex_view.(Literal (Fn_ptr fn_ptr)) in
+        Result.empty_of vertex typ ~view:(Some view)
+          ~enclosing_parallel_blocks:Context.(ctx.enclosing_parallel_blocks)
     | Ast.Bare_binop (typ, binop) ->
         let vertex = next_vertex () in
         let view = Vertex_view.(Literal (Bare_binop binop)) in
@@ -481,23 +487,36 @@ let substitute (source : dag) (vertex : Vertex.t) (target : dag) : dag =
   { target with vertex_infos = Map.merge_skewed target.vertex_infos source.vertex_infos
       ~combine:(fun ~key -> failwithf "Duplicate key `%ld` in source and target. :(" key ()) }
 
-let inline (dag_fun : dag_fun) (ast : t) : dag_fun =
+let rec inline (dag_fun : dag_fun) (ast : t) : dag_fun * dag_fun list =
   let dag = dag_fun.dag_graph in
-  let ast_map = String.Map.of_alist_exn (List.map ast ~f:(fun d -> (d.dag_name, d.dag_graph))) in
-  let rec loop (visited : Vertex.Set.t) (candidates : Vertex.Set.t) (dag : dag) : dag =
+  let ast_map = String.Map.of_alist_exn (List.map ast ~f:(fun d -> (d.dag_name, d))) in
+  let rec loop (visited : Vertex.Set.t) (candidates : Vertex.Set.t) (dag : dag) (to_inline : dag_fun list)
+    : dag * dag_fun list =
     match Vertex.Set.choose candidates with
-    | None -> dag
+    | None -> (dag, to_inline)
     | Some vertex ->
         let visited' = Set.add visited vertex in
         let open Vertex_view in
         match view dag vertex with
         | Function (Ast.Fun_ident name) ->
-            let f = Map.find_exn ast_map name in
+            let f = (Map.find_exn ast_map name).dag_graph in
             let dag' = substitute f vertex dag in
             let candidates' = Set.diff (Set.of_map_keys dag'.vertex_infos) visited' in
-            loop visited' candidates' dag'
+            loop visited' candidates' dag' to_inline
+        | Literal (Fn_ptr ident) ->
+            let candidates' = Vertex.Set.remove candidates vertex in
+            let to_inline' = Map.find_exn ast_map ident :: to_inline in
+            loop visited' candidates' dag to_inline'
         | _ ->
-          let candidates' = Vertex.Set.remove candidates vertex in
-          loop visited' candidates' dag
+            let candidates' = Vertex.Set.remove candidates vertex in
+            loop visited' candidates' dag to_inline
   in
-  { dag_fun with dag_graph = loop Vertex.Set.empty (Vertex.Set.of_map_keys dag.vertex_infos) dag }
+  let (dag_graph, to_inline) =
+    loop Vertex.Set.empty (Vertex.Set.of_map_keys dag.vertex_infos) dag []
+  in
+  let results = List.map to_inline ~f:(fun d ->
+    match inline d ast with
+    | (_, _ :: _) -> failwith "I don't want to recursively inline ANYTHING."
+    | (result, []) -> result)
+  in
+  ({ dag_fun with dag_graph = dag_graph }, results)

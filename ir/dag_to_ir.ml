@@ -45,10 +45,11 @@ let run (dag_fun : Dag.dag_fun) (traversal : Dag_traversal.traversal) : Ir.t * T
   let convert_op (arg : Vertex.t) : Ir.Operator.t =
     let open Vertex_view in
     match Dag.view dag arg with
+    | Literal (Fn_ptr ident) -> Ir.Operator.Fn_ptr ident
     | Literal (Bare_binop b) -> Ir.Operator.Binop b
     | Literal (Bare_unop u) -> Ir.Operator.Unop u
-    | Literal (Int32 _) | Literal (Float _) | Literal (Bool _ )  
-    | Parallel_block _ | Function _ | Binop _ | Unop _ | Input _ 
+    | Literal (Int32 _) | Literal (Float _) | Literal (Bool _ )
+    | Parallel_block _ | Function _ | Binop _ | Unop _ | Input _
     | Index | Struct_Init _  | Access _ -> failwith "Not operator."
   in
 

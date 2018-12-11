@@ -31,13 +31,16 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
           "Original dag:";
           Sexp.to_string_hum (Dag.sexp_of_dag_fun dag_fun);
         ]);*)
-        let inline = Dag.inline dag_fun dag in
+        let (inline, fn_ptrs) = Dag.inline dag_fun dag in
         note "inline";
         (*say (fun () -> [
           "Inlined:";
           Sexp.to_string_hum (Dag.sexp_of_dag_fun inline);
         ]);*)
         let traversal = Dag_traversal.any_traversal inline.Dag.dag_graph ~seed:101
+        in
+        let fn_ptr_traversals = List.map fn_ptrs
+          ~f:(fun f -> Dag_traversal.any_traversal f.Dag.dag_graph ~seed:102)
         in
         note "traversal";
         (*say (fun () -> [
@@ -52,6 +55,10 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
           ]);*)
           Ir_to_air.all ir temp_dag ~n:(Some 4)
         in
+        let fn_ptr_airs = List.map2 fn_ptrs fn_ptr_traversals ~f:(fun inline t ->
+          let (ir, temp_dag) = Dag_to_ir.run inline t in
+          Ir_to_air.any ir temp_dag)
+        in
         note "ir_to_air";
         let cudas = List.filter_mapi airs ~f:(fun i air ->
           say (fun () -> [
@@ -63,7 +70,9 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
             (*Sexp.to_string_hum (Annotated_air.sexp_of_result ann);*)
           ]);
 
-          let cuda = Cuda_trans.trans air Tc.(ctx.struct_ctx) ann in
+          let fn_ptr_with_anns = List.map fn_ptr_airs ~f:(fun x -> (x, Annotate.annotate x)) in
+
+          let cuda = Cuda_trans.trans fn_ptr_with_anns air Tc.(ctx.struct_ctx) ann in
           say (fun () -> [
             Printf.sprintf "Cuda:";
             begin

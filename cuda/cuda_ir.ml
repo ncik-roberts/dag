@@ -51,6 +51,7 @@ type unop =
   | DECR
   | NEG
   | NOT
+  | BNOT
   [@@deriving sexp]
 
 type dim =
@@ -176,6 +177,7 @@ let fmt_unop = function
   | DECR -> "--"
   | NEG -> "-"
   | NOT -> "!"
+  | BNOT -> "~"
 
 let fmt_binop = function
   | ADD -> "+"
@@ -218,7 +220,7 @@ let rec fmt_expr = function
     begin
       match u with
       | (INCR|DECR) -> sprintf "(%s)%s" (fmt_expr e) (fmt_unop u)
-      | (NEG | NOT) -> sprintf "%s(%s)" (fmt_unop u) (fmt_expr e)
+      | (NEG | NOT | BNOT) -> sprintf "%s(%s)" (fmt_unop u) (fmt_expr e)
     end
   | Cast (t,e) ->
     sprintf ("((%s) %s)") (fmt_typ t) (fmt_expr e)

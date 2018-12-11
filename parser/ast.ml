@@ -15,6 +15,7 @@ type 'a param = {
 type unop =
   | Negate
   | Logical_not
+  | Bitwise_not
   [@@deriving sexp]
 
 type binop =
@@ -47,6 +48,7 @@ type 'a stmt =
 
 and 'a arg =
   | Expr of 'a expr
+  | Fn_ptr of 'a * ident
   | Bare_binop of 'a * binop
   | Bare_unop of 'a * unop
   [@@deriving sexp]
@@ -148,6 +150,7 @@ and map_stmt ~f = function
   | Return expr -> Return (map_expr ~f expr)
 and map_arg ~f = function
   | Expr e -> Expr (map_expr ~f e)
+  | Fn_ptr (x, p) -> Fn_ptr (f x, p)
   | Bare_binop (x, b) -> Bare_binop (f x, b)
   | Bare_unop (x, u) -> Bare_unop (f x, u)
 and map_field ~f s = { s with field_expr = map_expr ~f s.field_expr }

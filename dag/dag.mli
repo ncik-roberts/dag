@@ -10,6 +10,7 @@ module Vertex_view : sig
     | Bool of bool
     | Bare_binop of Ast.binop
     | Bare_unop of Ast.unop
+    | Fn_ptr of Ast.ident
     [@@deriving sexp]
 
   type t =
@@ -18,7 +19,7 @@ module Vertex_view : sig
     | Binop of Ast.binop
     | Unop of Ast.unop
     | Access of Ast.ident
-    | Index 
+    | Index
     | Struct_Init of Tc.typ * Ast.ident list
     | Literal of literal
     | Input of Ast.ident
@@ -61,5 +62,5 @@ type dag_fun = {
 type t = dag_fun list [@@deriving sexp]
 val of_ast : Tc.typ Ast.fun_defn list -> t
 
-(** Inline all function calls. *)
-val inline : dag_fun -> t -> dag_fun
+(** Inline all function calls + translate function pointers. *)
+val inline : dag_fun -> t -> dag_fun * dag_fun list

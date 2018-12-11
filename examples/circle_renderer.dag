@@ -10,15 +10,19 @@ struct circle {
 };
 
 struct square {
-  float top;
-  float bottom;
-  float left;
-  float right;
+  int top;
+  int bottom;
+  int left;
+  int right;
 };
 
 bool circleIntersectsSquare(circle c, square box) {
-  float closestX = max(min(c.x, box.right), box.left);
-  float closestY = max(min(c.y, box.top), box.bottom);
+  float top = float_of_int(box.top);
+  float bottom = float_of_int(box.bottom);
+  float left = float_of_int(box.left);
+  float right = float_of_int(box.right);
+  float closestX = max(min(c.x, right), left);
+  float closestY = max(min(c.y, top), bottom);
   float distX = closestX - c.x;
   float distY = closestY - c.y;
   return distX * distX + distY * distY <= c.radius * c.radius;
@@ -43,15 +47,13 @@ square[][] partitionImage(int width, int height, int num_squares, int num_circle
   int[] xs = range(0, width / num_squares, 1);
   int[] ys = range(0, height / num_squares, 1);
 
-  float fnum = float_of_int(num_squares);
-
   return for (int h : ys) {
     return for (int w : xs) {
       return struct square {
-	left = float_of_int(w) * fnum;
-        right = float_of_int(w + 1) * fnum;
-        top = float_of_int(h) * fnum;
-        bottom = float_of_int(h + 1) * fnum;
+	left = w * num_squares;
+        right = (w + 1) * num_squares;
+        top = h * num_squares;
+        bottom = (h + 1) * num_squares;
       };
     };
   };
@@ -98,7 +100,7 @@ int setAlpha(int x, int alpha) {
 int blendColor(float a1, float a2, int c1, int c2, int offset) {
   //@ requires offset in {0, 8, 16, 24};
   float blend = (a1 * float_of_int(getColor(c1, offset)) +
-                 a2 * float_of_int(getColor(c2, offset)))
+                 a2 * float_of_int(getColor(c2, offset)));
   return int_of_float(blend) & 0xFF;
 }
 
@@ -120,10 +122,15 @@ bool pixelInCircle(circle c, float normX, float normY) {
   return dx*dx + dy*dy <= c.radius * c.radius;
 }
 
-/*
-int[][][][] renderSquares(square[][] squares, int[][][] scanned, circle[] circles, int num_squares, int width, int height) {
-  return for (sub_squares : squares) {
-    return for (square : sub_squares) {
+int[][][][] renderSquares(
+    square[][] squares,
+    int[][][] scanned,
+    circle[] circles,
+    int num_squares,
+    int width,
+    int height) {
+  return for (square[] sub_squares : squares) {
+    return for (square square : sub_squares) {
 
       float fWidth = float_of_int(width);
       float fHeight = float_of_int(height);
@@ -138,11 +145,11 @@ int[][][][] renderSquares(square[][] squares, int[][][] scanned, circle[] circle
           int[] ids = scanned[x][y];
           bool[] ix = for (int id : ids) {
             return pixelInCircle(circles[id], normX, normY);
-          }
+          };
 
           int[] colors = for (int id : ids) {
             return circles[id].color;
-          }
+          };
 
           int[] ix_colors = filter_with(colors, ix);
 
@@ -154,6 +161,7 @@ int[][][][] renderSquares(square[][] squares, int[][][] scanned, circle[] circle
   };
 }
 
+/*
 // Traverses the block array and creates a copy.
 int[][] concatPixelSubarrays (int[][][][] pixels, int width, int height) {
   int squareHeight = dim2(pixels);
@@ -179,5 +187,4 @@ int[][] renderImage(int image_width, int image_height, circle[] circles) {
   int[][][] scanned = scanCircles(squares, circles);
   int[][][][] pixels = renderSquares(squares, scanned, circles, num_squares, image_width, image_height);
   return concatPixelSubarrays(pixels, image_width, image_height);
-}
-*/
+}*/

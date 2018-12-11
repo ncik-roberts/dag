@@ -91,6 +91,7 @@ let infer_unop (unop : Ast.unop) : fun_type =
   let allowed_types = match unop with
   | Ast.Negate -> [ Int; Float; ]
   | Ast.Logical_not -> [ Int; Bool; ]
+  | Ast.Bitwise_not -> [ Int; ]
   in
   {
     param_types = [ None ];
@@ -313,7 +314,22 @@ let rec check_expr (ctx : tctxt) (ast : unit Ast.expr) : typ Ast.expr = match sn
         match arg with
         | Ast.Bare_binop ((), b) -> let ty = Fun (infer_binop b) in (ty, Ast.Bare_binop (ty, b))
         | Ast.Bare_unop ((), u) -> let ty = Fun (infer_unop u) in (ty, Ast.Bare_unop (ty, u))
-        | Ast.Expr e -> let (ty, _) as e' = check_expr ctx e in (ty, Ast.Expr e'))
+        | Ast.Fn_ptr _ -> failwith "This isn't identified by the user."
+        | Ast.Expr e ->
+            try
+              let (ty, _) as e' = check_expr ctx e in (ty, Ast.Expr e')
+            with _ -> begin
+              let open Option.Monad_infix in begin
+                match e with
+                | ((), Ast.Variable id) -> Option.return id
+                | _ -> None
+              end >>= fun id ->
+              Map.find ctx.fun_ctx id >>= fun fun_type ->
+              Option.return (Fun fun_type, id)
+            end |> function
+              | None -> failwith "Failed to typecheck expression used as argument."
+              | Some (fun_type, id) -> (fun_type, Ast.Fn_ptr (fun_type, id))
+          )
         |> List.unzip
       in
       (* An ast with partially-applied functions at each node. *)

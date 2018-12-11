@@ -416,6 +416,8 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
   | Air.Binop (d, op, s1, s2) ->
       [ d <-- CU.Binop (trans_binop op, trans_op_exn ctx s1, trans_op_exn ctx s2) ]
   | Air.Index (d, src, i) ->
+      Option.iter (match d with Ir.Dest t -> Some t | _ -> None)
+        ~f:(fun key -> Temp.Table.add ctx.allocation_method ~key ~data:`Unallocated |> dedup __LINE__);
       begin
         match src with
         | Air.Temp t ->

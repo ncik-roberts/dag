@@ -43,6 +43,8 @@ type context = {
     ] Temp.Table.t;
 
   bear_with_me : CU.cuda_expr list Temp.Table.t;
+
+  extra_lengths : CU.cuda_expr list Temp.Table.t;
 }
 
 (* Unique identifier for functions. s*)
@@ -233,6 +235,10 @@ and build_index_expr lens init =
 and get_lengths (ctx : context) (t : Temp.t) : CU.cuda_expr list =
   match Map.find Ano.(ctx.result.buffer_infos) t with
   | Some inf -> List.map ~f:trans_len_expr Ano.(inf.length)
+  | None ->
+
+  match Temp.Table.find ctx.extra_lengths t with
+  | Some lengths -> lengths
   | None ->
 
   match ctx.lvalue_lengths with
@@ -434,9 +440,6 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
   | Air.Unop (d, op, s) ->
       [ d <-- CU.Unop (trans_unop op, trans_op_exn ctx s) ]
   | Air.Assign (d, s) ->
-      prerr_endline (match ctx.lvalue with
-        | None -> "None"
-        | Some lv -> Expr.sexp_of_t lv |> Sexp.to_string_hum);
       [ d <-- trans_op_exn ctx s ]
   | Air.Primitive (d, s) ->
       [ d <-- trans_prim ctx s]
@@ -631,12 +634,15 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
        * bound_temps. *)
       let indices = List.map bound_array_views ~f:Tuple3.get2 in
       let (start, start_indices) =
-        Option.value_map ctx.lvalue
-          ~default:(Temp.next Tc.Int (), [])
-          ~f:(fix (fun loop -> function
-                | Expr.Index (e, Expr.Temp t) -> let (w, es) = loop e in (w, t :: es)
-                | Expr.Temp t -> (t, [])
-                | _ -> failwith ":("))
+        match dest with
+        | Ir.Dest t -> (t, [])
+        | Ir.Return _ ->
+            Option.value_map ctx.lvalue
+              ~default:(Temp.next Tc.Int (), [])
+              ~f:(fix (fun loop -> function
+                    | Expr.Index (e, Expr.Temp t) -> let (w, es) = loop e in (w, t :: es)
+                    | Expr.Temp t -> (t, [])
+                    | _ -> failwith ":("))
       in
 
       let lengths =
@@ -699,6 +705,10 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
        * are unique temps (and therefore will have unique parameter names).
        *)
       let output_buffer_param = Temp.next (Ir.type_of_dest dest) () in
+      (*let output_lengths = List.drop lengths (List.length start_indices) in*)
+
+      Temp.Table.add_exn ctx.extra_lengths ~key:output_buffer_param ~data:lengths;
+
       let (kernel_params, kernel_args) =
         (* List of tuples of types, params, and args *)
         let tpas = List.concat [
@@ -839,6 +849,7 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t) (resul
     lvalue_filter = (Temp.Map.empty, None); (*TODO*)
     lvalue = Option.map ~f:(fun t -> Expr.Temp t) lvalue;
     bear_with_me;
+    extra_lengths = Temp.Table.create ();
     lvalue_lengths =
       begin
         let open Option.Monad_infix in

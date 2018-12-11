@@ -20,6 +20,12 @@ type context = {
   lvalue : Expr.t option; (* this is an lvalue and its lengths *)
   lvalue_lengths : Length_expr.t list option;
 
+  (* Given one of those "placeholder" temps (with int type) saved from
+   * the previous step, give the current lvalue corresponding to the
+   * place where that temp is to be saved.
+   *)
+  lvalue_filter : (CU.cuda_expr * CU.cuda_expr) Temp.Map.t;
+
   out_param : Temp.t option;
 
   (* Temps indicating the dimensions of parameters. *)
@@ -98,6 +104,33 @@ let trans_params (params : Ano.Param.t list) : (CU.cuda_type * CU.cuda_ident) li
 
      (* A non-array parameter, sadly, is not. *)
      | Ano.Param.Not_array t -> List.return (trans_type (Temp.to_type t), temp_name t))
+
+let update_lvalue ctx dest bound_array_views =
+  let (_, lvalue_filter) =
+    begin
+      match Map.find Ano.(ctx.result.buffer_infos) (Ir.temp_of_dest dest) with
+        | None -> failwith "Didn't find that."
+        | Some bi ->
+
+      List.fold Ano.(bi.filtered_lengths) ~init:(Tc.Int, ctx.lvalue_filter)
+        ~f:(fun (typ, acc) t_opt ->
+          let typ' = Tc.Array typ in
+          let acc' = match t_opt with
+            | None -> acc
+            | Some t ->
+              let (elem, ls) = match Map.find acc t with
+                | None ->
+                    let t = Temp.next typ () in
+                    (temp_to_var t, CU.IConst 0L)
+                | Some expr -> expr
+              in
+              let ls' =
+                List.fold_left bound_array_views ~init:ls ~f:(fun ls (_, t_idx, _) -> CU.Binop (CU.ADD, temp_to_var t_idx, ls))
+              in
+              Map.set acc ~key:t ~data:(elem, ls')
+          in (typ', acc'))
+    end
+  in lvalue_filter
 
 let rec lengths ctx (_, av) = match av with
   | Air.Array t -> get_lengths ctx t
@@ -197,8 +230,28 @@ and build_index_expr lens init =
 and get_lengths (ctx : context) (t : Temp.t) : CU.cuda_expr list =
   match Map.find Ano.(ctx.result.buffer_infos) t with
   | Some inf -> List.map ~f:trans_len_expr Ano.(inf.length)
-  | None -> List.map ~f:trans_len_expr (Option.value_exn ctx.lvalue_lengths)
+  | None ->
+
+  match ctx.lvalue_lengths with
+  | None -> failwithf "`%d`" (Temp.to_int t) ()
+  | Some v -> List.map ~f:trans_len_expr v
       (* failwithf "Couldn't find buffer size for `%d`" (Temp.to_int t) () *)
+
+and get_filter_lvalue (ctx : context) (t : Temp.t) : CU.cuda_expr =
+  match Map.find Ano.(ctx.result.buffer_infos) t with
+  | Some bi ->
+    begin
+      match Ano.(bi.filtered_lengths) with
+      | Some t :: _ ->
+        begin
+          match Map.find ctx.lvalue_filter t with
+          | Some (expr1, expr2) -> CU.Index (expr1, expr2)
+          | None -> temp_to_var t
+        end
+      | None :: _ -> failwith "I don't know how this is possible -- 1."
+      | [] -> failwith "I don't know how this is possible -- 2."
+    end
+  | None -> failwith "Can't currently return a filtered thing from the main function."
 
 and trans_index_expr
   (ctx : context)
@@ -285,7 +338,7 @@ let multiply_cuda_exprs (exprs : CU.cuda_expr list) =
 (* Translate a statement irrespective of parallel/sequential semantics *)
 let rec trans_a_stmt : type a. (context -> a -> CU.cuda_stmt list) -> context -> a Air.stmt -> CU.cuda_stmt list =
   fun continuation ctx -> function
-    | Air.For (dest, (bound_temp, t_idx, view), stmt) ->
+    | Air.For (dest, (bound_temp, t_idx, view as bd), stmt) ->
         (* Get the destination buffer which the for loop is being assigned into. *)
         let dest_array = dest_to_expr_lvalue ctx dest in
 
@@ -298,7 +351,8 @@ let rec trans_a_stmt : type a. (context -> a -> CU.cuda_stmt list) -> context ->
         let body =
           (* The lvalue for the for body is an index into the destination array. *)
           (* Translate the body under the new lvalue. *)
-          let ctx' = { ctx with lvalue = Some (Expr.Index (dest_array, Expr.Temp t_idx)) } in
+          let ctx' = { ctx with lvalue = Some (Expr.Index (dest_array, Expr.Temp t_idx));
+                                lvalue_filter = update_lvalue ctx dest [bd]; } in
           continuation ctx' stmt in
 
        let to_memcpy =
@@ -424,6 +478,7 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       in
       [ CU.DeclareAssign (CU.Integer, temp_name acc, CU.IConst 0L);
         CU.Loop (hdr, [ check_stmt ]);
+        CU.Assign (get_filter_lvalue ctx (Ir.temp_of_dest dest), temp_to_var acc);
       ]
 
   | Air.Scan (dest, op, init, (t, _)) ->
@@ -470,6 +525,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         | Some k_inf -> k_inf
         | None -> failwith "Failed to find kernel info. (trans_stmt_par)"
       in
+
 
       List.iter bound_array_views ~f:(fun (_, _, av) ->
         fix
@@ -638,7 +694,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
                   CU.Assign (acc, CU.Binop (CU.DIV, acc, len));
                 ]
               );
-              trans_seq_stmt { ctx with lvalue = Some lvalue; } body;
+              trans_seq_stmt { ctx with lvalue = Some lvalue; lvalue_filter = update_lvalue ctx dest bound_array_views; } body;
             ]
           end;
       }) in
@@ -732,13 +788,15 @@ let trans (program : Air.t) (struct_decls : Tc.struct_type Tc.IdentMap.t) (resul
   let body = trans_par_stmt {
     result;
     allocation_method;
+    lvalue_filter = Temp.Map.empty;
     lvalue = Option.map ~f:(fun t -> Expr.Temp t) lvalue;
-    lvalue_lengths = begin
-      let open Option.Monad_infix in
-      lvalue >>= fun t ->
-      Map.find Ano.(result.buffer_infos) t >>= fun x ->
-      Option.return Ano.(x.length)
-    end;
+    lvalue_lengths =
+      begin
+        let open Option.Monad_infix in
+        lvalue >>= fun t ->
+        Map.find Ano.(result.buffer_infos) t >>= fun x ->
+        Option.return Ano.(x.length)
+      end;
     out_param = lvalue;
     backed_temps = Temp.Hash_set.create ();
     dims_of_params = List.concat_map Ano.(result.params) ~f:(function

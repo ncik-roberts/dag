@@ -64,21 +64,23 @@ let annotate_array_view
         let bi = lookup_exn ctx t in
         { dim = bi.dim;
           length = bi.length;
-          index = Many_fn.Result (Expr.Temp t);
           filtered_lengths = bi.filtered_lengths;
+          index = Many_fn.Result (Expr.Temp t);
           typ = bi.typ;
         }
     | (_, Air.Array_index (t1, t2)) ->
         let bi = lookup_exn ctx t1 in
         { dim = bi.dim - 1;
           length = List.tl_exn bi.length;
-          filtered_lengths = Option.map ~f:List.tl_exn bi.filtered_lengths;
+          filtered_lengths = List.tl_exn bi.filtered_lengths;
           index = app bi.index (Expr.Temp t2);
           typ = (match bi.typ with Tc.Array t -> t | _ -> failwith "No.");
         }
 
     | (typ, Air.Transpose av) ->
         let bi = loop av in
+        (if List.exists ~f:(Option.is_some) bi.filtered_lengths
+           then failwith "Can't transpose filtered array.");
         assert (typ = bi.typ);
         { bi with
             index =
@@ -88,6 +90,8 @@ let annotate_array_view
         }
     | (typ, Air.Reverse av) ->
         let bi = loop av in
+        (if List.exists ~f:(Option.is_some) bi.filtered_lengths
+           then failwith "Can't transpose reversed array.");
         assert (typ = bi.typ);
         let n_minus_1 = (* n - 1 *)
           Expr.Call (Ir.Operator.Binop Ast.Minus,
@@ -100,8 +104,8 @@ let annotate_array_view
     | (typ, Air.Tabulate (b, e, s)) ->
         { typ = Tc.(Array Int);
           dim = 1;
-          filtered_lengths = None;
           length = List.return Length_expr.(Div (Minus (Temp e, Temp b), Temp s));
+          filtered_lengths = [None];
           index = Many_fn.Fun (fun expr -> Many_fn.Result begin
             Expr.Call (Ir.Operator.Binop Ast.Plus, [
               Expr.Temp b;
@@ -124,8 +128,8 @@ let annotate_array_view
         assert (dim = 1); (* Don't know how to handle other cases yet. *)
         { dim;
           length = hd.length;
+          filtered_lengths = [ List.hd_exn hd.filtered_lengths ];
           typ;
-          filtered_lengths = hd.filtered_lengths;
           index =
             Many_fn.Fun (fun expr ->
               let e =
@@ -180,41 +184,29 @@ let defined_of_dest : Ir.dest -> Temp.Set.t =
 let mk_buffer_info_out_of_temp t kernel_ctx buffer_infos =
   (* DON'T ASK *)
   match kernel_ctx.return_buffer_info with
-  | Some buffer_info ->
-      A_air.{
-        typ = Temp.to_type t;
-        dim = 1 + buffer_info.dim;
-        length = List.map buffer_infos ~f:(fun bi -> List.hd_exn bi.length) @ buffer_info.length;
-        index = begin
-          let (_, fn, _) = build_length_function (Temp.to_type t) in
-          Many_fn.Fun (fun e -> Many_fn.Result (fn (Expr.Temp t) e))
-        end;
-        filtered_lengths = begin
-          let chosen = ref false in
-          let set_chosen x =
-            chosen := true;
-            x
-          in
-          let fi =
-            Option.value_map buffer_info.filtered_lengths ~f:set_chosen ~default:buffer_info.length
-          in
-          let rest = List.map buffer_infos ~f:(fun bi ->
-            Option.value_map bi.filtered_lengths
-              ~default:(List.hd_exn bi.length) ~f:(Fn.compose set_chosen List.hd_exn))
-          in
-          if !chosen then Some (fi @ rest) else None
-        end;
-      }
+  | Some buffer_info -> A_air.{
+      typ = Temp.to_type t;
+      dim = 1 + buffer_info.dim;
+      length = List.map buffer_infos ~f:(fun bi -> List.hd_exn bi.length) @ buffer_info.length;
+      filtered_lengths = begin
+        List.map ~f:(fun bi -> List.hd_exn bi.filtered_lengths) buffer_infos
+          @ buffer_info.filtered_lengths
+      end;
+      index = begin
+        let (_, fn, _) = build_length_function (Temp.to_type t) in
+        Many_fn.Fun (fun e -> Many_fn.Result (fn (Expr.Temp t) e))
+      end;
+    }
   | None -> A_air.{
-        typ = Temp.to_type t;
-        dim = List.length buffer_infos;
-        length = List.map buffer_infos ~f:(fun bi -> List.hd_exn bi.length);
-        index = begin
-          let (_, fn, _) = build_length_function (Temp.to_type t) in
-          Many_fn.Fun (fun e -> Many_fn.Result (fn (Expr.Temp t) e))
-        end;
-        filtered_lengths = None;
-      }
+      typ = Temp.to_type t;
+      dim = List.length buffer_infos;
+      length = List.map buffer_infos ~f:(fun bi -> List.hd_exn bi.length);
+      filtered_lengths = List.map ~f:(fun bi -> List.hd_exn bi.filtered_lengths) buffer_infos;
+      index = begin
+        let (_, fn, _) = build_length_function (Temp.to_type t) in
+        Many_fn.Fun (fun e -> Many_fn.Result (fn (Expr.Temp t) e))
+      end;
+    }
 
 let update_backing_temps
   (backing_temps : Temp.Set.t Temp.Map.t)
@@ -262,7 +254,7 @@ and annotate_par_stmt (ctx : context) (stmt : Air.par_stmt) : context =
                 (match dest with
                  | Ir.Return _ -> Fn.id
                  | Ir.Dest t -> Map.add_exn ~key:t ~data:(mk_buffer_info_out_of_temp t kernel_ctx buffer_infos));
-          }
+          };
       }
   | Air.Seq stmt -> snd (annotate_seq_stmt ctx stmt)
   | Air.Par_stmt par_stmt -> annotate_par_stmt_stmt ctx par_stmt
@@ -325,7 +317,11 @@ and annotate_stmt
       let my_buffer_info =
         let typ = A_air.(buffer_info1.typ) in
         let (_, index, _) = build_length_function typ in
-        A_air.{ buffer_info1 with index = Many_fn.Fun (fun e -> Many_fn.Result (index (Expr.Temp (Ir.temp_of_dest dest)) e)); }
+        let temp = Temp.next Tc.Int () in (* placeholder type; won't reach CUDA *)
+        A_air.{ buffer_info1 with
+          index = Many_fn.Fun (fun e -> Many_fn.Result (index (Expr.Temp (Ir.temp_of_dest dest)) e));
+          filtered_lengths = Some temp :: List.tl_exn buffer_info1.filtered_lengths;
+        }
       in
       ({ used = kernel_ctx.used;
          defined = Set.union defined kernel_ctx.defined;
@@ -488,7 +484,7 @@ let param_of_temp : Temp.t -> A_air.Param.t * A_air.buffer_info option =
     | _ -> (Param.Array (p, ts), Some A_air.{
         length = List.map ~f:(fun t -> Length_expr.Temp t) ts;
         index = Many_fn.Fun (fun e -> Many_fn.Result (index (Expr.Temp p) e));
-        filtered_lengths = None;
+        filtered_lengths = List.init dim ~f:(fun _ -> None);
         dim;
         typ;
       })

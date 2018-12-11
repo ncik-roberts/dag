@@ -156,11 +156,13 @@ let rec update_lvalue ctx dest bound_array_views =
 
   match bi with
   | None -> ctx.lvalue_filter
-  | Some bi -> update_lvalue_with Ano.(bi.filtered_lengths) (fst ctx.lvalue_filter) bound_array_views
+  | Some bi -> update_lvalue_with ctx
+      (List.map ~f:trans_len_expr Ano.(bi.length))
+      Ano.(bi.filtered_lengths) (fst ctx.lvalue_filter) bound_array_views
 
-and update_lvalue_with filtered_lengths map bound_array_views =
-  let (_, result) = List.fold filtered_lengths ~init:(Tc.Int, map)
-    ~f:(fun (typ, acc) t_opt ->
+and update_lvalue_with ctx lens filtered_lengths map bound_array_views =
+  let (_, result) = List.foldi filtered_lengths ~init:(Tc.Int, map)
+    ~f:(fun i (typ, acc) t_opt ->
       let typ' = Tc.Array typ in
       let acc' = match t_opt with
         | None -> acc
@@ -168,6 +170,8 @@ and update_lvalue_with filtered_lengths map bound_array_views =
           let elem = match Map.find acc t with
             | None ->
                 let t = Temp.next typ () in
+                let lens = List.take lens i in
+                Temp.Table.add_exn ctx.extra_lengths ~key:t ~data:lens;
                 Expr.Temp t
             | Some expr -> expr
           in
@@ -187,7 +191,7 @@ and update_lvalue_with filtered_lengths map bound_array_views =
 
   (result, temp)
 
-let rec lengths ctx (_, av) = match av with
+and lengths ctx (_, av) = match av with
   | Air.Array t -> get_lengths ctx t
   | Air.Array_index (t, _) -> List.drop (get_lengths ctx t) 1
   | Air.Zip_with (_, []) -> failwith "lol"
@@ -299,7 +303,7 @@ and get_lengths (ctx : context) (t : Temp.t) : CU.cuda_expr list =
   | None -> failwithf "`%d`" (Temp.to_int t) ()
   | Some v -> List.map ~f:trans_len_expr v
 
-and get_filter_lvalue (ctx : context) (t : Temp.t) : CU.cuda_expr =
+and get_filter_lvalue (ctx : context) (dest : Ir.dest) (t : Temp.t) : CU.cuda_expr =
   let t =
     match Map.find Ano.(ctx.result.buffer_infos) t with
     | Some bi ->
@@ -311,6 +315,10 @@ and get_filter_lvalue (ctx : context) (t : Temp.t) : CU.cuda_expr =
       end
     | None ->
 
+    match snd ctx.lvalue_filter, dest with
+    | Some t, Ir.Return _ -> t
+    | _ ->
+
     match Map.find Ano.(ctx.result.returned_buffer_infos) t with
     | Some bi ->
       begin
@@ -319,11 +327,7 @@ and get_filter_lvalue (ctx : context) (t : Temp.t) : CU.cuda_expr =
         | None :: _ -> failwith "I don't know how this is possible -- 1."
         | [] -> failwith "I don't know how this is possible -- 2."
       end
-    | None ->
-
-    match snd ctx.lvalue_filter with
     | None -> failwith "Don't currently support returning filtered thing from main."
-    | Some t -> t
   in
 
   begin
@@ -601,7 +605,7 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       in
       [ CU.DeclareAssign (CU.Integer, temp_name acc, CU.IConst 0L);
         CU.Loop (hdr, [ check_stmt ]);
-        CU.Assign (get_filter_lvalue ctx (Ir.temp_of_dest dest), temp_to_var acc);
+        CU.Assign (get_filter_lvalue ctx dest (Ir.temp_of_dest dest), temp_to_var acc);
       ]
 
   | Air.Scan (dest, op, init, (t, _)) ->
@@ -806,19 +810,31 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
           | None -> (acc, None)
           | Some t ->
               let typ = Fn.apply_n_times ~n:i (fun x -> Tc.Array x) Tc.Int in
-              let lens = Temp.Table.find_exn ctx.extra_lengths t in
-              let old_type =
-                let expr = Map.find_exn acc t in
-                fix (fun loop -> function
-                  | Expr.Temp t -> Temp.to_type t
-                  | Expr.Index (lhs, _) -> loop lhs
-                  | _ -> failwith ":(") expr
-              in
-              let lens = List.drop lens (typ_diff old_type typ) in (* Oh my god *)
-              let temp = Temp.next typ () in
-              Temp.Table.add_exn ctx.extra_lengths ~key:temp ~data:lens;
-              Temp.Table.add_exn ctx.bear_with_me ~key:temp ~data:lens;
-              (Map.set acc ~key:t ~data:(Expr.Temp temp), Some (temp, t)))
+              begin
+                match Temp.Table.find ctx.extra_lengths t with
+                | None ->
+                  let temp = Temp.next typ () in
+                  let temp2 = Temp.next typ () in
+                  let lens = List.take lengths i in
+                  Temp.Table.add_exn ctx.extra_lengths ~key:temp ~data:lens;
+                  Temp.Table.add_exn ctx.extra_lengths ~key:temp2 ~data:lens;
+                  let dest = Expr.Temp temp2 in
+                  (Map.set acc ~key:t ~data:(Expr.Temp temp), Some (temp, dest))
+                | Some lens ->
+                  let old_type =
+                    let expr = Map.find_exn acc t in
+                    fix (fun loop -> function
+                      | Expr.Temp t -> Temp.to_type t
+                      | Expr.Index (lhs, _) -> loop lhs
+                      | _ -> failwith ":(") expr
+                  in
+                  let lens = List.drop lens (typ_diff old_type typ) in (* Oh my god *)
+                  let temp = Temp.next typ () in
+                  Temp.Table.add_exn ctx.extra_lengths ~key:temp ~data:lens;
+                  Temp.Table.add_exn ctx.bear_with_me ~key:temp ~data:lens;
+                  let dest = Map.find_exn (fst ctx.lvalue_filter) t in
+                  (Map.set acc ~key:t ~data:(Expr.Temp temp), Some (temp, dest))
+              end)
         |> Tuple2.map_snd ~f:List.filter_opt
       in
       let filter_params = List.map ~f:fst fwd in
@@ -839,8 +855,8 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       let bound_temps = List.map ~f:Tuple3.get1 bound_array_views in
       List.iter bound_temps ~f:(fun key ->
         Temp.Table.set ctx.allocation_method ~key ~data:`Unallocated);
-      let lengths = List.map ~f:(get_length ctx) bound_temps in
-      let total_length = multiply_cuda_exprs lengths in
+      let bound_temp_lengths = List.map ~f:(get_length ctx) bound_temps in
+      let total_length = multiply_cuda_exprs bound_temp_lengths in
 
       let gdim = (CU.IConst 256L, CU.IConst 1L, CU.IConst 1L) in
       let bdim = (CU.Binop (CU.DIV, total_length, CU.IConst 256L), CU.IConst 1L, CU.IConst 1L) in (* Todo: make this blocks/thrd  *)
@@ -868,13 +884,13 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
               [ CU.DeclareAssign (CU.Integer, temp_name i_temp, index_expr);
                 CU.DeclareAssign (CU.Integer, temp_name acc_temp, i);
               ];
-              List.concat_map (List.zip_exn indices lengths) ~f:(fun (idx, len) ->
+              List.concat_map (List.zip_exn indices bound_temp_lengths) ~f:(fun (idx, len) ->
                 [ CU.DeclareAssign (CU.Integer, temp_name idx, CU.Binop (CU.MOD, acc, len));
                   CU.Assign (acc, CU.Binop (CU.DIV, acc, len));
                 ]
               );
               trans_seq_stmt { ctx with lvalue = Some lvalue; lvalue_filter =
-                update_lvalue_with (get_filtered_lengths ctx dest) lvalue_filter bound_array_views; } body;
+                update_lvalue_with ctx lengths (get_filtered_lengths ctx dest) lvalue_filter bound_array_views; } body;
             ]
           end;
       }) in
@@ -902,9 +918,9 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
           CU.Binop (CU.MUL, CU.Size_of (remove_arrays (Ir.type_of_dest dest)),
             multiply_cuda_exprs lengths),
           (Device, Host))
-        ] @ CU.(List.map fwd ~f:(fun (t, t_old) ->
+        ] @ CU.(List.map fwd ~f:(fun (t, dest) ->
           Transfer (
-            trans_expr ctx (Map.find_exn (fst ctx.lvalue_filter) t_old),
+            trans_expr ctx dest,
             temp_to_var t,
             CU.Binop (CU.MUL, CU.Size_of CU.Integer,
               multiply_cuda_exprs (Temp.Table.find_exn ctx.extra_lengths t)

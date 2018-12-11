@@ -12,11 +12,28 @@ int[][] f3(int[][] xss, bool[] bs) {
   };
 }
 
-int f(int[][][] xsss, bool[] bs) {
+int f4(int[] xs, bool[] bs) {
+  int[] ys = filter_with(xs, bs);
+  return dim0(ys);
+}
+
+int f5(int[][] xss, bool[] bs) {
+  int[][] yss = for (int[] xs : xss) {
+    return filter_with(xs, bs);
+  };
+  return dim0(yss);
+}
+
+int f6(int[][][] xsss, bool[] bs) {
   int[][][] ysss = for (int[][] xss : xsss) {
     return for (int[] xs : xss) {
       return filter_with(xs, bs);
     };
   };
   return dim0(ysss);
+}
+
+int f7(int[] xs, bool[] bs) {
+  int[] ys = filter_with(xs, bs);
+  return reduce(+, 0, ys);
 }

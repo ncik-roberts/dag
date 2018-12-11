@@ -1055,14 +1055,14 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
       CU.(Function {
             typ = Host;
             ret = trans_type Air.(p.return_type);
-            name = "dag_host_" ^ Air.(program.fn_name);
+            name = "dag_host_" ^ Air.(p.fn_name);
             params = ps;
             body = b;
       }),
       CU.(Function {
             typ = Device;
             ret = trans_type Air.(p.return_type);
-            name = "dag_device_" ^ Air.(program.fn_name);
+            name = "dag_device_" ^ Air.(p.fn_name);
             params = ps;
             body = b;
       }))

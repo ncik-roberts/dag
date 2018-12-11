@@ -27,29 +27,29 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
     List.concat_map dag ~f:(fun dag_fun ->
       if mem Dag.(dag_fun.dag_name) then begin
         note "start";
-        say (fun() -> [
+        (*say (fun() -> [
           "Original dag:";
           Sexp.to_string_hum (Dag.sexp_of_dag_fun dag_fun);
-        ]);
+        ]);*)
         let inline = Dag.inline dag_fun dag in
         note "inline";
-        say (fun () -> [
+        (*say (fun () -> [
           "Inlined:";
           Sexp.to_string_hum (Dag.sexp_of_dag_fun inline);
-        ]);
+        ]);*)
         let traversal = Dag_traversal.any_traversal inline.Dag.dag_graph ~seed:101
         in
         note "traversal";
-        say (fun () -> [
+        (*say (fun () -> [
           "Traversal:";
           Sexp.to_string_hum (Dag_traversal.sexp_of_traversal traversal);
-        ]);
+        ]);*)
         let airs =
           let (ir, temp_dag) = Dag_to_ir.run inline traversal in
-          say (fun () -> [
+          (*say (fun () -> [
             "IR:";
             Sexp.to_string_hum (Ir.sexp_of_t ir);
-          ]);
+          ]);*)
           Ir_to_air.all ir temp_dag ~n:(Some 4)
         in
         note "ir_to_air";
@@ -59,9 +59,9 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
             Air.Pretty_print.pp_t air;
           ]);
           let ann = Annotate.annotate air in (* Annotations *)
-          say (fun () -> [
+          (*say (fun () -> [
             Sexp.to_string_hum (Annotated_air.sexp_of_result ann);
-          ]);
+          ]);*)
 
           let cuda = Cuda_trans.trans air Tc.(ctx.struct_ctx) ann in
           say (fun () -> [

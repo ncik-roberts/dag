@@ -276,6 +276,10 @@ and get_lengths (ctx : context) (t : Temp.t) : CU.cuda_expr list =
   | Some inf -> List.map ~f:trans_len_expr Ano.(inf.length)
   | None ->
 
+  match Map.find Ano.(ctx.result.returned_buffer_infos) t with
+  | Some inf -> List.map ~f:trans_len_expr Ano.(inf.length)
+  | None ->
+
   match Temp.Table.find ctx.extra_lengths t with
   | Some lengths -> lengths
   | None ->
@@ -370,6 +374,13 @@ let app index t = Many_fn.app index t ~default:(fun arr -> Expr.Index (arr, t))
 let rec app_expr ctx f e = Many_fn.compose (trans_expr ctx) (app f e)
 
 let get_length ctx t = List.hd_exn (get_lengths ctx t)
+
+let get_expr_index (ctx : context) (t : Temp.t) : Temp.t -> (Expr.t, Expr.t) Many_fn.t =
+  match Map.find Ano.(ctx.result.buffer_infos) t with
+  | Some inf ->
+      (* Lookup function *)
+      fun t -> app Ano.(inf.index) (Expr.Temp t)
+  | None -> failwithf "Couldn't find buffer index for `%d`" (Temp.to_int t) ()
 
 let get_index (ctx : context) (t : Temp.t) : Temp.t -> (Expr.t, CU.cuda_expr) Many_fn.t =
   match Map.find Ano.(ctx.result.buffer_infos) t with
@@ -507,11 +518,19 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
            Temp.Table.add ctx.allocation_method ~key:t ~data:`Unallocated |> dedup __LINE__
        | _ -> ());
       let dest_temp = Ir.temp_of_dest dest in
-      let index_fn = get_index ctx dest_temp in
+      let index_fn = get_expr_index ctx dest_temp in
       let loop_temp = Temp.next Tc.Int () in
       let lengths = get_lengths ctx dest_temp in
       let hdr = create_loop ~counter:loop_temp (List.hd_exn lengths) in
-      let body = trans_array_view ctx (dest, loop_temp, index_fn, List.tl_exn lengths) in
+
+      let dest_arr = dest_to_expr_lvalue_exn ctx dest in
+      let lvalue = Expr.Index (dest_arr, Expr.Temp loop_temp) in
+      let typ = match Ir.type_of_dest dest with
+        | Tc.Array t -> t
+        | _ -> failwith ":("
+      in
+
+      let body = trans_array_view ctx (typ, lvalue, loop_temp, index_fn, List.tl_exn lengths) in
       [ CU.Loop (hdr, [ body ]) ]
 
   (* For reduce, we associate the buffer_info for the view with t. *)
@@ -536,15 +555,26 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       List.iter [t1; t2;] ~f:(fun key ->
         Temp.Table.add ctx.allocation_method ~key ~data:`Unallocated
           |> dedup __LINE__);
-      let index1_fn = get_index ctx t1 in
+      let index1_fn = get_expr_index ctx t1 in
       let index2_fn = get_index ctx t2 in
+      let lengths = get_lengths ctx (Ir.temp_of_dest dest) in
       let loop_temp = Temp.next Tc.Int () in
       let acc = Temp.next Tc.Int () in
       let hdr = create_loop ~counter:loop_temp (get_length ctx t1) in
+      let typ = match Ir.type_of_dest dest with
+        | Tc.Array t -> t
+        | _ -> failwith ":("
+      in
       let check_stmt =
         CU.Condition (Many_fn.result_exn ~msg:"cuda_trans1" (index2_fn loop_temp),
-          [ CU.Assign (trans_expr ctx (Expr.Index (dest_to_expr_lvalue_exn ctx dest, Expr.Temp acc)),
-              Many_fn.result_exn ~msg:"cuda_trans2" (index1_fn loop_temp));
+          [
+            trans_array_view ctx (
+              typ,
+              Expr.Index (dest_to_expr_lvalue_exn ctx dest, Expr.Temp acc),
+              loop_temp,
+              index1_fn,
+              lengths
+            );
             CU.AssignOp (CU.ADD, temp_to_var acc, CU.IConst 1L);
           ],
           [ (* nothing to do in else case *) ])
@@ -830,21 +860,26 @@ and trans_seq_stmt_stmt ctx stmt = trans_a_stmt trans_seq_stmt ctx stmt
 and trans_par_stmt_stmt ctx stmt = trans_a_stmt trans_par_stmt ctx stmt
 
 (* Store array_view in dest using loop_var as the counter variable. *)
-and trans_array_view (ctx : context) (dest, loop_temp, index_fn, lengths) : CU.cuda_stmt =
-  let dest_arr = dest_to_expr_lvalue_exn ctx dest in
-  let lvalue = Expr.Index (dest_arr, Expr.Temp loop_temp) in
-
+and trans_array_view (ctx : context) (typ, lvalue, loop_temp, index_fn, lengths) : CU.cuda_stmt =
   (* Ok, we have to case on the type of the destination in order to figure out whether we
    * need to memcpy or if a simple assignment is sufficient. *)
-  let rec loop lvalue lens = function
-    | Many_fn.Result src -> CU.Assign (trans_expr ctx lvalue, src)
-    | Many_fn.Fun f ->
+  let rec loop typ lvalue lens src = match typ with
+    | Tc.Array typ' ->
         let t_idx = Temp.next Tc.Int () in
-        (* TODO: do more than one level *)
+        let src' = match src with
+          | Many_fn.Fun f -> f (Expr.Temp t_idx)
+          (* TODO: Fix *)
+          | Many_fn.Result src -> Many_fn.Result (Expr.Index (src, Expr.Temp t_idx))
+        in
         let hdr = create_loop ~counter:t_idx (List.hd_exn lens) in
-        CU.Loop (hdr, [ loop (Expr.Index (lvalue, Expr.Temp t_idx)) (List.tl_exn lens) (f (Expr.Temp t_idx)) ])
+        CU.Loop (hdr, [ loop typ'
+          (Expr.Index (lvalue, Expr.Temp t_idx))
+          (List.tl_exn lens)
+          src'
+        ])
+    | _ -> CU.Assign (trans_expr ctx lvalue, trans_expr ctx (Many_fn.result_exn src))
   in
-  loop lvalue lengths (index_fn loop_temp)
+  loop typ lvalue lengths (index_fn loop_temp)
 
 let rec extract_kernel_launches : CU.cuda_stmt list -> CU.cuda_func list =
   List.fold_left ~init:[] ~f:(fun kernel_launches -> function

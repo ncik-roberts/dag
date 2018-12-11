@@ -2,7 +2,11 @@ int[] f1(int[] xs, bool[] bs) {
   return filter_with(xs, bs);
 }
 
-int[][] f2(int[][] xss, bool[] bs) {
+int[][] f2(int[][] xs, bool[] bs) {
+  return filter_with(xs, bs);
+}
+
+int[][] f3(int[][] xss, bool[] bs) {
   return for (int[] xs : xss) {
     return filter_with(xs, bs);
   };

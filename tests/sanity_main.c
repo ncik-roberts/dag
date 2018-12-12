@@ -9,16 +9,14 @@
 // 
 // We increase the size accordingly to run a larger benchmark.
 
-int* saxpy_int(int* a,int* b,int* c, int len){
-  int* result = (int*) malloc(len * sizeof(int));
+int* saxpy_int(int* result, int* a,int* b,int* c, int len){
   for (int i = 0; i < len; i++){
     result[i] = (a[i]*b[i]) + c[i];
   }
   return result;
 }
 
-float* saxpy_float(float* a,float* b,float* c, int len){
-  float* result = (float*) malloc(len * sizeof(float));
+float* saxpy_float(float* result, float* a,float* b,float* c, int len){
   for (int i = 0; i < len; i++){
     result[i] = (a[i]*b[i]) + c[i];
   }
@@ -41,12 +39,26 @@ float sum_float(float* a, float* b, int len){
   return result;
 }
 
+static inline long minl(long a, long b){
+  return a < b ? a : b;
+}
 
 int main(){
   int NUM_ELEMS = 1 << 20; // A solid million.
+  int NUM_RUNS = 5; // Normalize the timing a bit.
+
   struct timeval t0;
   struct timeval t1;
   long elapsed;
+
+  long timesaxic = __LONG_MAX__;
+  long timesaxfc = __LONG_MAX__;
+  long timesaxid = __LONG_MAX__;
+  long timesaxfd = __LONG_MAX__;
+  long timesumic = __LONG_MAX__;
+  long timesumfc = __LONG_MAX__;
+  long timesumid = __LONG_MAX__;
+  long timesumfd = __LONG_MAX__;
 
   int* iarray1 = initRandomArrayiRange(NUM_ELEMS,0,5);
   int* iarray2 = initRandomArrayiRange(NUM_ELEMS,0,5);
@@ -56,71 +68,83 @@ int main(){
   float* farray3 = initRandomArrayfRange(NUM_ELEMS,0.f,5.f);
 
 
-  printf("Saxpy Int (C)\n");
-  gettimeofday(&t0,NULL);
-  int* saxpyCi = saxpy_int(iarray1,iarray2,iarray3,NUM_ELEMS);
-  gettimeofday(&t1,NULL);
-  elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
-  printf("Time %ld (us)\n",elapsed);
-
   int* saxpyDAGi = (int*) calloc(NUM_ELEMS,sizeof(int));
+  float* saxpyDAGf = (float*) calloc(NUM_ELEMS,sizeof(float)); 
+  int* saxpyCi = (int*) malloc(NUM_ELEMS * sizeof(int));  
+  float* saxpyCf = (float*) malloc(NUM_ELEMS * sizeof(float));
+  int sumCi; int sumDAGi;
+  int sumCf; int sumDAGf;
 
-  printf("Saxpy Int (DAG)\n");
-  gettimeofday(&t0,NULL);
+  // Warm up the GPU before benchmark.
   dag_saxpy(saxpyDAGi,NUM_ELEMS,
-                iarray1,NUM_ELEMS,
-                iarray2,NUM_ELEMS,
-                iarray3,NUM_ELEMS);
-  gettimeofday(&t1,NULL);
+              iarray1,NUM_ELEMS,
+              iarray2,NUM_ELEMS,
+              iarray3,NUM_ELEMS);
+
+  for (int i = 0; i < NUM_RUNS; i++){
+    gettimeofday(&t0,NULL);
+    saxpy_int(saxpyCi,iarray1,iarray2,iarray3,NUM_ELEMS);
+    gettimeofday(&t1,NULL);
     elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
-  printf("Time %ld (us)\n",elapsed);
+    timesaxic = minl(elapsed,timesaxic);
 
-  printf("Saxpy Float (C)\n");
-  gettimeofday(&t0,NULL);
-  float* saxpyCf = saxpy_float(farray1,farray2,farray3,NUM_ELEMS);
-  gettimeofday(&t1,NULL);
-  elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
-  printf("Time %ld (us)\n",elapsed);
+    gettimeofday(&t0,NULL);
+    dag_saxpy(saxpyDAGi,NUM_ELEMS,
+                  iarray1,NUM_ELEMS,
+                  iarray2,NUM_ELEMS,
+                  iarray3,NUM_ELEMS);
+    gettimeofday(&t1,NULL);
+    elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
+    timesaxid = minl(elapsed,timesaxid);
 
+    gettimeofday(&t0,NULL);
+    saxpy_float(saxpyCf,farray1,farray2,farray3,NUM_ELEMS);
+    gettimeofday(&t1,NULL);
+    elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
+    timesaxfc = minl(elapsed,timesaxfc);
 
-  float* saxpyDAGf = (float*) calloc(NUM_ELEMS,sizeof(float));     
-  printf("Saxpy Float (DAG)\n");
-  gettimeofday(&t0,NULL);              
-  dag_saxpy_float(saxpyDAGf,NUM_ELEMS,
-                  farray1,NUM_ELEMS,
-                  farray2,NUM_ELEMS,
-                  farray3,NUM_ELEMS);
-  gettimeofday(&t1,NULL);
-  elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
-  printf("Time %ld (us)\n",elapsed);
+    gettimeofday(&t0,NULL);              
+    dag_saxpy_float(saxpyDAGf,NUM_ELEMS,
+                    farray1,NUM_ELEMS,
+                    farray2,NUM_ELEMS,
+                    farray3,NUM_ELEMS);
+    gettimeofday(&t1,NULL);
+    elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
+    timesaxfd = minl(elapsed,timesaxfd);
 
-  printf("Sum Int (C)\n");
-  gettimeofday(&t0,NULL);  
-  int sumCi = sum_int(iarray1,iarray2,NUM_ELEMS);
-  gettimeofday(&t1,NULL);
-  elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
-  printf("Time %ld (us)\n",elapsed);
+    gettimeofday(&t0,NULL);  
+    sumCi = sum_int(iarray1,iarray2,NUM_ELEMS);
+    gettimeofday(&t1,NULL);
+    elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
+    timesumic = minl(elapsed,timesumic);
 
-  printf("Sum Int (DAG)\n");
-  gettimeofday(&t0,NULL);  
-  int sumDAGi = dag_sum(iarray1,NUM_ELEMS,iarray2,NUM_ELEMS);
-  gettimeofday(&t1,NULL);
-  elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
-  printf("Time %ld (us)\n",elapsed);
+    gettimeofday(&t0,NULL);  
+    sumDAGi = dag_sum(iarray1,NUM_ELEMS,iarray2,NUM_ELEMS);
+    gettimeofday(&t1,NULL);
+    elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
+    timesumid = minl(elapsed,timesumid);
 
-  printf("Sum Float (C)\n");
-  gettimeofday(&t0,NULL);  
-  float sumCf = sum_float(farray1,farray2,NUM_ELEMS);
-  gettimeofday(&t1,NULL);
-  elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
-  printf("Time %ld (us)\n",elapsed);
+    gettimeofday(&t0,NULL);  
+    sumCf = sum_float(farray1,farray2,NUM_ELEMS);
+    gettimeofday(&t1,NULL);
+    elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
+    timesumfc = minl(elapsed,timesumfc);
+  
+    gettimeofday(&t0,NULL); 
+    sumDAGf = dag_sum_float(farray1,NUM_ELEMS,farray2,NUM_ELEMS);
+    gettimeofday(&t1,NULL);
+    elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
+    timesumfd = minl(elapsed,timesumfd);
+  }
 
-  printf("Sum Float (DAG)\n");
-  gettimeofday(&t0,NULL); 
-  float sumDAGf = dag_sum_float(farray1,NUM_ELEMS,farray2,NUM_ELEMS);
-  gettimeofday(&t1,NULL);
-  elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
-  printf("Time %ld (us)\n",elapsed);
+  printf("Saxpy Int (C)    \t%ld\n",timesaxic);
+  printf("Saxpy Int (DAG)  \t%ld\n",timesaxid);
+  printf("Saxpy Float (C)  \t%ld\n",timesaxfc);
+  printf("Saxpy Float (DAG)\t%ld\n",timesaxfd);
+  printf("Sum Int (C)      \t%ld\n",timesumic);
+  printf("Sum Int (DAG)    \t%ld\n",timesumid);
+  printf("Sum Float (C)    \t%ld\n",timesumfc);
+  printf("Sum Float (DAG)  \t%ld\n",timesumfd);
 
   verifyArrays("saxpy",saxpyCi,saxpyDAGi,NUM_ELEMS);
   verifyFloatArrays("saxpyf",saxpyCf,saxpyDAGf,NUM_ELEMS);

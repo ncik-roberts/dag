@@ -38,7 +38,6 @@ int nextPowerTwo(int n0) {
   return n6 + 1;
 }
 
-
 int numSquaresPerSide(int num_circles) {
   return nextPowerTwo(log2(num_circles));
 }

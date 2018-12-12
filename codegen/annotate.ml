@@ -241,7 +241,8 @@ and annotate_par_stmt (ctx : context) (stmt : Air.par_stmt) : kernel_context * c
           }
         in (ctx, bi)
       ) in
-      let (kernel_ctx, ctx) = annotate_seq_stmt ctx body in
+      let (kernel_ctx, ctx) = annotate_seq_stmt ~kernel_ctx:empty_kernel_ctx
+        ctx body in
       let kernel_ctx = { kernel_ctx with defined = List.fold_left tavs ~init:kernel_ctx.defined ~f:(fun acc (t1, t2, _) ->
         acc |> Fn.flip Set.add t1
             |> Fn.flip Set.add t2) }
@@ -264,7 +265,7 @@ and annotate_par_stmt (ctx : context) (stmt : Air.par_stmt) : kernel_context * c
                  | Ir.Dest t -> Map.add_exn ~key:t ~data:bi);
           };
       })
-  | Air.Seq stmt -> annotate_seq_stmt ctx stmt
+  | Air.Seq stmt -> annotate_seq_stmt ~kernel_ctx:empty_kernel_ctx ctx stmt
   | Air.Par_stmt par_stmt -> annotate_par_stmt_stmt ctx par_stmt
 
 and empty_kernel_ctx : kernel_context =
@@ -281,7 +282,8 @@ and annotate_par_stmt_stmt (ctx : context) (par : Air.par_stmt Air.stmt) : kerne
 
 and annotate_seq_stmt_stmt (kernel_ctx : kernel_context) (ctx : context) (seq : Air.seq_stmt Air.stmt)
   : kernel_context * context =
-    annotate_stmt kernel_ctx ctx (fun ~kernel_ctx ctx -> annotate_seq_stmt ctx) seq
+    annotate_stmt kernel_ctx ctx (fun ~kernel_ctx ctx ->
+      annotate_seq_stmt ~kernel_ctx ctx) seq
 
 and annotate_stmt
   : type a.
@@ -445,7 +447,7 @@ and annotate_stmt
        }, ctx')
 
 and annotate_seq_stmt
- ?(kernel_ctx=empty_kernel_ctx)
+ ~kernel_ctx
   (ctx : context)
   (stmt : Air.seq_stmt) : kernel_context * context =
   let (kernel_ctx', ctx) = match stmt with

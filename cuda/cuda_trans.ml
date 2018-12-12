@@ -34,6 +34,9 @@ type context = {
 
   backed_temps : Temp.Hash_set.t;
 
+  (* this is really important *)
+  filtered_lengths_of : Expr.t option list Temp.Table.t;
+
   (* Map from temps to kind of allocation necessary *)
   (* If it's not in here, it's just on the host. *)
   allocation_method :
@@ -311,7 +314,7 @@ and get_lengths (ctx : context) (t : Temp.t) : CU.cuda_expr list =
   | None -> failwithf "`%d`" (Temp.to_int t) ()
   | Some v -> List.map ~f:trans_len_expr v
 
-and get_filter_lvalue (ctx : context) (dest : Ir.dest) (t : Temp.t) : CU.cuda_expr =
+and get_filter_lvalue (ctx : context) (dest : Ir.dest) (t : Temp.t) : Expr.t =
   let t =
     match Map.find Ano.(ctx.result.buffer_infos) t with
     | Some bi ->
@@ -340,8 +343,8 @@ and get_filter_lvalue (ctx : context) (dest : Ir.dest) (t : Temp.t) : CU.cuda_ex
 
   begin
     match Map.find (fst ctx.lvalue_filter) t with
-    | Some expr -> trans_expr ctx expr
-    | None -> temp_to_var t
+    | Some expr -> expr
+    | None -> Expr.Temp t
   end
 
 and trans_index_expr
@@ -405,11 +408,18 @@ let dest_to_stmt (ctx : context) (dest : Ir.dest) (rhs : CU.cuda_expr) : CU.cuda
 let app index t = Many_fn.app index t ~default:(fun arr -> Expr.Index (arr, t))
 let rec app_expr ctx f e = Many_fn.compose (trans_expr ctx) (app f e)
 
-let get_length ctx t =
+let rec get_length_of_av (ctx : context) (_, av : Air.array_view) : Expr.t =
+  match av with
+  | Air.Array t ->
+       Option.value_exn
+        (List.hd_exn
+          (Temp.Table.find_exn ctx.filtered_lengths_of t))
+  | _ -> failwith "WAIT..."
+
+let get_length ctx (t, av) =
   match List.hd_exn (get_filtered_lengths ctx t) with
   | None -> List.hd_exn (get_lengths ctx t)
-  | Some t ->
-      trans_expr ctx (Map.find_exn (fst ctx.lvalue_filter) t)
+  | Some _ -> trans_expr ctx (get_length_of_av ctx av)
 
 let get_expr_index (ctx : context) (t : Temp.t) : Temp.t -> (Expr.t, Expr.t) Many_fn.t =
   match Map.find Ano.(ctx.result.buffer_infos) t with
@@ -452,7 +462,7 @@ let rec trans_a_stmt : type a. (context -> a -> CU.cuda_stmt list) -> context ->
 
         (* Iterate over the bound temp (which Annotate stores as having all the
          * information of the view array). *)
-        let hdr = create_loop ~counter:t_idx (get_length ctx bound_temp) in
+        let hdr = create_loop ~counter:t_idx (get_length ctx (bound_temp, view)) in
         Temp.Table.add ctx.allocation_method ~key:bound_temp ~data:`Unallocated
           |> dedup __LINE__;
 
@@ -551,7 +561,9 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
   | Air.Run (dest, _) ->
       (match dest with
        | Ir.Return t ->
-           Temp.Table.add ctx.allocation_method ~key:t ~data:`Unallocated |> dedup __LINE__
+           Temp.Table.add ctx.allocation_method
+             ~key:t ~data:`Unallocated
+               |> dedup __LINE__
        | _ -> ());
       let dest_temp = Ir.temp_of_dest dest in
       let index_fn = get_expr_index ctx dest_temp in
@@ -566,15 +578,18 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
         | _ -> failwith ":("
       in
 
-      let body = trans_array_view ctx (typ, lvalue, loop_temp, index_fn, List.tl_exn lengths) in
+      let body =
+        trans_array_view ctx
+          (typ, lvalue, loop_temp, index_fn, List.tl_exn lengths)
+      in
       [ CU.Loop (hdr, [ body ]) ]
 
   (* For reduce, we associate the buffer_info for the view with t. *)
-  | Air.Reduce (dest, op, init, (t, _)) ->
+  | Air.Reduce (dest, op, init, (t, av)) ->
       let lvalue = Temp.next (Ir.type_of_dest dest) () in
       let index_fn = get_index ctx t in
       let loop_temp = Temp.next Tc.Int () in
-      let hdr = create_loop ~counter:loop_temp (get_length ctx t) in
+      let hdr = create_loop ~counter:loop_temp (get_length ctx (t, av)) in
       Temp.Table.add ctx.allocation_method ~key:t ~data:`Unallocated
         |> dedup __LINE__;
       let assign_stmt = make_reduce op ~in_kernel:(ctx.in_kernel)
@@ -587,7 +602,7 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
         dest_to_stmt ctx dest (temp_to_var lvalue);
       ]
 
-  | Air.Filter_with (dest, (t1, _), (t2, _)) ->
+  | Air.Filter_with (dest, (t1, av1), (t2, _)) ->
       List.iter [t1; t2;] ~f:(fun key ->
         Temp.Table.add ctx.allocation_method ~key ~data:`Unallocated
           |> dedup __LINE__);
@@ -596,7 +611,7 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       let lengths = get_lengths ctx (Ir.temp_of_dest dest) in
       let loop_temp = Temp.next Tc.Int () in
       let acc = Temp.next Tc.Int () in
-      let hdr = create_loop ~counter:loop_temp (get_length ctx t1) in
+      let hdr = create_loop ~counter:loop_temp (get_length ctx (t1, av1)) in
       let typ = match Ir.type_of_dest dest with
         | Tc.Array t -> t
         | _ -> failwith ":("
@@ -615,12 +630,20 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
           ],
           [ (* nothing to do in else case *) ])
       in
+      let lhs = get_filter_lvalue ctx dest (Ir.temp_of_dest dest) in
+
+      (* Add me to the list *)
+      Temp.Table.add_exn
+        ctx.filtered_lengths_of
+        ~key:(Ir.temp_of_dest dest)
+        ~data:[Some lhs];
+
       [ CU.DeclareAssign (CU.Integer, temp_name acc, CU.IConst 0L);
         CU.Loop (hdr, [ check_stmt ]);
-        CU.Assign (get_filter_lvalue ctx dest (Ir.temp_of_dest dest), temp_to_var acc);
+        CU.Assign (trans_expr ctx lhs, temp_to_var acc);
       ]
 
-  | Air.Scan (dest, op, init, (t, _)) ->
+  | Air.Scan (dest, op, init, (t, av)) ->
       let ty = match Ir.type_of_dest dest with
         | Tc.Array ty -> ty
         | _ -> failwith "Not right."
@@ -628,7 +651,7 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       let acc = Temp.next ty () in
       let index_fn = get_index ctx t in
       let loop_temp = Temp.next Tc.Int () in
-      let hdr = create_loop ~counter:loop_temp (get_length ctx t) in
+      let hdr = create_loop ~counter:loop_temp (get_length ctx (t, av)) in
       Temp.Table.add ctx.allocation_method ~key:t ~data:`Unallocated
         |> dedup __LINE__;
       let assign_stmt = make_reduce op ~in_kernel:ctx.in_kernel
@@ -867,7 +890,9 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       let bound_temps = List.map ~f:Tuple3.get1 bound_array_views in
       List.iter bound_temps ~f:(fun key ->
         Temp.Table.set ctx.allocation_method ~key ~data:`Unallocated);
-      let bound_temp_lengths = List.map ~f:(get_length ctx) bound_temps in
+      let bound_temp_lengths = List.map bound_array_views
+        ~f:(fun (t, _, av) -> get_length ctx (t, av))
+      in
       let total_length = multiply_cuda_exprs bound_temp_lengths in
 
       let gdim = (CU.IConst 256L, CU.IConst 1L, CU.IConst 1L) in
@@ -916,8 +941,10 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         if Hash_set.mem don't_ask src then None else
         match typ with
         | Tc.Array _ ->
-            let lengths = (Map.find_exn ctx.result.Ano.buffer_infos src).Ano.length
-              |> List.map ~f:(trans_len_expr) in
+            let lengths = match Map.find ctx.result.Ano.buffer_infos src with
+              | Some x -> x.Ano.length |> List.map ~f:(trans_len_expr)
+              | None -> failwithf "`%d`\n" (Temp.to_int src) ()
+            in
             let len = CU.Binop (CU.MUL, multiply_cuda_exprs lengths, CU.Size_of (remove_arrays typ)) in
             Some (CU.Transfer (temp_to_var dest, temp_to_var src, len, tfr))
         | Tc.Int | Tc.Float | Tc.Bool -> None
@@ -1028,6 +1055,7 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
   let bear_with_me = Temp.Table.create () in
   let ctx = {
     result;
+    filtered_lengths_of = Temp.Table.create ();
     in_kernel = false;
     allocation_method;
     lvalue_filter = (init_filter_map, init_lvalue_filter);

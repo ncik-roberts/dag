@@ -91,6 +91,8 @@ void verifyInt(const char* name, int a, int b){
   if (a != b){
     printf("(%s) mismatch, expected %d, got %d\n",name,a,b);
     return;
+  } else{
+    printf("(%s) Test Passed.\n",name);
   }
 }
 
@@ -98,6 +100,8 @@ void verifyFloat(const char* name, float a, float b){
   if (!almostEquals(a,b)){
     printf("(%s) mismatch, expected %f, got %f\n",name,a,b);
     return;
+  } else{
+    printf("(%s) Test Passed.\n",name);
   }
 }
 

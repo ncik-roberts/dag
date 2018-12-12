@@ -1,5 +1,5 @@
 #include "mmult_test.h"
-#include <time.h>
+#include <sys/time.h>
 
 // Naive Matrix Multiply in C.
 int* multiplyMatrixMatrix(int* m1, int* m2, int n)
@@ -16,26 +16,32 @@ int* multiplyMatrixMatrix(int* m1, int* m2, int n)
 }
 
 int main(){
-  int NUM_ELEMS = 1 << 10; // 1024 to start. 
+  int NUM_ELEMS = 1 << 8; // 1024 to start. 
   int len = NUM_ELEMS*NUM_ELEMS;
   int* m3_dag  = (int*) malloc(NUM_ELEMS*NUM_ELEMS*sizeof(int));
 
   int* m1 = initRandomArrayi(len);
   int* m2 = initRandomArrayi(len);
 
+  struct timeval t0;
+  struct timeval t1;
+  long elapsed;
   printf("Multiplying Matrix (C)\n");
-  clock_t start_c = clock();
+
+  gettimeofday(&t0,NULL);
   int* m3_c = multiplyMatrixMatrix(m1,m2,NUM_ELEMS);
-  clock_t end_c = clock();
-  printf("Time %f (s)\n",1000.0 * (double) (end_c - start_c) / CLOCKS_PER_SEC);
+  gettimeofday(&t1,NULL);
+  elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
+  printf("Time %ld (us)\n",elapsed);
 
   printf("Multiplying Matrix (DAG)\n");
-  clock_t start_dag = clock();
+  gettimeofday(&t0,NULL);
   dag_multiplyMatrixMatrix(m3_dag,NUM_ELEMS,NUM_ELEMS,
                             m1,NUM_ELEMS,NUM_ELEMS,
                             m2,NUM_ELEMS,NUM_ELEMS);
-  clock_t end_dag = clock();
-  printf("Time %f (ss)\n",(double) (end_dag - start_dag) / CLOCKS_PER_SEC);
+  gettimeofday(&t1,NULL);
+  elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
+  printf("Time %ld (us)\n",elapsed);
 
 
   verifyArrays("mmult",m3_c,m3_dag,len);

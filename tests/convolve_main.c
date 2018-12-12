@@ -77,5 +77,5 @@ int main(){
   clock_t end_dag = clock();
   printf("Time %f (ss)\n",(double) (end_dag - start_dag) / CLOCKS_PER_SEC);
 
-  verifyArrays("convolve",result,result_dag,len);
+  verifyFloatArrays("convolve",result,result_dag,len);
 }

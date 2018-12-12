@@ -1,8 +1,10 @@
+
+// 2D copy kernel to test ranges, dim() calls, and indexing.
+// This is a lot harder than it looks. 
+
 int[][] copyTwo(int[][] input){
-  int[] is = range(0, dim0(input), 1);
-  int[] js = range(0, dim1(input), 1);
-  return for (int i : is){
-    return for (int j : js){
+  return for (int i : range(0, dim0(input), 1)){
+    return for (int j : range(0, dim1(input), 1)){
       return input[i][j];
     };
   };

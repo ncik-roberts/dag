@@ -294,8 +294,8 @@ and fmt_stmt n stm =
    (fmt_expr src) (fmt_expr size) (Tuple2.uncurry fmt_mem_tfr ttyp)
 
  | Launch ((x, y, z), (a, b, c), { name }, args) ->
-   let block = sprintf "%sdim3 dimBlock(%s, %s, %s);\n" sp (fmt_expr a) (fmt_expr b) (fmt_expr c) in
-   let grid = sprintf "%sdim3 dimGrid(%s, %s, %s);\n" sp (fmt_expr x) (fmt_expr y) (fmt_expr z) in
+   let block = sprintf "%sdim3 dimGrid(%s, %s, %s);\n" sp (fmt_expr a) (fmt_expr b) (fmt_expr c) in
+   let grid = sprintf "%sdim3 dimBlock(%s, %s, %s);\n" sp (fmt_expr x) (fmt_expr y) (fmt_expr z) in
    let launch = sprintf "%s%s<<<dimGrid,dimBlock>>>%s" sp name (comma_delineated (List.map ~f:fmt_expr args))
    in block ^ grid ^ launch
 

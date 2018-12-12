@@ -483,6 +483,20 @@ let substitute (source : dag) (vertex : Vertex.t) (target : dag) : dag =
    * by renaming the function call to the return vertex. *)
   let target = renumber_map target (Vertex.Map.singleton vertex source.return_vertex) in
 
+  (* Make sure we add the successors of the vertex back *)
+  let source =
+    let target_vertex_infos = Map.to_alist target.vertex_infos in
+    let result = List.fold_left target_vertex_infos ~init:Vertex.Set.empty
+      ~f:(fun acc (k, v) ->
+        if List.mem ~equal:Vertex.equal Vertex_info.(v.predecessors) source.return_vertex
+          then Set.add acc k
+          else acc)
+    in { source with vertex_infos = Map.update source.vertex_infos source.return_vertex
+      ~f:(function
+        | Some vi -> Vertex_info.{ vi with successors = Set.union result Vertex_info.(vi.successors) }
+        | None -> failwith ":(" ) }
+  in
+
   (* Now for the death blow: add everything from source into target. *)
   { target with vertex_infos = Map.merge_skewed target.vertex_infos source.vertex_infos
       ~combine:(fun ~key -> failwithf "Duplicate key `%ld` in source and target. :(" key ()) }

@@ -87,9 +87,12 @@ let traversals_with_filter (dag : Dag.dag) ~seed : traversal =
   (* Arbitrarily find a way to evaluate starting from a context. *)
   and loop ~(acc : traversal) (ctx : context) : (traversal * Vertex.Set.t) =
     let candidates = Set.filter ctx.direct_predecessors ~f:(fun v ->
-      isn't_value v && Set.is_subset (Dag.successors dag v) ~of_:ctx.evaluated
+      isn't_value v
+        && Set.is_subset (Dag.successors dag v) ~of_:ctx.evaluated
+        && not (Set.mem ctx.evaluated v)
     ) in
-    let loop_with (vertex : Vertex.t) (subtraversal, remaining : traversal * Vertex.Set.t) : (traversal * Vertex.Set.t) =
+    let loop_with (vertex : Vertex.t) (subtraversal, remaining : traversal * Vertex.Set.t)
+    : (traversal * Vertex.Set.t) =
       let predecessors_minus_vertex = Set.remove ctx.direct_predecessors vertex in
       let direct_predecessors =
         Vertex.Set.of_list (Dag.predecessors dag vertex)

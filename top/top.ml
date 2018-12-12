@@ -27,32 +27,32 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
     List.concat_map dag ~f:(fun dag_fun ->
       if mem Dag.(dag_fun.dag_name) then begin
         note "start";
-        (*say (fun() -> [
+        say (fun() -> [
           "Original dag:";
           Sexp.to_string_hum (Dag.sexp_of_dag_fun dag_fun);
-        ]);*)
+        ]);
         let (inline, fn_ptrs) = Dag.inline dag_fun dag in
         note "inline";
-        (*say (fun () -> [
+        say (fun () -> [
           "Inlined:";
           Sexp.to_string_hum (Dag.sexp_of_dag_fun inline);
-        ]);*)
+        ]);
         let traversal = Dag_traversal.any_traversal inline.Dag.dag_graph ~seed:101
         in
         let fn_ptr_traversals = List.map fn_ptrs
           ~f:(fun f -> Dag_traversal.any_traversal f.Dag.dag_graph ~seed:102)
         in
         note "traversal";
-        (*say (fun () -> [
+        say (fun () -> [
           "Traversal:";
           Sexp.to_string_hum (Dag_traversal.sexp_of_traversal traversal);
-        ]);*)
+        ]);
         let airs =
           let (ir, temp_dag) = Dag_to_ir.run inline traversal in
-          (*say (fun () -> [
+          say (fun () -> [
             "IR:";
             Sexp.to_string_hum (Ir.sexp_of_t ir);
-          ]);*)
+          ]);
           Ir_to_air.all ir temp_dag ~n:(Some 4)
         in
         let fn_ptr_airs = List.map2_exn fn_ptrs fn_ptr_traversals ~f:(fun inline t ->

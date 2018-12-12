@@ -382,3 +382,91 @@ let primitive_transpose : t = [
   Decl (DeclareAssign (ConstType Integer, "tp_BLOCK_ROWS", IConst 8L));
   Function transpose_kernel;
 ]
+
+module S = String.Set
+let rec used_of_expr : cuda_expr -> S.t = function
+  | IConst _ | FConst _ | BConst _ | Size_of _ | KVar _ -> S.empty
+  | Var x -> S.singleton x
+  | Cast (_, expr) | Unop (_, expr) | Address expr | Deref expr | Field (expr, (_ : string)) ->
+      used_of_expr expr
+  | Binop (_, expr1, expr2) | Cmpop (_, expr1, expr2) | Index (expr1, expr2) ->
+      used_of_exprs [expr1;expr2;]
+  | Ternary (expr1, expr2, expr3) ->
+      used_of_exprs [expr1;expr2;expr3;]
+  | FnCall (_, exprs) -> used_of_exprs exprs
+
+and used_of_exprs stmts = S.union_list (List.map ~f:used_of_expr stmts)
+
+let defined_of_stmt : cuda_stmt -> string option = function
+  | Malloc (_, id, _) -> Some id
+  | Cuda_malloc (_, id, _) -> Some id
+  | DeclareAssign (_, id, _) -> Some id
+  | DeclareArray (_, _, id, _) -> Some id
+  | _ -> None
+
+let rec used_of_stmt : cuda_stmt -> S.t = function
+  | Sync | Nop | Declare _ | Free (_ : cuda_ident) -> S.empty
+  | AssignOp (_, lhs, rhs) | Assign (lhs, rhs) -> used_of_exprs [lhs; rhs;]
+  | DeclareArray (_, _, _, exprs) -> used_of_exprs exprs
+  | Loop ((stmt1, expr, stmt2), _) ->
+      let set = S.union_list [ used_of_stmt stmt1; used_of_expr expr; used_of_stmt stmt2; ] in
+      begin
+        match defined_of_stmt stmt1 with
+        | Some x -> S.remove set x
+        | None -> set
+      end
+  | InitStruct (lvalue, expr_pairs) -> used_of_exprs (lvalue :: List.map ~f:snd expr_pairs)
+  | Malloc (_, _, expr) | Cuda_malloc (_, _, expr) | DeclareAssign (_, _, expr) | Expression expr | Return expr -> used_of_expr expr
+  | Condition (cond, if_stmt, then_stmt) -> S.union_list [ used_of_expr cond; ]
+  | Transfer (expr1, expr2, expr3, _) -> used_of_exprs [ expr1; expr2; expr3; ]
+  | Memcpy (expr1, expr2, expr3) -> used_of_exprs [ expr1; expr2; expr3; ]
+  | Launch (_, _, _, exprs) -> used_of_exprs exprs
+and used_of_stmts stmts = S.union_list (List.map ~f:used_of_stmt stmts)
+
+let top_sort : cuda_ident list -> cuda_stmt list -> cuda_stmt list =
+  let rec loop stmts defined =
+    let rec go (defined, init_rev, tl) stmt =
+      let stmt' = match stmt with
+        | Sync | Nop | Declare _ | Free _ | AssignOp _ | Assign _ | DeclareArray _
+        | InitStruct _ | Malloc _ | Cuda_malloc _ | DeclareAssign _ | Expression _ | Return _
+        | Transfer _ | Memcpy _ | Launch _ -> stmt
+        | Condition (e, stmt1, stmt2) -> Condition (e, loop stmt1 defined, loop stmt2 defined)
+        | Loop (hdr, stmts) ->
+            let defined' = Option.value_map (defined_of_stmt (Tuple3.get1 hdr)) defined
+              ~default:Fn.id ~f:(Fn.flip S.add)
+            in
+            Loop (hdr, loop stmts defined')
+      in
+      (*Printf.printf "Defined: %s\n" (defined |> S.sexp_of_t |> Sexp.to_string_hum);
+      Printf.printf "Considering stmt: %s..." (fmt_stmt 0 stmt');*)
+      let used = Option.value_map (defined_of_stmt stmt') (used_of_stmt stmt')
+                    ~default:Fn.id ~f:(Fn.flip S.remove)
+      in
+      if not (S.is_subset used ~of_:defined)
+        then begin
+          (*Printf.printf "Finding other stmt! (Didn't find %s)\n" (S.diff used defined |> S.sexp_of_t |> Sexp.to_string_hum);*)
+          let b = ref true in
+          let (elem, rest) =
+            match
+              List.partition_tf tl ~f:(fun stmt ->
+              Option.value_map (defined_of_stmt stmt)
+                ~f:(fun x -> !b && S.mem used x && not (S.mem defined x) && (b := false; true))
+                 ~default:false)
+            with
+            | ([x], rest) -> (x, rest)
+            | ([], _) -> failwith "Stuck"
+            | _ -> failwith "Impossible"
+          in go (defined, init_rev, stmt :: rest) elem
+        end else begin
+          (*Printf.printf "committing to order!\n";*)
+          let defined' = Option.value_map (defined_of_stmt stmt') defined
+                          ~default:Fn.id ~f:(Fn.flip S.add)
+          in
+          match tl with
+          | [] -> List.rev (stmt' :: init_rev)
+          | t :: tl -> go (defined', stmt' :: init_rev, tl) t
+        end
+    in match stmts with
+      | [] -> []
+      | x :: xs -> go (defined, [], xs) x
+  in fun params stmts -> loop stmts (S.of_list params)

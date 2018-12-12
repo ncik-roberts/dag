@@ -1150,5 +1150,5 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
             end;
             name = "dag_" ^ Air.(program.fn_name);
             params;
-            body = hd @ malloc'ing @ body @ tl; });
+            body = (hd @ malloc'ing @ body @ tl) |> CU.top_sort (List.map ~f:snd params); });
   ] |> Option.some

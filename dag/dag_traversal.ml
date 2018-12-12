@@ -126,13 +126,14 @@ let traversals_with_filter (dag : Dag.dag) ~seed : traversal =
                 end))
           in
           let result = loop_with vertex subtraversals in
-          begin
+          result
+          (*begin
             match ctx.curr_bound_parallel_vertex with
             | Some pvtx when not (Set.mem (Map.find_exn predecessors vertex) pvtx) ->
                 let results2 = loop ~acc { ctx with direct_predecessors = Set.remove ctx.direct_predecessors vertex } in
                 List.random_element_exn [ result; Tuple2.map_snd results2 ~f:(Fn.flip Vertex.Set.add vertex); ]
             | _ -> result
-          end
+          end*)
     end
   in
   fst (loop_of_vertex (Dag.return_vertex dag))

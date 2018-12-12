@@ -61,10 +61,6 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
         in
         note "ir_to_air";
         let cudas = List.filter_mapi airs ~f:(fun i air ->
-          let orig_say = say in
-          let said = ref [] in
-          let say xs = said := !said @ [xs] in
-          try
             say (fun () -> [
               Printf.sprintf "AIR #%d" i;
               Air.Pretty_print.pp_t air;
@@ -85,18 +81,7 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
                 | Some cuda -> Cuda_ir.fmt_gstmts cuda
               end;
             ]);
-
-            begin
-              match cuda with
-              | Some _ -> orig_say (fun () ->
-                  List.concat_map ~f:(fun f -> f ()) !said)
-              | None -> ()
-            end;
             cuda
-          with e ->
-            orig_say (fun () ->
-              List.concat_map ~f:(fun f -> f ()) !said);
-            raise e
         ) in
 
         note "annotation + trans";

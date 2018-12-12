@@ -44,3 +44,14 @@ int[] f8(int[] xs, bool[] bs) {
     return y + 1;
   };
 }
+
+int[] f9(int[] xs) {
+  bool[] bs = for (int x : xs) {
+    return x <= 10;
+  };
+  int[] ys = filter_with(xs, bs);
+  int[] zs = for (int y : ys) {
+    return y + 100;
+  };
+  return zs;
+}

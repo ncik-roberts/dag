@@ -44,7 +44,7 @@ static inline long minl(long a, long b){
 }
 
 int main(){
-  int NUM_ELEMS = 1 << 20; // A solid million.
+  int NUM_ELEMS = 1 << 22; // A solid million.
   int NUM_RUNS = 5; // Normalize the timing a bit.
 
   struct timeval t0;
@@ -72,6 +72,15 @@ int main(){
   float* saxpyDAGf = (float*) calloc(NUM_ELEMS,sizeof(float)); 
   int* saxpyCi = (int*) malloc(NUM_ELEMS * sizeof(int));  
   float* saxpyCf = (float*) malloc(NUM_ELEMS * sizeof(float));
+
+  if(iarray1 == NULL || iarray2 == NULL || iarray3 == NULL || 
+     farray1 == NULL || farray2 == NULL || farray3 == NULL || 
+     saxpyDAGi == NULL || saxpyDAGf == NULL || saxpyCi == NULL || 
+     saxpyCf == NULL){
+       printf("Malloc returned null. Try fewer elements.\n");
+       return -1;
+     }
+
   int sumCi; int sumDAGi;
   int sumCf; int sumDAGf;
 

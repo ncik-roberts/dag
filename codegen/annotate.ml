@@ -451,12 +451,21 @@ and annotate_seq_stmt
   (ctx : context)
   (stmt : Air.seq_stmt) : kernel_context * context =
   let (kernel_ctx', ctx) = match stmt with
-    | Air.Binop (dest, _, src1, src2) | Air.Index (dest,src1,src2) ->
+    | Air.Binop (dest, _, src1, src2) ->
         let used = Set.union (used_of_operand ctx src1) (used_of_operand ctx src2) in
         let defined = defined_of_dest dest in
         ({ used; defined; additional_buffers = Temp.Set.empty;
            return_buffer_info = None;
          }, ctx)
+    | Air.Index (dest, (t, av), src2) ->
+        let used = Set.union (used_of_array_view ctx av) (used_of_operand ctx src2) in
+        let defined = defined_of_dest dest in
+        let bi = annotate_array_view ctx av in
+        ({ used; defined; additional_buffers = Temp.Set.empty;
+           return_buffer_info = Some bi;
+         }, { ctx with result = A_air.{
+           ctx.result with buffer_infos = ctx.result.buffer_infos
+             |> Map.add_exn ~key:t ~data:bi }})
     | Air.Assign (dest, src) ->
         let used = used_of_operand ctx src in
         let defined = defined_of_dest dest in
@@ -494,7 +503,7 @@ and annotate_seq_stmt
   let (ctx, kernel_ctx) = match stmt with
     | Air.Assign (Ir.Dest t_dst, Air.Temp t_src) ->
         ({ ctx with aliases = Map.add_exn ctx.aliases ~key:t_dst ~data:t_src }, kernel_ctx)
-    | Air.Index (dest, Air.Temp t_src, op) when (match Temp.to_type t_src with | Tc.Array Tc.Array _ -> true | _ -> false) ->
+    | Air.Index (dest, (_, (_, Air.Array t_src)), op) when (match Temp.to_type t_src with | Tc.Array Tc.Array _ -> true | _ -> false) ->
         let open A_air in
         let bi = lookup_exn ctx t_src in
         let bi' = {

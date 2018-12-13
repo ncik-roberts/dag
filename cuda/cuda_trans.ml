@@ -515,23 +515,28 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
     | None -> CU.Return src
   in
 
+  let operand_to_expr = function
+    | Air.Temp t -> Expr.Temp t
+    | Air.Const i -> Expr.Const i
+    | Air.IndexOp (t1, t2) -> Ano.(begin
+        match Map.find ctx.result.buffer_infos t1 with
+        | Some bi -> Many_fn.result_exn (app bi.index (Expr.Temp t2))
+        | None -> Expr.Index (Expr.Temp t1, Expr.Temp t2)
+      end)
+    | Air.Dim _ -> failwith "No"
+    | Air.Bool _ | Air.Float _ -> failwith "No"
+  in
+
   match stmt with
   | Air.Binop (d, op, s1, s2) ->
       [ d <-- CU.Binop (trans_binop op, trans_op_exn ctx s1, trans_op_exn ctx s2) ]
-  | Air.Index (d, src, i) ->
+  | Air.Index (d, (t, _), i) ->
+      Temp.Table.add ctx.allocation_method ~key:t ~data:`Unallocated
+        |> dedup __LINE__;
       Option.iter (match d with Ir.Dest t -> Some t | _ -> None)
         ~f:(fun key -> Temp.Table.add ctx.allocation_method ~key ~data:`Unallocated |> dedup __LINE__);
-      begin
-        match src with
-        | Air.Temp t ->
-            let lengths = List.tl_exn (get_lengths ctx t) in
-            begin
-              match lengths with
-              | [] -> [ d <-- CU.Index (temp_to_var t, build_index_expr lengths (trans_op_exn ctx i)) ]
-              | _ -> [ d <-- CU.Address (CU.Index (temp_to_var t, build_index_expr lengths (trans_op_exn ctx i))) ]
-            end
-        | _ -> [ d <-- CU.Index (trans_op_exn ctx src, trans_op_exn ctx i) ]
-      end
+      let index_fn = Ano.( (Map.find_exn ctx.result.buffer_infos t).index ) in
+      [ d <-- Many_fn.result_exn (app_expr ctx index_fn (operand_to_expr i)) ]
   | Air.Access (d,src,f) ->
       [ d <-- CU.Field (trans_op_exn ctx src, f)]
   | Air.Unop (d, op, s) ->
@@ -770,7 +775,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
           | Some (`Host_and_device_no_malloc_on_host t) -> t
           | Some `Unallocated ->
               let new_temp = Temp.next (Temp.to_type host_t) () in
-              Temp.Table.set ctx.allocation_method ~key:host_t ~data:(`Host_and_device_no_malloc_on_host new_temp);
+              Temp.Table.set ctx.allocation_method ~key:host_t ~data:(`Host_and_device new_temp);
               new_temp
           | None ->
 
@@ -1091,10 +1096,14 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
       | Ano.Param.Array (_, dims) -> dims
       | Ano.Param.Not_array _ -> []);
   } in
+
   let body = trans_par_stmt ctx Air.(program.body) in
   let zipped_fn_ptr_definitions = List.map fn_ptr_programs ~f:(fun (p, r) ->
     let (ps, _, _) = trans_params (Temp.Table.create ()) r in
-    let b = trans_par_stmt { ctx with out_param = Ano.(r.out_param) } Air.(p.body) in
+    let b = trans_par_stmt { ctx with
+      out_param = Ano.(r.out_param);
+      lvalue = Option.map ~f:(fun t -> Expr.Temp t) Ano.(r.out_param);
+    } Air.(p.body) in
     (Air.(p.fn_name),
       CU.(Function {
             typ = Host;
@@ -1152,6 +1161,32 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
 
   let struct_decls = Map.mapi ~f:trans_struct_decl struct_decls |> Map.to_alist |> List.map ~f:snd in
   let gdecls = extract_kernel_launches body in
+
+  (*Printf.printf "\n\n\n%s\n\n\n"
+    (Sexp.to_string_hum (Temp.Table.sexp_of_t
+      (function
+        | `Unallocated -> Sexp.of_string "unalloc"
+        | `Host_and_device t -> Tuple2.sexp_of_t Sexp.of_string Temp.sexp_of_t ("host_and_device", t)
+        | `Host_and_device_no_malloc_on_host t -> Tuple2.sexp_of_t Sexp.of_string Temp.sexp_of_t ("host_and_device_no_malloc_on_host", t)
+      )
+      allocation_method));*)
+
+  (*List.concat [
+    [ CU.Include "dag_utils.cpp"; ];
+    struct_decls;
+    gdecls |> List.map ~f:(fun x -> CU.Function x);
+    List.concat_map zipped_fn_ptr_definitions ~f:(fun (_, f1, f2) -> [f1; f2;]);
+    List.return
+      CU.(Function { typ = Host;
+            ret = begin
+              match Ano.(result.out_param) with
+              | None -> trans_type Air.(program.return_type)
+              | Some _ -> ret_ty
+            end;
+            name = "dag_" ^ Air.(program.fn_name);
+            params;
+            body = hd @ malloc'ing @ body @ tl; })
+  ] |> Cuda_ir.fmt_gstmts |> print_endline;*)
   Option.map (CU.top_sort (List.map ~f:snd params) (hd @ malloc'ing @ body @ tl))
     ~f:(fun body ->
       List.concat [

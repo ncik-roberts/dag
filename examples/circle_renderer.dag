@@ -133,11 +133,11 @@ int[][][][] renderSquares(
 
       float fWidth = float_of_int(width);
       float fHeight = float_of_int(height);
-      int[] xPixels = range(width * square.left, width * square.right, 1);
-      int[] yPixels = range(height * square.top, height * square.bottom, 1);
+      int[] xPixels = range(square.left, square.right, 1);
+      int[] yPixels = range(square.top, square.bottom, 1);
 
-      return for (int y : range(0, dim0(yPixels), 1)) {
-        return for (int x : range(0, dim0(xPixels), 1)) {
+      return for (int y : range(0, width / num_squares, 1)) {
+        return for (int x : range(0, width / num_squares, 1)) {
           float normX = float_of_int(xPixels[x]) / fWidth;
           float normY = float_of_int(yPixels[y]) / fHeight;
 

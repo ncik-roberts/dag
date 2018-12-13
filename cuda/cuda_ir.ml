@@ -446,17 +446,48 @@ let top_sort : cuda_ident list -> cuda_stmt list -> cuda_stmt list option =
       if not (S.is_subset used ~of_:defined)
         then begin
           (*Printf.printf "Finding other stmt! (Didn't find %s)\n" (S.diff used defined |> S.sexp_of_t |> Sexp.to_string_hum);*)
-          let b = ref true in
           let (elem, rest) =
-            match
-              List.partition_tf tl ~f:(fun stmt ->
-              Option.value_map (defined_of_stmt stmt)
-                ~f:(fun x -> !b && S.mem used x && not (S.mem defined x) && (b := false; true))
-                 ~default:false)
-            with
-            | ([x], rest) -> (x, rest)
-            | ([], _) -> raise Stuck
-            | _ -> failwith "Impossible"
+            let rec loop = function
+              | [] -> raise Stuck
+              | stmt :: stmts ->
+                  let opt = match defined_of_stmt stmt with
+                    | None -> None
+                    | Some i ->
+                        if S.mem used i && not (S.mem defined i) then Some (stmt, stmts)
+                        else None
+                  in
+                  match opt with
+                  | Some x -> x
+                  | None ->
+                      begin
+                        match stmt with
+                        | Loop (hdr, body) ->
+                            begin
+                              try
+                                let (select, body') = loop body in
+                                (select, Loop (hdr, body') :: stmts)
+                              with Stuck ->
+                                let (select, stmts) = loop stmts in
+                                (select, stmt :: stmts)
+                            end
+                        | Condition (e, body1, body2) ->
+                            begin
+                              try
+                                let (select, body') = loop body1 in
+                                (select, Condition (e, body', body2) :: stmts)
+                              with _ ->
+                              begin
+                                try
+                                  let (select, body') = loop body2 in
+                                  (select, Condition (e, body1, body') :: stmts)
+                                with _ ->
+                                  let (select, stmts) = loop stmts in
+                                  (select, stmt :: stmts)
+                              end
+                            end
+                        | _ -> let (x, xs) = loop stmts in (x, stmt :: xs)
+                      end
+            in loop tl
           in go (defined, init_rev, stmt :: rest) elem
         end else begin
           (*Printf.printf "committing to order!\n";*)

@@ -53,35 +53,32 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
             "IR:";
             Sexp.to_string_hum (Ir.sexp_of_t ir);
           ]);
-          Ir_to_air.all ir temp_dag ~n:(Some 20)
+          Ir_to_air.all ir temp_dag ~n:(Some 50)
         in
         let fn_ptr_airs = List.map2_exn fn_ptrs fn_ptr_traversals ~f:(fun inline t ->
           let (ir, temp_dag) = Dag_to_ir.run inline t in
           Ir_to_air.any ir temp_dag)
         in
         note "ir_to_air";
-        let cudas = List.filter_mapi airs ~f:(fun i air ->
-            say (fun () -> [
-              Printf.sprintf "AIR #%d" i;
-              Air.Pretty_print.pp_t air;
-            ]);
+        let cudas = List.concat_mapi airs ~f:(fun i air ->
             let ann = Annotate.annotate air in (* Annotations *)
-            say (fun () -> [
-              Sexp.to_string_hum (Annotated_air.sexp_of_result ann);
-            ]);
-
             let fn_ptr_with_anns = List.map fn_ptr_airs ~f:(fun x -> (x, Annotate.annotate x)) in
-
             let cuda = Cuda_trans.trans fn_ptr_with_anns air Tc.(ctx.struct_ctx) ann in
-            say (fun () -> [
-              Printf.sprintf "Cuda:";
-              begin
-                match cuda with
-                | None -> "None"
-                | Some cuda -> Cuda_ir.fmt_gstmts cuda
-              end;
-            ]);
-            cuda
+            match cuda with
+            | Some cuda ->
+                say (fun () -> [
+                  "~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*";
+                ]);
+                say (fun () -> [
+                  Printf.sprintf "AIR #%d" i;
+                  Air.Pretty_print.pp_t air;
+                ]);
+                say (fun () -> [
+                  Printf.sprintf "Cuda:";
+                  Cuda_ir.fmt_gstmts cuda;
+                ]);
+                [cuda]
+            | None -> []
         ) in
 
         note "annotation + trans";

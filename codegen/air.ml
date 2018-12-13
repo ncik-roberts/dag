@@ -91,7 +91,7 @@ and seq_stmt =
   | Unop of Ir.dest * Ast.unop * operand
   | Primitive of Ir.dest * primitive
   | Struct_Init of Ir.dest * Tc.typ * (Ast.ident * operand) list
-  | Index of Ir.dest * operand * operand
+  | Index of Ir.dest * (Temp.t * array_view) * operand
   | Access of Ir.dest * operand * Ast.ident
   | Assign of Ir.dest * operand
   [@@deriving sexp]
@@ -161,12 +161,12 @@ end = struct
     | Unop (dst, unop, src) -> sprintf "%s%s <- %s%s" indent (pp_dest dst)
         (Sexp.to_string_hum (Ast.sexp_of_unop unop))
         (pp_operand src)
-    | Index (dst,src,expr) -> 
-        sprintf "%s%s <- %s[%s]" indent (pp_dest dst) (pp_operand src) (pp_operand expr)
+    | Index (dst, (_, av), expr) ->
+        sprintf "%s%s <- %s[%s]" indent (pp_dest dst) (pp_array_view av) (pp_operand expr)
     | Struct_Init (dst,_,flx) ->
         let fields = String.concat ~sep:"; " (List.map flx ~f:(fun (n,o) -> n^" = "^pp_operand o)) in
         sprintf "%s%s <- { %s }" indent (pp_dest dst) (fields)
-    | Access (dest,strc,fld) -> 
+    | Access (dest,strc,fld) ->
         sprintf "%s%s <- %s.%s" indent (pp_dest dest) (pp_operand strc) (fld)
     | Assign (dst, src) -> sprintf "%s%s <- %s" indent (pp_dest dst)
         (pp_operand src)

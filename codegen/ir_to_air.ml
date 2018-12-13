@@ -199,8 +199,14 @@ let upto (ir : Ir.t) (dag : Temp_dag.dag) ~n : Air.t list =
       assert (not_in ctx src2);
       Air.[(ctx, Seq (Binop (dest, binop, convert_operand ctx src1, convert_operand ctx src2)))]
   | Ir.Index (dest,src,expr) ->
+    let src = match src with
+      | Ir.Const _ | Ir.Float _ | Ir.Bool _ -> failwith "No"
+      | Ir.Temp t ->
+          let av = Map.find ctx.array_views t |> Option.value ~default:(Temp.to_type t, Air.Array t) in
+          let typ = Temp.to_type t in (Temp.next typ (), av)
+    in
     (* Maybe no indexes that operate on indexes? *)
-    Air.[(ctx,Seq (Index (dest,convert_operand ctx src,convert_operand ctx expr)))]
+    Air.[(ctx,Seq (Index (dest, src, convert_operand ctx expr)))]
   | Ir.Access (dest,strc,field) ->
     Air.[(ctx,Seq (Access (dest,convert_operand ctx strc,field)))]
   | Ir.Unop (dest, unop, src) ->

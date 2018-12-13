@@ -12,8 +12,6 @@ let dedup line = function
   | `Ok -> ()
   | `Duplicate -> failwithf "(%d): dup :(" line ()
 
-let failwith n = failwith ("AIR -> CUDA : " ^ n)
-
 type context = {
   result : Ano.result;
 
@@ -172,11 +170,14 @@ and update_lvalue_with ctx lens filtered_lengths map bound_array_views =
       let typ' = Tc.Array typ in
       let acc' = match t_opt with
         | None -> acc
+        | Some t when Temp.Table.mem ctx.extra_lengths t -> acc
         | Some t ->
           let elem = match Map.find acc t with
             | None ->
                 let t = Temp.next typ () in
                 let lens = List.take lens i in
+                if List.is_empty lens
+                  then failwith "This isn't right.";
                 Temp.Table.add_exn ctx.extra_lengths ~key:t ~data:lens;
                 Expr.Temp t
             | Some expr -> expr
@@ -637,10 +638,19 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
         ctx.filtered_lengths_of
         ~key:(Ir.temp_of_dest dest)
         ~data:[Some lhs];
+      Temp.Table.add_exn
+        ctx.extra_lengths
+        ~key:(Option.value_exn (List.hd_exn
+          (get_filtered_lengths ctx (Ir.temp_of_dest dest))))
+        ~data:lengths;
 
       [ CU.DeclareAssign (CU.Integer, temp_name acc, CU.IConst 0L);
         CU.Loop (hdr, [ check_stmt ]);
-        CU.Assign (trans_expr ctx lhs, temp_to_var acc);
+        begin
+          match trans_expr ctx lhs with
+          | CU.Var v -> CU.DeclareAssign (CU.Integer, v, temp_to_var acc)
+          | e -> CU.Assign (e, temp_to_var acc)
+        end;
       ]
 
   | Air.Scan (dest, op, init, (t, av)) ->
@@ -831,6 +841,8 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       let output_buffer_param = Temp.next (Ir.type_of_dest dest) () in
       (*let output_lengths = List.drop lengths (List.length start_indices) in*)
 
+      if List.is_empty lengths
+        then failwith "This isn't right.";
       Temp.Table.add_exn ctx.extra_lengths ~key:output_buffer_param ~data:lengths;
 
       (* :( *)
@@ -851,24 +863,28 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
                   let temp = Temp.next typ () in
                   let temp2 = Temp.next typ () in
                   let lens = List.take lengths i in
+                  if i = 0
+                    then failwithf "Error temp: `%d`" (Temp.to_int t) ();
                   Temp.Table.add_exn ctx.extra_lengths ~key:temp ~data:lens;
                   Temp.Table.add_exn ctx.extra_lengths ~key:temp2 ~data:lens;
                   let dest = Expr.Temp temp2 in
                   (Map.set acc ~key:t ~data:(Expr.Temp temp), Some (temp, dest))
                 | Some lens ->
-                  let old_type =
-                    let expr = Map.find_exn acc t in
-                    fix (fun loop -> function
-                      | Expr.Temp t -> Temp.to_type t
-                      | Expr.Index (lhs, _) -> loop lhs
-                      | _ -> failwith ":(") expr
-                  in
-                  let lens = List.drop lens (typ_diff old_type typ) in (* Oh my god *)
-                  let temp = Temp.next typ () in
-                  Temp.Table.add_exn ctx.extra_lengths ~key:temp ~data:lens;
-                  Temp.Table.add_exn ctx.bear_with_me ~key:temp ~data:lens;
-                  let dest = Map.find_exn (fst ctx.lvalue_filter) t in
-                  (Map.set acc ~key:t ~data:(Expr.Temp temp), Some (temp, dest))
+                  match Map.find acc t with
+                  | Some expr ->
+                    let old_type =
+                      fix (fun loop -> function
+                        | Expr.Temp t -> Temp.to_type t
+                        | Expr.Index (lhs, _) -> loop lhs
+                        | _ -> failwith ":(") expr
+                    in
+                    let lens = List.drop lens (typ_diff old_type typ) in (* Oh my god *)
+                    let temp = Temp.next typ () in
+                    Temp.Table.add_exn ctx.extra_lengths ~key:temp ~data:lens;
+                    Temp.Table.add_exn ctx.bear_with_me ~key:temp ~data:lens;
+                    let dest = Map.find_exn (fst ctx.lvalue_filter) t in
+                    (Map.set acc ~key:t ~data:(Expr.Temp temp), Some (temp, dest))
+                  | None -> (acc, None)
               end)
         |> Tuple2.map_snd ~f:List.filter_opt
       in
@@ -1136,19 +1152,21 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
 
   let struct_decls = Map.mapi ~f:trans_struct_decl struct_decls |> Map.to_alist |> List.map ~f:snd in
   let gdecls = extract_kernel_launches body in
-  List.concat [
-    [ CU.Include "dag_utils.cpp"; ];
-    struct_decls;
-    gdecls |> List.map ~f:(fun x -> CU.Function x);
-    List.concat_map zipped_fn_ptr_definitions ~f:(fun (_, f1, f2) -> [f1; f2;]);
-    List.return
-      CU.(Function { typ = Host;
-            ret = begin
-              match Ano.(result.out_param) with
-              | None -> trans_type Air.(program.return_type)
-              | Some _ -> ret_ty
-            end;
-            name = "dag_" ^ Air.(program.fn_name);
-            params;
-            body = (hd @ malloc'ing @ body @ tl) |> CU.top_sort (List.map ~f:snd params); });
-  ] |> Option.some
+  Option.map (CU.top_sort (List.map ~f:snd params) (hd @ malloc'ing @ body @ tl))
+    ~f:(fun body ->
+      List.concat [
+        [ CU.Include "dag_utils.cpp"; ];
+        struct_decls;
+        gdecls |> List.map ~f:(fun x -> CU.Function x);
+        List.concat_map zipped_fn_ptr_definitions ~f:(fun (_, f1, f2) -> [f1; f2;]);
+        List.return
+          CU.(Function { typ = Host;
+                ret = begin
+                  match Ano.(result.out_param) with
+                  | None -> trans_type Air.(program.return_type)
+                  | Some _ -> ret_ty
+                end;
+                name = "dag_" ^ Air.(program.fn_name);
+                params;
+                body; })
+      ])

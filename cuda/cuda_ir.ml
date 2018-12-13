@@ -423,7 +423,8 @@ let rec used_of_stmt : cuda_stmt -> S.t = function
   | Launch (_, _, _, exprs) -> used_of_exprs exprs
 and used_of_stmts stmts = S.union_list (List.map ~f:used_of_stmt stmts)
 
-let top_sort : cuda_ident list -> cuda_stmt list -> cuda_stmt list =
+let top_sort : cuda_ident list -> cuda_stmt list -> cuda_stmt list option =
+  let exception Stuck in
   let rec loop stmts defined =
     let rec go (defined, init_rev, tl) stmt =
       let stmt' = match stmt with
@@ -454,7 +455,7 @@ let top_sort : cuda_ident list -> cuda_stmt list -> cuda_stmt list =
                  ~default:false)
             with
             | ([x], rest) -> (x, rest)
-            | ([], _) -> failwith "Stuck"
+            | ([], _) -> raise Stuck
             | _ -> failwith "Impossible"
           in go (defined, init_rev, stmt :: rest) elem
         end else begin
@@ -469,4 +470,6 @@ let top_sort : cuda_ident list -> cuda_stmt list -> cuda_stmt list =
     in match stmts with
       | [] -> []
       | x :: xs -> go (defined, [], xs) x
-  in fun params stmts -> loop stmts (S.of_list params)
+  in fun params stmts ->
+    try loop stmts (S.of_list params) |> Option.some
+    with Stuck -> None

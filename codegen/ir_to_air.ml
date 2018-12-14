@@ -99,11 +99,11 @@ let rec to_seq_stmt : Air.par_stmt -> Air.seq_stmt =
     | Air.Parallel (_, _, [], _) -> failwith "Empty parallel loop."
     | Air.Parallel (dst, _id, [(t, t_idx, av)], stmt) -> Air.Seq_stmt (Air.For (dst, (t, t_idx, av), stmt))
     | Air.Parallel (dst, id, (t, t_idx, av) :: tavs, stmt) ->
-        let t = match Ir.type_of_dest dst with
+        let t_ret = match Ir.type_of_dest dst with
           | Tc.Array typ -> Temp.next typ ()
           | _ -> failwith "Invalid type."
         in
-        Air.Seq_stmt (Air.For (dst, (t, t_idx, av), to_seq_stmt (Air.Parallel (Ir.Return t, id, tavs, stmt))))
+        Air.Seq_stmt (Air.For (dst, (t, t_idx, av), to_seq_stmt (Air.Parallel (Ir.Return t_ret, id, tavs, stmt))))
     | Air.Par_stmt stmt -> Air.Seq_stmt (to_seq_stmt' stmt)
     | Air.Seq stmt -> stmt
 
@@ -171,7 +171,7 @@ let upto (ir : Ir.t) (dag : Temp_dag.dag) ~n : Air.t list =
 
   let limit = match n with
     | None -> Fn.id
-    | Some n -> Fn.flip List.take n
+    | Some n -> fun x -> Fn.flip List.take n x
   in
 
   (* Returned list is the various ways of parallelizing this statement. *)
@@ -333,7 +333,7 @@ let upto (ir : Ir.t) (dag : Temp_dag.dag) ~n : Air.t list =
             | [] -> [Air.(Par_stmt (Block (List.rev acc)))]
             | s :: ss ->
                 let ctx_stmt_pairs = loop ctx s in
-                List.concat_map ctx_stmt_pairs ~f:(fun (ctx, stmt) -> f ctx ss (stmt :: acc))
+                List.concat_map (limit ctx_stmt_pairs) ~f:(fun (ctx, stmt) -> f ctx ss (stmt :: acc))
           in
           f ctx stmts []
     end |> List.filter_map ~f:simplify

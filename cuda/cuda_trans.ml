@@ -110,7 +110,7 @@ let trans_params (extra_lengths : CU.cuda_expr list Temp.Table.t) (ctx : Ano.res
          let array_param = (trans_type (Temp.to_type t), temp_name t) in
          let filtered_lengths =
            match Map.find Ano.(ctx.buffer_infos) t with
-           | None -> failwith ":("
+           | None -> failwith ">>>>>:("
            | Some bi -> Ano.(bi.filtered_lengths)
          in
          let filtered_length_params =
@@ -227,7 +227,7 @@ and trans_op ctx = function
   | Air.Temp t -> Many_fn.Result (CU.Var (temp_name t))
   | Air.Dim (n, view) -> Many_fn.Result (List.nth_exn (lengths ctx view) n)
 
-and trans_op_exn ctx = Fn.compose (Many_fn.result_exn ~msg:":(") (trans_op ctx)
+and trans_op_exn ctx = Fn.compose (Many_fn.result_exn ~msg:">>>>>>:(") (trans_op ctx)
 
 and trans_prim ctx m = match m with
   | Air.Max (a, b)
@@ -409,18 +409,22 @@ let dest_to_stmt (ctx : context) (dest : Ir.dest) (rhs : CU.cuda_expr) : CU.cuda
 let app index t = Many_fn.app index t ~default:(fun arr -> Expr.Index (arr, t))
 let rec app_expr ctx f e = Many_fn.compose (trans_expr ctx) (app f e)
 
-let rec get_length_of_av (ctx : context) (_, av : Air.array_view) : Expr.t =
+let rec get_length_of_av (ctx : context) (_, av : Air.array_view) t : Expr.t =
   match av with
   | Air.Array t ->
-       Option.value_exn
-        (List.hd_exn
-          (Temp.Table.find_exn ctx.filtered_lengths_of t))
+      begin
+        match Temp.Table.find ctx.filtered_lengths_of t with
+        | None -> failwithf "Filtered len not found: `%d`" (Temp.to_int t) ()
+        | Some [] -> failwith "No lengths?"
+        | Some (None :: _) -> failwithf "Not filtered %d" (Temp.to_int t) ()
+        | Some (Some t :: _) -> t
+      end
   | _ -> failwith "WAIT..."
 
 let get_length ctx (t, av) =
   match List.hd_exn (get_filtered_lengths ctx t) with
   | None -> List.hd_exn (get_lengths ctx t)
-  | Some _ -> trans_expr ctx (get_length_of_av ctx av)
+  | Some _ -> trans_expr ctx (get_length_of_av ctx av t)
 
 let get_expr_index (ctx : context) (t : Temp.t) : Temp.t -> (Expr.t, Expr.t) Many_fn.t =
   match Map.find Ano.(ctx.result.buffer_infos) t with
@@ -530,13 +534,25 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
   match stmt with
   | Air.Binop (d, op, s1, s2) ->
       [ d <-- CU.Binop (trans_binop op, trans_op_exn ctx s1, trans_op_exn ctx s2) ]
-  | Air.Index (d, (t, _), i) ->
+  | Air.Index (d, (t, (_, av)), i) ->
       Temp.Table.add ctx.allocation_method ~key:t ~data:`Unallocated
         |> dedup __LINE__;
       Option.iter (match d with Ir.Dest t -> Some t | _ -> None)
         ~f:(fun key -> Temp.Table.add ctx.allocation_method ~key ~data:`Unallocated |> dedup __LINE__);
-      let index_fn = Ano.( (Map.find_exn ctx.result.buffer_infos t).index ) in
-      [ d <-- Many_fn.result_exn (app_expr ctx index_fn (operand_to_expr i)) ]
+      let bi = Map.find_exn ctx.result.Ano.buffer_infos t in
+      begin
+        match av with
+        | Air.Array t2 ->
+          begin
+            match Temp.Table.find ctx.filtered_lengths_of t2 with
+            | None -> ()
+            | Some (_ :: tl) ->
+                Temp.Table.add_exn ctx.filtered_lengths_of ~key:(Ir.temp_of_dest d)
+                  ~data:(List.map tl ~f:(Option.map ~f:(fun x -> Expr.Index (x, operand_to_expr i))))
+          end
+        | _ -> ()
+      end;
+      [ d <-- Many_fn.result_exn (app_expr ctx Ano.(bi.index) (operand_to_expr i)) ]
   | Air.Access (d,src,f) ->
       [ d <-- CU.Field (trans_op_exn ctx src, f)]
   | Air.Unop (d, op, s) ->
@@ -581,7 +597,7 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       let lvalue = Expr.Index (dest_arr, Expr.Temp loop_temp) in
       let typ = match Ir.type_of_dest dest with
         | Tc.Array t -> t
-        | _ -> failwith ":("
+        | _ -> failwith ">:("
       in
 
       let body =
@@ -620,7 +636,7 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
       let hdr = create_loop ~counter:loop_temp (get_length ctx (t1, av1)) in
       let typ = match Ir.type_of_dest dest with
         | Tc.Array t -> t
-        | _ -> failwith ":("
+        | _ -> failwith ">>:("
       in
       let check_stmt =
         CU.Condition (Many_fn.result_exn ~msg:"cuda_trans1" (index2_fn loop_temp),
@@ -739,7 +755,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
               ~f:(fix (fun loop -> function
                     | Expr.Index (e, Expr.Temp t) -> let (w, es) = loop e in (w, t :: es)
                     | Expr.Temp t -> (t, [])
-                    | _ -> failwith ":("))
+                    | _ -> failwith ">>>:("))
       in
 
       let don't_ask = Temp.Hash_set.create () in
@@ -881,7 +897,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
                       fix (fun loop -> function
                         | Expr.Temp t -> Temp.to_type t
                         | Expr.Index (lhs, _) -> loop lhs
-                        | _ -> failwith ":(") expr
+                        | _ -> failwith ">>>>:(") expr
                     in
                     let lens = List.drop lens (typ_diff old_type typ) in (* Oh my god *)
                     let temp = Temp.next typ () in
@@ -893,6 +909,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
               end)
         |> Tuple2.map_snd ~f:List.filter_opt
       in
+
       let filter_params = List.map ~f:fst fwd in
 
       let (kernel_params, kernel_args) =
@@ -971,6 +988,24 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         | Tc.Int | Tc.Float | Tc.Bool -> None
         | _ -> failwith "Not yet."
       ) |> List.filter_opt in
+
+      begin
+        try
+          Temp.Table.add_exn
+            ctx.filtered_lengths_of
+            ~key:(Ir.temp_of_dest dest)
+            ~data:(
+              match bound_array_views with
+              | [(_, _, (_, Air.Array t))] ->
+                  Temp.Table.find_exn ctx.filtered_lengths_of t
+              | _ ->
+              let (_, result) = List.fold filtered_lengths ~init:(0, [])
+                ~f:(fun (i, acc) -> function
+                  | None -> (i, None :: acc)
+                  | Some _ -> (i+1, Some (snd (List.nth_exn fwd i)) :: acc))
+              in List.rev result)
+        with _ -> ()
+      end;
 
       List.concat [
         (* Memcpy the host args into the device args. *)
@@ -1171,7 +1206,7 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
       )
       allocation_method));*)
 
-  (*List.concat [
+  List.concat [
     [ CU.Include "dag_utils.cpp"; ];
     struct_decls;
     gdecls |> List.map ~f:(fun x -> CU.Function x);
@@ -1186,7 +1221,7 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
             name = "dag_" ^ Air.(program.fn_name);
             params;
             body = hd @ malloc'ing @ body @ tl; })
-  ] |> Cuda_ir.fmt_gstmts |> print_endline;*)
+  ] |> Cuda_ir.fmt_gstmts |> print_endline;
   Option.map (CU.top_sort (List.map ~f:snd params) (hd @ malloc'ing @ body @ tl))
     ~f:(fun body ->
       List.concat [

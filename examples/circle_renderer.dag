@@ -160,7 +160,6 @@ int[][][][] renderSquares(
   };
 }
 
-/*
 // Traverses the block array and creates a copy.
 int[][] concatPixelSubarrays (int[][][][] pixels, int width, int height) {
   int squareHeight = dim2(pixels);
@@ -182,8 +181,8 @@ int[][] concatPixelSubarrays (int[][][][] pixels, int width, int height) {
 // Main function.
 int[][] renderImage(int image_width, int image_height, circle[] circles) {
   int num_squares = numSquaresPerSide(dim0(circles));
-  square[][] squares = partitionImage(image_width, image_height, dim0(circles));
+  square[][] squares = partitionImage(image_width, image_height, num_squares, dim0(circles));
   int[][][] scanned = scanCircles(squares, circles);
   int[][][][] pixels = renderSquares(squares, scanned, circles, num_squares, image_width, image_height);
   return concatPixelSubarrays(pixels, image_width, image_height);
-}*/
+}

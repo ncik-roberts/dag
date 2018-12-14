@@ -438,14 +438,16 @@ let top_sort : cuda_ident list -> cuda_stmt list -> cuda_stmt list option =
             in
             Loop (hdr, loop stmts defined')
       in
-      (*Printf.printf "Defined: %s\n" (defined |> S.sexp_of_t |> Sexp.to_string_hum);
-      Printf.printf "Considering stmt: %s..." (fmt_stmt 0 stmt');*)
+      (*Printf.printf "Defined: %s\n" (defined |> S.sexp_of_t |> Sexp.to_string_hum);*)
+      (*Printf.printf "Considering stmt: %s..." (fmt_stmt 0 stmt');*)
       let used = Option.value_map (defined_of_stmt stmt') (used_of_stmt stmt')
                     ~default:Fn.id ~f:(Fn.flip S.remove)
       in
       if not (S.is_subset used ~of_:defined)
         then begin
           (*Printf.printf "Finding other stmt! (Didn't find %s)\n" (S.diff used defined |> S.sexp_of_t |> Sexp.to_string_hum);*)
+          begin
+          try
           let (elem, rest) =
             let rec loop = function
               | [] -> raise Stuck
@@ -489,6 +491,15 @@ let top_sort : cuda_ident list -> cuda_stmt list -> cuda_stmt list option =
                       end
             in loop tl
           in go (defined, init_rev, stmt :: rest) elem
+          with Stuck ->
+            (*Printf.printf "committing to order, despite problems.\n";*)
+            let defined' = Option.value_map (defined_of_stmt stmt') defined
+                            ~default:Fn.id ~f:(Fn.flip S.add)
+            in
+            match tl with
+            | [] -> List.rev (stmt' :: init_rev)
+            | t :: tl -> go (defined', stmt' :: init_rev, tl) t
+          end
         end else begin
           (*Printf.printf "committing to order!\n";*)
           let defined' = Option.value_map (defined_of_stmt stmt') defined

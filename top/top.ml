@@ -74,6 +74,9 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
                 Air.Pretty_print.pp_t air;
               ]);
               say (fun () -> [
+                Annotated_air.sexp_of_result ann |> Sexp.to_string_hum;
+              ]);
+              say (fun () -> [
                 Printf.sprintf "Cuda:";
                 Cuda_ir.fmt_gstmts cuda;
               ]);

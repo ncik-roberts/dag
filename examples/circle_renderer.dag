@@ -43,8 +43,8 @@ int numSquaresPerSide(int num_circles) {
 }
 
 square[][] partitionImage(int width, int height, int num_squares, int num_circles) {
-  int[] xs = range(0, width / num_squares, 1);
-  int[] ys = range(0, height / num_squares, 1);
+  int[] xs = range(width / num_squares);
+  int[] ys = range(height / num_squares);
 
   return for (int h : ys) {
     return for (int w : xs) {
@@ -64,7 +64,7 @@ int[][][] scanCircles(square[][] squares, circle[] circles) {
       bool[] intersections = for (circle c : circles) {
         return circleIntersectsSquare(c, square);
       };
-      int[] unfiltered_IDs = range(0, dim0(circles), 1);
+      int[] unfiltered_IDs = range(dim0(circles));
       return filter_with(unfiltered_IDs, intersections);
     };
   };
@@ -133,13 +133,15 @@ int[][][][] renderSquares(
 
       float fWidth = float_of_int(width);
       float fHeight = float_of_int(height);
-      int[] xPixels = range(square.left, square.right, 1);
-      int[] yPixels = range(square.top, square.bottom, 1);
+      int left = square.left; int right = square.right;
+      int top = square.top; int bottom = square.bottom;
+      int[] xPixels = range(right - left);
+      int[] yPixels = range(bottom - top);
 
-      return for (int y : range(0, width / num_squares, 1)) {
-        return for (int x : range(0, width / num_squares, 1)) {
-          float normX = float_of_int(xPixels[x]) / fWidth;
-          float normY = float_of_int(yPixels[y]) / fHeight;
+      return for (int y : range(width / num_squares)) {
+        return for (int x : range(width / num_squares)) {
+          float normX = float_of_int(xPixels[x] + left) / fWidth;
+          float normY = float_of_int(yPixels[y] + top) / fHeight;
 
           int[] ids = scanned[x][y];
           bool[] ix = for (int id : ids) {
@@ -165,8 +167,8 @@ int[][] concatPixelSubarrays (int[][][][] pixels, int width, int height) {
   int squareHeight = dim2(pixels);
   int squareWidth  = dim3(pixels);
 
-  int[] xs = range(0, width, 1);
-  int[] ys = range(0, height, 1);
+  int[] xs = range(width);
+  int[] ys = range(height);
   return for (int y : ys) {
     return for (int x : xs) {
       int i = y / squareHeight;

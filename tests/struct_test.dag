@@ -7,7 +7,7 @@ struct test {
 
 // Compose some arrays into some structs.
 test[] structify(int[] as, int[] bs, int[] cs){
-  return for (int i : range(0, dim0(as), 1)){
+  return for (int i : range(dim0(as))){
     return struct test {
       a = as[i];
       b = bs[i];
@@ -24,7 +24,7 @@ test[] filter_structs(test[] some_structs){
 }
 
 int destructify(test[] structs) {
-  int[] result = for (int i : range(0, dim0(structs), 1)) {
+  int[] result = for (int i : range(dim0(structs))) {
     test s = structs[i];
     return s.a + s.b + s.c;
   };

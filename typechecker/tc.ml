@@ -181,7 +181,7 @@ let check_fun (ctx : tctxt) (fun_name : Ast.call_name) (arg_types : typ list) : 
   | Ast.Tabulate ->
       begin
         match arg_types with
-        | [ Int; Int; Int; ] -> Array Int
+        | [ Int; ] -> Array Int
         | _ -> failwith "Invalid arguments to Tabulate."
       end
   | Ast.Log2 ->

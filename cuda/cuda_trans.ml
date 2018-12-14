@@ -204,8 +204,7 @@ and lengths ctx (_, av) = match av with
   | Air.Zip_with (_, []) -> failwith "lol"
   | Air.Zip_with (_, av1 :: _) -> lengths ctx av1
   | Air.Reverse av -> lengths ctx av
-  | Air.Tabulate (b, e, s) ->
-      [CU.Binop (CU.DIV, CU.Binop (CU.SUB, temp_to_var e, temp_to_var b), temp_to_var s)]
+  | Air.Tabulate e -> [temp_to_var e]
   | Air.Transpose av -> match lengths ctx av with
       | x1 :: x2 :: xs -> x2 :: x1 :: xs
       | _ -> failwith "That can't be right."
@@ -282,7 +281,7 @@ and make_reduce op args ~(in_kernel : bool) =
   match (op, args) with
     | Op.Binop bin, [a;b] -> CU.AssignOp (trans_binop bin, a, b)
     | Op.Fn_ptr f, [a;b;] -> if in_kernel
-        then CU.Assign (a, CU.FnCall ("dag_device_" ^ f, [ a; b; ]))
+        then CU.Expression (CU.FnCall ("dag_device_" ^ f, [ CU.Address a; a; b; ]))
         else CU.Assign (a, CU.FnCall ("dag_host_" ^ f, [ a; b; ]))
     | Op.Binop _, _ -> failwith "Binary operators have two arguments."
     | Op.Unop _, _ -> failwith "Cannot reduce with a unary operator."
@@ -546,6 +545,7 @@ and trans_seq_stmt (ctx : context) (stmt : Air.seq_stmt) : CU.cuda_stmt list =
           begin
             match Temp.Table.find ctx.filtered_lengths_of t2 with
             | None -> ()
+            | Some [] -> failwith ":("
             | Some (_ :: tl) ->
                 Temp.Table.add_exn ctx.filtered_lengths_of ~key:(Ir.temp_of_dest d)
                   ~data:(List.map tl ~f:(Option.map ~f:(fun x -> Expr.Index (x, operand_to_expr i))))
@@ -739,7 +739,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
         | Air.Reverse av -> temps_in_array_view av
         | Air.Array t -> Temp.Set.singleton t
         | Air.Transpose av -> temps_in_array_view av
-        | Air.Tabulate (b,e,s) -> Temp.Set.of_list [b;e;s]
+        | Air.Tabulate e -> Temp.Set.singleton e
         | Air.Array_index (t1, t2) -> Temp.Set.of_list [t1; t2;]
       in
 
@@ -1010,7 +1010,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       List.concat [
         (* Memcpy the host args into the device args. *)
         memcpy CU.(Host, Device) device_args host_args;
-        [CU.Launch (gdim, bdim, kernel, kernel_args)];
+        [CU.Launch (Id.to_int id, gdim, bdim, kernel, kernel_args)];
         CU.[Transfer (
           dest_to_lvalue_exn ctx dest,
           trans_expr ctx device_dest,
@@ -1057,7 +1057,7 @@ let rec extract_kernel_launches : CU.cuda_stmt list -> CU.cuda_func list =
     | CU.Return _ | CU.Sync | CU.Nop | CU.DeclareArray _ | CU.DeclareAssign _ | CU.Assign _ | CU.Declare _
     | CU.AssignOp _ | CU.Cuda_malloc _ | CU.Malloc _ | CU.Free _ | CU.Transfer _ | CU.InitStruct _
     | CU.Expression _ | CU.Memcpy _ -> kernel_launches
-    | CU.Launch (_, _, cuda_func, _) -> cuda_func :: kernel_launches
+    | CU.Launch (_, _, _, cuda_func, _) -> cuda_func :: kernel_launches
     | CU.Loop (_, stmts) -> extract_kernel_launches stmts @ kernel_launches
     | CU.Condition (_, stmts1, stmts2) ->
         let gstmts1 = extract_kernel_launches stmts1 in
@@ -1069,7 +1069,7 @@ let rec extract_kernel_launches : CU.cuda_stmt list -> CU.cuda_func list =
     | CU.Sync | CU.Nop | CU.DeclareArray _ | CU.DeclareAssign _ | CU.Assign _ | CU.Declare _
     | CU.AssignOp _ | CU.Malloc _ | CU.Cuda_malloc _ | CU.Free _ | CU.Transfer _
     | CU.Expression _ | CU.Memcpy _ | CU.Return _ | CU.InitStruct _ -> kernel_launches
-    | CU.Launch (_, _, cuda_func, _) -> cuda_func :: kernel_launches
+    | CU.Launch (_, _, _, cuda_func, _) -> cuda_func :: kernel_launches
     | CU.Loop (_, stmts) -> extract_kernel_launches stmts @ kernel_launches
     | CU.Condition (_, stmts1, stmts2) ->
         let gstmts1 = extract_kernel_launches stmts1 in
@@ -1118,13 +1118,15 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
     lvalue = Option.map ~f:(fun t -> Expr.Temp t) lvalue;
     bear_with_me;
     extra_lengths;
-    lvalue_lengths =
+    lvalue_lengths = (
       begin
         let open Option.Monad_infix in
         lvalue >>= fun t ->
         Map.find Ano.(result.buffer_infos) t >>= fun x ->
         Option.return Ano.(x.length)
-      end;
+      end |> function
+        | Some x -> Printf.printf "%s\n" (List.sexp_of_t Length_expr.sexp_of_t x |> Sexp.to_string_hum); Some x
+        | None -> None);
     out_param = lvalue;
     backed_temps = Temp.Hash_set.create ();
     dims_of_params = List.concat_map Ano.(result.params) ~f:(function
@@ -1147,12 +1149,17 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
             params = ps;
             body = b;
       }),
-      CU.(Function {
+      CU.(
+        let typ = Air.(p.return_type) in
+        let tmp = Temp.next typ () in
+        Function {
             typ = Device;
-            ret = trans_type Air.(p.return_type);
+            ret = Void;
             name = "dag_device_" ^ Air.(p.fn_name);
-            params = ps;
-            body = b;
+            params = (CU.Pointer (trans_type typ), temp_name tmp) :: ps;
+            body = b |> List.map ~f:(function
+              | CU.Return e -> CU.Assign (CU.Deref (temp_to_var tmp), e);
+              | stmt -> stmt);
       }))
   ) in
 
@@ -1205,23 +1212,6 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
         | `Host_and_device_no_malloc_on_host t -> Tuple2.sexp_of_t Sexp.of_string Temp.sexp_of_t ("host_and_device_no_malloc_on_host", t)
       )
       allocation_method));*)
-
-  List.concat [
-    [ CU.Include "dag_utils.cpp"; ];
-    struct_decls;
-    gdecls |> List.map ~f:(fun x -> CU.Function x);
-    List.concat_map zipped_fn_ptr_definitions ~f:(fun (_, f1, f2) -> [f1; f2;]);
-    List.return
-      CU.(Function { typ = Host;
-            ret = begin
-              match Ano.(result.out_param) with
-              | None -> trans_type Air.(program.return_type)
-              | Some _ -> ret_ty
-            end;
-            name = "dag_" ^ Air.(program.fn_name);
-            params;
-            body = hd @ malloc'ing @ body @ tl; })
-  ] |> Cuda_ir.fmt_gstmts |> print_endline;
   Option.map (CU.top_sort (List.map ~f:snd params) (hd @ malloc'ing @ body @ tl))
     ~f:(fun body ->
       List.concat [

@@ -101,19 +101,12 @@ let annotate_array_view
               Many_fn.Fun (fun expr ->
                 app bi.index (Expr.Call (Ir.Operator.Binop Ast.Minus, [ n_minus_1; expr; ])))
         }
-    | (typ, Air.Tabulate (b, e, s)) ->
+    | (typ, Air.Tabulate e) ->
         { typ = Tc.(Array Int);
           dim = 1;
-          length = List.return Length_expr.(Div (Minus (Temp e, Temp b), Temp s));
+          length = List.return Length_expr.(Temp e);
           filtered_lengths = [None];
-          index = Many_fn.Fun (fun expr -> Many_fn.Result begin
-            Expr.Call (Ir.Operator.Binop Ast.Plus, [
-              Expr.Temp b;
-              Expr.Call (Ir.Operator.Binop Ast.Times, [
-                Expr.Temp s;
-                expr;
-            ])])
-          end);
+          index = Many_fn.Fun (fun expr -> Many_fn.Result expr);
         }
 
     | (typ, Air.Zip_with (op, avs)) ->
@@ -154,7 +147,7 @@ let rec used_of_array_view (ctx : context) (av : Air.array_view) : Temp.Set.t = 
     | Air.Array_index _ -> Temp.Set.empty (* don't ask *)
     | Air.Reverse av -> used_of_array_view ctx av
     | Air.Transpose av -> used_of_array_view ctx av
-    | Air.Tabulate (a, b, c) -> Temp.Set.of_list [a;b;c;]
+    | Air.Tabulate a -> Temp.Set.singleton a
 
 let used_of_operand (ctx : context) : Air.operand -> Temp.Set.t =
   function
@@ -218,7 +211,7 @@ let update_backing_temps
     | Air.Array t -> Temp.Set.singleton t
     | Air.Reverse av -> loop av
     | Air.Zip_with (_, avs) -> Temp.Set.union_list (List.map ~f:loop avs)
-    | Air.Tabulate (_, _, _) -> Temp.Set.empty
+    | Air.Tabulate _ -> Temp.Set.empty
   in
   Map.add_exn backing_temps ~key:t ~data:(loop av)
 
@@ -461,8 +454,15 @@ and annotate_seq_stmt
         let used = Set.union (used_of_array_view ctx av) (used_of_operand ctx src2) in
         let defined = defined_of_dest dest in
         let bi = annotate_array_view ctx av in
+        let bi' = A_air.{
+          typ = (match bi.typ with Tc.Array typ -> typ | _ -> failwith ":(" );
+          dim = bi.dim - 1;
+          length = List.tl_exn bi.length;
+          filtered_lengths = List.tl_exn bi.filtered_lengths;
+          index = bi.index;
+        } in
         ({ used; defined; additional_buffers = Temp.Set.empty;
-           return_buffer_info = Some bi;
+           return_buffer_info = Some bi';
          }, { ctx with result = A_air.{
            ctx.result with buffer_infos = ctx.result.buffer_infos
              |> Map.add_exn ~key:t ~data:bi }})

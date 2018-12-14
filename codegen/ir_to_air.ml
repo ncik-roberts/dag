@@ -59,17 +59,13 @@ let make_array_view
     | Ir.Zip_with f, [ `Array_view view1; `Array_view view2; ] -> Air.Zip_with (f, [ view1; view2; ]) |> nop
     | Ir.Transpose, [ `Array_view view ] -> Air.Transpose view |> nop
     | Ir.Map f, [ `Array_view view ] -> Air.Zip_with (f, [ view ]) |> nop
-    | Ir.Tabulate, [`Operand o1; `Operand o2; `Operand o3;] ->
+    | Ir.Tabulate, [`Operand o1 ] ->
         let t1 = Temp.next Tc.Int () in
-        let t2 = Temp.next Tc.Int () in
-        let t3 = Temp.next Tc.Int () in
         let assts =
           [ Air.Assign (Ir.Dest t1, o1);
-            Air.Assign (Ir.Dest t2, o2);
-            Air.Assign (Ir.Dest t3, o3);
           ] |> fun x -> Air.Seq (Air.Seq_stmt (Air.Block x))
         in
-        (assts, Air.Tabulate (t1, t2, t3))
+        (assts, Air.Tabulate t1)
     | Ir.Int_of_float, _ -> failwith "I <- F is not an array view."
     | Ir.Float_of_int, _ -> failwith "F <- I is not an array view."
     | Ir.Reduce _, _ -> failwith "Reduce is not an array view."

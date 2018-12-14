@@ -1,6 +1,6 @@
 
 float[] saxpy_float(float[] a, float[] b, float[] c){
-  int[] indexes = range(0, dim0(a), 1);
+  int[] indexes = range(dim0(a));
   return for (int i : indexes) {
     return a[i] * b[i] + c[i];
   };

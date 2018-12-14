@@ -124,7 +124,7 @@ and cuda_stmt =
   (* Not cudaMemcpy; literally just memcpy. *)
   | Memcpy of cuda_expr * cuda_expr * cuda_expr
     (* Launch dimension, blocks/thread, kernel, arguments *)
-  | Launch of grid_dim * grid_dim * cuda_func * cuda_expr list
+  | Launch of int * grid_dim * grid_dim * cuda_func * cuda_expr list
 
   | Return of cuda_expr
   | Free of cuda_ident
@@ -284,7 +284,7 @@ and fmt_stmt n stm =
    let malloc = sprintf "%scudaMalloc(&%s, %s)" sp (dest) (fmt_expr size) in
    decl ^ malloc
 
- | Malloc (typ, dest, size) -> sprintf "%s%s %s = malloc(%s)" sp (fmt_typ typ) (dest) (fmt_expr size)
+ | Malloc (typ, dest, size) -> sprintf "%s%s %s = (%s) malloc(%s)" sp (fmt_typ typ) (dest) (fmt_typ typ) (fmt_expr size)
 
  | Memcpy (dest, src, size) ->
    sprintf "%smemcpy(%s, %s, %s)" sp (fmt_expr dest) (fmt_expr src) (fmt_expr src)
@@ -293,10 +293,10 @@ and fmt_stmt n stm =
    sprintf "%scudaMemcpy(%s, %s, %s, %s)" sp (fmt_expr dest)
    (fmt_expr src) (fmt_expr size) (Tuple2.uncurry fmt_mem_tfr ttyp)
 
- | Launch ((x, y, z), (a, b, c), { name }, args) ->
-   let block = sprintf "%sdim3 dimGrid(%s, %s, %s);\n" sp (fmt_expr a) (fmt_expr b) (fmt_expr c) in
-   let grid = sprintf "%sdim3 dimBlock(%s, %s, %s);\n" sp (fmt_expr x) (fmt_expr y) (fmt_expr z) in
-   let launch = sprintf "%s%s<<<dimGrid,dimBlock>>>%s" sp name (comma_delineated (List.map ~f:fmt_expr args))
+ | Launch (i, (x, y, z), (a, b, c), { name }, args) ->
+   let block = sprintf "%sdim3 dimGrid%d(%s, %s, %s);\n" sp i (fmt_expr a) (fmt_expr b) (fmt_expr c) in
+   let grid = sprintf "%sdim3 dimBlock%d(%s, %s, %s);\n" sp i (fmt_expr x) (fmt_expr y) (fmt_expr z) in
+   let launch = sprintf "%s%s<<<dimGrid%d,dimBlock%d>>>%s" sp name i i (comma_delineated (List.map ~f:fmt_expr args))
    in block ^ grid ^ launch
 
  | Sync -> sprintf "%s %s\n" sp "__syncthreads()"
@@ -369,12 +369,12 @@ let transpose_kernel : cuda_func = {
 }
 
 (* Builds the expression for the kernel launch of the transpose primitive *)
-let launch_transpose matrix dev_matrix dev_result =
+let launch_transpose i matrix dev_matrix dev_result =
   let rowexp = Binop (DIV, Index (Field (matrix, "lens"), IConst 0L), Var "tp_TILE_DIM") in
   let colexp = Binop (DIV, Index (Field (matrix, "lens"), IConst 1L), Var "tp_TILE_DIM") in
   let gridDim = (rowexp, colexp, IConst 1L) in
   let blockDim = (Var "tp_TILE_DIM", Var "tp_BLOCK_ROWS", IConst 1L) in
-  Launch (gridDim, blockDim, transpose_kernel, [ dev_result; dev_matrix; ])
+  Launch (i, gridDim, blockDim, transpose_kernel, [ dev_result; dev_matrix; ])
 
 (* IR Representation of the Transpose function from the CUDA documentation. *)
 let primitive_transpose : t = [
@@ -420,7 +420,7 @@ let rec used_of_stmt : cuda_stmt -> S.t = function
   | Condition (cond, if_stmt, then_stmt) -> S.union_list [ used_of_expr cond; ]
   | Transfer (expr1, expr2, expr3, _) -> used_of_exprs [ expr1; expr2; expr3; ]
   | Memcpy (expr1, expr2, expr3) -> used_of_exprs [ expr1; expr2; expr3; ]
-  | Launch (_, _, _, exprs) -> used_of_exprs exprs
+  | Launch (_, _, _, _, exprs) -> used_of_exprs exprs
 and used_of_stmts stmts = S.union_list (List.map ~f:used_of_stmt stmts)
 
 let top_sort : cuda_ident list -> cuda_stmt list -> cuda_stmt list option =

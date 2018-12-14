@@ -13,7 +13,7 @@ and array_view' =
      * second array view: thing of booleans.
      *)
   | Reverse of array_view
-  | Tabulate of Temp.t * Temp.t * Temp.t (* lo, hi, step? *)
+  | Tabulate of Temp.t
   | Transpose of array_view
   [@@deriving sexp]
 
@@ -121,8 +121,7 @@ end = struct
           (Sexp.to_string_hum (Ir.Operator.sexp_of_t o))
           (String.concat ~sep:", " (List.map avs ~f:pp_array_view))
     | Reverse av -> sprintf "reverse(%s)" (pp_array_view av)
-    | Tabulate (b, e, s) -> sprintf "tabulate(%%%d, %%%d, %%%d)"
-        (Temp.to_int b) (Temp.to_int e) (Temp.to_int s)
+    | Tabulate e -> sprintf "tabulate(%%%d)" (Temp.to_int e)
     | Transpose av -> sprintf "transpose(%s)" (pp_array_view av)
 
   let pp_operand = function

@@ -1,12 +1,8 @@
 
-int dotProduct(int[] v1, int[] v2) {
-  return reduce(+, 0, zip_with(*, v1, v2));
-}
-
 int[][] multiplyMatrixMatrix(int[][] m1, int[][] m2) {
   return for (int[] row : m1) {
     return for (int[] col : transpose(m2)) {
-      return dotProduct(row, col);
+      return reduce(+, 0, zip_with(*, row, col));
     };
   };
 }

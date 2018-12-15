@@ -31,12 +31,20 @@ float* initRandomArrayf(int NUM_ELEMS)
 
 float* initRandomArrayfRange(int NUM_ELEMS,int min, int max)
 {
-  float* array = (float*) malloc(NUM_ELEMS * sizeof (float));
+  float* array = (float*) calloc(NUM_ELEMS,sizeof (float));
   for (int i=0; i<NUM_ELEMS; i++){
     int sample = min + (rand() % (max - min + 1));
     array[i] = (float) sample;
   }
   return array;
+}
+
+void randomizeFloatArray(float* result, int NUM_ELEMS,int min, int max)
+{
+  for (int i=0; i<NUM_ELEMS; i++){
+    int sample = min + (rand() % (max - min + 1));
+    result[i] = (float) sample;
+  }
 }
 
 
@@ -66,7 +74,7 @@ int almostEquals(float a, float b){
   return abs(b - a) < 1e-4;
 }
 
-void verifyFloatArrays(const char* name, float* standard, float* test, int len){
+void verifyFloatArrays(const char* name, float* standard, float* test, int len, int quiet){
   int passed = 0;
   for (int i = 0; i < len; i++){
       if (!almostEquals(standard[i],test[i])){
@@ -80,7 +88,7 @@ void verifyFloatArrays(const char* name, float* standard, float* test, int len){
       }
   }
 
-  if (passed == 0){
+  if (passed == 0 && !quiet){
     printf("(%s) Test Passed.\n", name);
   } else{
     printf("(%s) Test FAILED.\n", name);

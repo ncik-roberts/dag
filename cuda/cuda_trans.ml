@@ -1150,15 +1150,13 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
     lvalue = Option.map ~f:(fun t -> Expr.Temp t) lvalue;
     bear_with_me;
     extra_lengths;
-    lvalue_lengths = (
+    lvalue_lengths =
       begin
         let open Option.Monad_infix in
         lvalue >>= fun t ->
         Map.find Ano.(result.buffer_infos) t >>= fun x ->
         Option.return Ano.(x.length)
-      end |> function
-        | Some x -> Printf.printf "%s\n" (List.sexp_of_t Length_expr.sexp_of_t x |> Sexp.to_string_hum); Some x
-        | None -> None);
+      end;
     out_param = lvalue;
     backed_temps = Temp.Hash_set.create ();
     dims_of_params = List.concat_map Ano.(result.params) ~f:(function
@@ -1236,14 +1234,6 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
   let struct_decls = Map.mapi ~f:trans_struct_decl struct_decls |> Map.to_alist |> List.map ~f:snd in
   let gdecls = extract_kernel_launches body in
 
-  (*Printf.printf "\n\n\n%s\n\n\n"
-    (Sexp.to_string_hum (Temp.Table.sexp_of_t
-      (function
-        | `Unallocated -> Sexp.of_string "unalloc"
-        | `Host_and_device t -> Tuple2.sexp_of_t Sexp.of_string Temp.sexp_of_t ("host_and_device", t)
-        | `Host_and_device_no_malloc_on_host t -> Tuple2.sexp_of_t Sexp.of_string Temp.sexp_of_t ("host_and_device_no_malloc_on_host", t)
-      )
-      allocation_method));*)
   Option.map (CU.top_sort (List.map ~f:snd params) (hd @ malloc'ing @ body @ tl))
     ~f:(fun body ->
       List.concat [

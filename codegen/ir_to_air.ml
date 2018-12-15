@@ -157,6 +157,10 @@ let rec make_parallel
         Parallel (d1, Id.next (), [(t1, t_idx1, av1)], Seq_stmt (Run (d2, av2)));
         Par_stmt (For (d1, (t1, t_idx1, av1), stmt));
       ]
+    | Air.Par_stmt (Air.Block _ as par_stmt) -> Air.[
+        Parallel (d1, Id.next (), [(t1, t_idx1, av1)], Seq_stmt (to_seq_stmt' par_stmt));
+        Par_stmt (For (d1, (t1, t_idx1, av1), stmt));
+      ]
     | Air.Par_stmt par_stmt -> Air.[
         Parallel (d1, Id.next (), [(t1, t_idx1, av1)], Seq_stmt (to_seq_stmt' par_stmt));
         Par_stmt (For (d1, (t1, t_idx1, av1), stmt));
@@ -326,7 +330,11 @@ let upto (ir : Ir.t) (dag : Temp_dag.dag) ~n : Air.t list =
           (* TODO: rename *)
           let rec f (ctx : context) (stmts : Ir.stmt list) (acc : Air.par_stmt list) : Air.par_stmt list =
             match stmts with
-            | [] -> [Air.(Par_stmt (Block (List.rev acc)))]
+            | [] -> begin
+                match List.rev_filter_map ~f:simplify acc with
+                | [x] -> [x]
+                | xs -> [Air.(Par_stmt (Block xs))]
+              end
             | s :: ss ->
                 let ctx_stmt_pairs = loop ctx s in
                 List.concat_map (limit ctx_stmt_pairs) ~f:(fun (ctx, stmt) -> f ctx ss (stmt :: acc))

@@ -1,4 +1,6 @@
 #include "julia_test.h"
+#include <sys/time.h>
+#include "ppm.cpp"
 
 typedef struct { 
   float r;
@@ -39,8 +41,7 @@ bool julia (int x, int y, int DIM) {
   return mag <= 1000.f;
 }
 
-bool* render_julia(int DIM){
-  bool* image = (bool*) malloc(DIM*DIM*sizeof(bool));
+void render_julia(bool* image, int DIM){
   for (int y=0; y<DIM; y++) {
     for (int x=0; x<DIM; x++) {
       int offset = x + y * DIM;
@@ -48,26 +49,52 @@ bool* render_julia(int DIM){
       image[offset] = juliaValue;
     }
   }
-  return image;
 }
 
 int main(){
   int DIM = 1024; 
+  int RUNS = 3;
 
-  bool* julia_c = render_julia(DIM);
-  int trues = 0; int falses = 0;
-  for (int i = 0; i < DIM * DIM; i++){
-    if(julia_c[i]) trues++; else falses++;
-  }
-  printf("\t  (C) Trues: %d, Falses %d\n",trues,falses);
-  trues = 0; falses = 0;
+  long timec = __LONG_MAX__;
+  long timed = __LONG_MAX__;
+
+  struct timeval t0;
+  struct timeval t1;
+  long elapsed;
+
+  //int trues = 0; int falses = 0;
+  //for (int i = 0; i < DIM * DIM; i++){
+  //  if(julia_c[i]) trues++; else falses++;
+  //}
+  //printf("\t  (C) Trues: %d, Falses %d\n",trues,falses);
+  //trues = 0; falses = 0;
+  bool* julia_c = (bool*) calloc(DIM*DIM,(sizeof(bool)));
   bool* julia_dag = (bool*) calloc(DIM*DIM,(sizeof(bool)));
-  dag_render_julia(julia_dag,DIM,DIM,DIM); // this is a little awkward
-  for (int i = 0; i < DIM * DIM; i++){
-    if(julia_dag[i]) trues++; else falses++;
-  }
-  printf("\t(DAG) Trues: %d, Falses %d\n",trues,falses);
 
+  for (int i = 0; i < RUNS; i++){
+    gettimeofday(&t0,NULL);
+    render_julia(julia_c,DIM);
+    gettimeofday(&t1,NULL);
+    elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
+    timec = minl(elapsed,timec);
+
+    gettimeofday(&t0,NULL);
+    dag_render_julia(julia_dag,DIM,DIM,DIM); // this is a little awkward
+    gettimeofday(&t1,NULL);
+    elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
+    timed = minl(elapsed,timed);
+  }
+  
+  int* julia_img = (int*) calloc(DIM*DIM,sizeof(int));
+  for (int i = 0; i < DIM * DIM; i++){
+   if(julia_dag[i]) julia_img[i] = 255;
+  }
+  //printf("\t(DAG) Trues: %d, Falses %d\n",trues,falses);
+
+  writePPMImage(julia_img, DIM, DIM, "julia.ppm", 256);
   verifyBoolArrays("julia",julia_c,julia_dag,DIM*DIM);
+
+  printf("Julia (C)    \t%ld\n",timec);
+  printf("Julia (DAG)  \t%ld\n",timed);
 }
 

@@ -4,9 +4,8 @@ module Cuda = Cuda_ir
 
 type t = {
 
-  (* Negative times the amount of parallel operations (kernel launches,
-   * calls to thrust, etc.). It's negative so that smaller is better. *)
-  neg_parallelism : int;
+  (** Max dimensions we're looping over in the main function. *)
+  nested_loops : int;
 
   (* Number of total transfer instructions, where the first element
    * of the tuple is the number of nested levels of loops. (This
@@ -29,7 +28,7 @@ type t = {
 let empty : t = {
   memory_allocation = 0;
   transfers = [];
-  neg_parallelism = 0;
+  nested_loops = 0;
 }
 
 type 'a binop = 'a -> 'a -> 'a
@@ -48,7 +47,7 @@ let rec merge_transfers : (int * int) list binop = fun xs1 xs2 ->
 let merge : t binop = fun t1 t2 -> {
   memory_allocation = t1.memory_allocation + t2.memory_allocation;
   transfers = merge_transfers t1.transfers t2.transfers;
-  neg_parallelism = t1.neg_parallelism + t2.neg_parallelism;
+  nested_loops = max t1.nested_loops t2.nested_loops;
 }
 
 let rec count_multiplicands = function
@@ -64,29 +63,28 @@ let rec convert_stmt : Cuda.cuda_stmt -> t =
   let open Cuda in
   function
     | Nop | Sync | DeclareArray _ | Return _ | InitStruct _ | Assign _ | AssignOp _ | Expression _
-    | Declare _ | DeclareAssign _ | Malloc _ | Free _  | Memcpy _ -> empty
+    | Launch _ | Declare _ | DeclareAssign _ | Malloc _ | Free _  | Memcpy _ -> empty
     | ThrustCall ("reduce", _, [_;_;_;length;]) ->
         let n = count_multiplicands length in
-        { neg_parallelism = -1;
+        { nested_loops = 0;
           memory_allocation = n;
           transfers = [(n, 1)];
         }
     | ThrustCall ("scan", _, [_;_;_;length;]) ->
         let n = count_multiplicands length in
-        { neg_parallelism = -1;
+        { nested_loops = 0;
           memory_allocation = 2 * n;
           transfers = [(n, 2)];
         }
     | ThrustCall _ -> failwith "That's it."
     | Cuda_malloc (_, _, expr) ->
         { empty with memory_allocation = count_multiplicands expr }
-    | Launch _ -> { empty with neg_parallelism = -1 }
     | Transfer (_, _, size, _) -> { empty with transfers = [ (count_multiplicands size, 1) ] }
     | Loop ((_, loop_guard, _), body) ->
         let t = convert_stmts body in
         let n = count_multiplicands_in_loop_guard loop_guard in
         { memory_allocation = n * t.memory_allocation;
-          neg_parallelism = t.neg_parallelism;
+          nested_loops = t.nested_loops * n;
           transfers = List.map ~f:(Tuple2.map_fst ~f:((+) n)) t.transfers;
         }
     | Condition (_, body1, body2) ->

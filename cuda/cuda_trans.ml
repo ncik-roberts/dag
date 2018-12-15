@@ -1248,8 +1248,6 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
         body;
       } in
 
-      print_endline (Sexp.to_string_hum (Heuristics.sexp_of_t (Heuristics.into main)));
-
       List.concat [
         [ CU.Include "\"dag_utils.cpp\"";      CU.Include "<thrust/scan.h>";
           CU.Include "<thrust/device_ptr.h>";  CU.Include "<thrust/device_malloc.h>";

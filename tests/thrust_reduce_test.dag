@@ -1,0 +1,4 @@
+
+int thrust_reduce(int[] input){
+  return reduce(+,0,input);
+}

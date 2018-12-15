@@ -21,7 +21,7 @@ complex complex_mult(complex a, complex b) {
 }
 
 bool julia (int x, int y, int dim) {
-  float scale = -1.5;
+  float scale = 1.5;
   float jx = scale * float_of_int(dim - x) / float_of_int(dim);
   float jy = scale * float_of_int(dim - y) / float_of_int(dim);
 

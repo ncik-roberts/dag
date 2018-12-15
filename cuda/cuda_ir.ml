@@ -13,7 +13,6 @@ type cuda_type =
   | ConstType of cuda_type
   | Struct of cuda_ident
   | Dim of int
-  | StringType of string
   [@@deriving sexp]
 
 type cuda_mem_type =
@@ -126,7 +125,7 @@ and cuda_stmt =
   | Memcpy of cuda_expr * cuda_expr * cuda_expr
     (* Launch dimension, blocks/thread, kernel, arguments *)
   | Launch of int * grid_dim * grid_dim * cuda_func * cuda_expr list
-  | ThrustCall of cuda_ident  * cuda_expr * cuda_expr * cuda_expr
+  | ThrustCall of cuda_ident * binop * (cuda_expr list)
   | Return of cuda_expr
   | Free of cuda_ident
   | Sync
@@ -155,7 +154,6 @@ let rec fmt_typ = function
   | ConstType t -> "const "^(fmt_typ t)
   | Pointer t -> (fmt_typ t)^"*"
   | Struct s -> "struct " ^ s
-  | StringType s -> s
   | Dim i -> "dim"^(string_of_int i)
 
 let fmt_mem_hdr = function
@@ -216,6 +214,11 @@ let cc = ref 0
 let call_counter () = 
   let n = !cc in
   let _ = cc := n+1 in n
+
+let get_thrust_op = function
+  | ADD -> "thrust::plus<int>()"
+  | MUL -> "thrust::times<int>()"
+  | _ -> failwith "Let's not's reduce's this."
 
 let rec fmt_expr = function
   | IConst c -> Int64.to_string c
@@ -305,20 +308,34 @@ and fmt_stmt n stm =
    let grid = sprintf "%sdim3 dimBlock%d(%s, %s, %s);\n" sp i (fmt_expr x) (fmt_expr y) (fmt_expr z) in
    let launch = sprintf "%s%s<<<dimGrid%d,dimBlock%d>>>%s" sp name i i (comma_delineated (List.map ~f:fmt_expr args))
    in block ^ grid ^ launch
- | ThrustCall (ident,dest,src,lng) -> 
+
+ | ThrustCall ("reduce",op,[dest;init;src;lng]) ->
+    let num = call_counter () in
+    let devtyp = "thrust::device_ptr<int>" in
+    let d_in = sprintf "d_input%d" num in let d_out = fmt_expr dest in
+    let m1 = sprintf "%s%s %s = thrust::device_malloc<int>(%s)" sp devtyp d_in  (fmt_expr lng) in
+    let mcpy = sprintf "%scudaMemcpy(%s.get(),%s,%s*sizeof(int),cudaMemcpyHostToDevice)" sp d_in (fmt_expr src) (fmt_expr lng) in
+    let red = sprintf "%sint %s = thrust::reduce(%s,%s + %s,%s,%s)" sp d_out d_in (d_in) (fmt_expr lng) (fmt_expr init) (get_thrust_op op) in
+    let sync = sprintf "%scudaThreadSynchronize()" sp in
+    let f1 = sprintf "%sthrust::device_free(%s)" sp d_in in
+    String.concat ~sep:";\n" [m1;mcpy;red;sync;f1]
+
+ | ThrustCall ("exclusive_scan",op,[dest;init;src;lng]) -> 
     let num = call_counter () in
     let devtyp = "thrust::device_ptr<int>" in
     let d_in = sprintf "d_input%d" num in let d_out = sprintf "d_output%d" num in
     let m1 = sprintf "%s%s %s = thrust::device_malloc<int>(%s)" sp devtyp d_in  (fmt_expr lng) in
     let m2 = sprintf "%s%s %s = thrust::device_malloc<int>(%s)" sp devtyp d_out (fmt_expr lng) in
     let mcpy = sprintf "%scudaMemcpy(%s.get(),%s,%s*sizeof(int),cudaMemcpyHostToDevice)" sp d_in (fmt_expr src) (fmt_expr lng) in
-    let scan = sprintf "%sthrust::%s(%s,%s + %s,%s)" sp ident d_in (d_in) (fmt_expr lng) d_out in
+    let scan = sprintf "%sthrust::exclusive_scan(%s,%s + %s,%s,%s,%s)" sp d_in (d_in) (fmt_expr lng) d_out (fmt_expr init) (get_thrust_op op) in
     let sync = sprintf "%scudaThreadSynchronize()" sp in
     let back = sprintf "%scudaMemcpy(%s,%s.get(),%s*sizeof(int),cudaMemcpyDeviceToHost)" sp (fmt_expr dest) (d_out) (fmt_expr lng) in
-    let f1 = sprintf "thrust::device_free(%s)" d_in in
-    let f2 = sprintf "thrust::device_free(%s)" d_out in
+    let f1 = sprintf "%sthrust::device_free(%s)" sp d_in in
+    let f2 = sprintf "%sthrust::device_free(%s)" sp d_out in
     String.concat ~sep:";\n" [m1;m2;mcpy;scan;sync;back;f1;f2]
-
+ 
+ 
+ | ThrustCall _ -> failwith "Unknown thrust call value. Invalid arg length?"
  | Sync -> sprintf "%s %s\n" sp "__syncthreads()"
  | Free id -> sprintf "%s cudaFree(%s)\n" sp id
  | Nop -> ""
@@ -341,7 +358,7 @@ let fmt_struct (id,fields) =
   header ^ block'
 
 let fmt_gstmt = function
-  | Include str -> "#include \"" ^ str ^"\""
+  | Include str -> "#include  "^ str 
   | Function f -> fmt_func f
   | Decl d -> fmt_stmt 0 d ^ ";"
   | StructDecl (id, fields) -> fmt_struct (id, fields)
@@ -438,10 +455,9 @@ let rec used_of_stmt : cuda_stmt -> S.t = function
   | InitStruct (lvalue, expr_pairs) -> used_of_exprs (lvalue :: List.map ~f:snd expr_pairs)
   | Malloc (_, _, expr) | Cuda_malloc (_, _, expr) | DeclareAssign (_, _, expr) | Expression expr | Return expr -> used_of_expr expr
   | Condition (cond, if_stmt, then_stmt) -> S.union_list [ used_of_expr cond; ]
-  | Transfer (expr1, expr2, expr3, _) -> used_of_exprs [ expr1; expr2; expr3; ]
-  | Memcpy (expr1, expr2, expr3) -> used_of_exprs [ expr1; expr2; expr3; ]
-  | Launch (_, _, _, _, exprs) -> used_of_exprs exprs
-  | ThrustCall (_,exp1,exp2,exp3) -> used_of_exprs [exp1; exp2; exp3]
+  | Transfer (expr1, expr2, expr3, _) 
+  | Memcpy (expr1,expr2,expr3) -> used_of_exprs [ expr1; expr2; expr3; ]
+  | Launch (_, _, _, _, exprs) | ThrustCall (_,_,exprs) -> used_of_exprs exprs
 and used_of_stmts stmts = S.union_list (List.map ~f:used_of_stmt stmts)
 
 let top_sort : cuda_ident list -> cuda_stmt list -> cuda_stmt list option =

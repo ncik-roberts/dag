@@ -707,13 +707,27 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
 
   (* TODO: Make these actually run in parallel. *)
   | Air.Par_stmt (Air.Run (a, b)) -> trans_seq_stmt ctx (Air.Seq_stmt (Air.Run (a, b)))
-  | Air.Par_stmt (Air.Reduce (a, b, c, d)) -> trans_seq_stmt ctx (Air.Seq_stmt (Air.Reduce (a, b, c, d)))
+  | Air.Par_stmt (Air.Reduce (dest, Ir.Operator.Binop(Ast.Plus), init, (t, (_,Air.Array t_src) as source))) -> 
+         let len = get_length ctx source in
+         let src = temp_to_var t_src in
+         let init = trans_op_exn ctx init in
+         Temp.Table.add ctx.allocation_method ~key:t ~data:`Unallocated
+         |> dedup __LINE__;
+         (match dest_to_lvalue ctx dest with
+         | Some dd -> [CU.ThrustCall("reduce",CU.ADD,[dd;init;src;len])]
+         | None -> 
+             let dd = temp_to_var (Temp.next Tc.Int ()) in 
+             [CU.ThrustCall("reduce",CU.ADD,[dd;init;src;len]); CU.Return (dd)])
+            
+  | Air.Par_stmt (Air.Reduce (a, b, c, d)) -> 
+        trans_seq_stmt ctx (Air.Seq_stmt (Air.Reduce (a, b, c, d)))
   | Air.Par_stmt (Air.Filter_with (a, b, c)) -> trans_seq_stmt ctx (Air.Seq_stmt (Air.Filter_with (a, b, c)))
   | Air.Par_stmt (Air.Scan (dest, Ir.Operator.Binop(Ast.Plus), init, (t, (_, Air.Array t_src) as source))) -> 
         let dd = dest_to_lvalue_exn ctx dest in
         let len = get_length ctx source in 
         let src = temp_to_var t_src in
-        [CU.ThrustCall("exclusive_scan",dd,src,len)] 
+        let init = trans_op_exn ctx init in
+        [CU.ThrustCall("exclusive_scan",CU.ADD,[dd;init;src;len])] 
     
   | Air.Par_stmt (Air.Scan (a,b,c,d)) -> trans_seq_stmt ctx (Air.Seq_stmt (Air.Scan (a, b, c, d)))
 
@@ -1222,9 +1236,10 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
   Option.map (CU.top_sort (List.map ~f:snd params) (hd @ malloc'ing @ body @ tl))
     ~f:(fun body ->
       List.concat [
-        [ CU.Include "\"dag_utils.cpp\""; CU.Include "<thrust/scan.h>";
-          CU.Include "<thrust/device_ptr.h>"; CU.Include "<thrust/device_malloc.h>";
-          CU.Include "<thrust/device_free.h>"];
+        [ CU.Include "\"dag_utils.cpp\"";      CU.Include "<thrust/scan.h>";
+          CU.Include "<thrust/device_ptr.h>";  CU.Include "<thrust/device_malloc.h>";
+          CU.Include "<thrust/device_free.h>"; CU.Include "<thrust/reduce.h>";
+          CU.Include "<thrust/functional.h>"];
         struct_decls;
         gdecls |> List.map ~f:(fun x -> CU.Function x);
         List.concat_map zipped_fn_ptr_definitions ~f:(fun (_, f1, f2) -> [f1; f2;]);

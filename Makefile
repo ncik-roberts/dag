@@ -1,3 +1,5 @@
+SHELL=/bin/bash
+
 dagc: main.native
 	mv main.native dagc
 
@@ -9,6 +11,7 @@ clean:
 
 install:
 	sh <(curl -sL https://raw.githubusercontent.com/ocaml/opam/master/shell/install.sh)
+	opam init
 	eval `opam env`
 	opam switch create 4.05.0
 	eval `opam env`

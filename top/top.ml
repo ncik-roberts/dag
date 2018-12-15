@@ -53,7 +53,7 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
             "IR:";
             Sexp.to_string_hum (Ir.sexp_of_t ir);
           ]);
-          Ir_to_air.all ir temp_dag ~n:(Some 100)
+          Ir_to_air.all ir temp_dag ~n:(Some 1000)
         in
         let fn_ptr_airs = List.map2_exn fn_ptrs fn_ptr_traversals ~f:(fun inline t ->
           let (ir, temp_dag) = Dag_to_ir.run inline t in
@@ -61,27 +61,29 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
         in
         note "ir_to_air";
         let cudas = List.concat_mapi airs ~f:(fun i air ->
-          let ann = Annotate.annotate air in (* Annotations *)
-          let fn_ptr_with_anns = List.map fn_ptr_airs ~f:(fun x -> (x, Annotate.annotate x)) in
-          let cuda = Cuda_trans.trans fn_ptr_with_anns air Tc.(ctx.struct_ctx) ann in
-          match cuda with
-          | Some cuda ->
-              say (fun () -> [
-                "~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*";
-              ]);
-              say (fun () -> [
-                Printf.sprintf "AIR #%d" i;
-                Air.Pretty_print.pp_t air;
-              ]);
-              say (fun () -> [
-                Annotated_air.sexp_of_result ann |> Sexp.to_string_hum;
-              ]);
-              say (fun () -> [
-                Printf.sprintf "Cuda:";
-                Cuda_ir.fmt_gstmts cuda;
-              ]);
-              [cuda]
-          | None -> []
+          try
+            let ann = Annotate.annotate air in (* Annotations *)
+            let fn_ptr_with_anns = List.map fn_ptr_airs ~f:(fun x -> (x, Annotate.annotate x)) in
+            let cuda = Cuda_trans.trans fn_ptr_with_anns air Tc.(ctx.struct_ctx) ann in
+            match cuda with
+            | Some cuda ->
+                say (fun () -> [
+                  "~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*~*-*";
+                ]);
+                say (fun () -> [
+                  Printf.sprintf "AIR #%d" i;
+                  Air.Pretty_print.pp_t air;
+                ]);
+                say (fun () -> [
+                  Annotated_air.sexp_of_result ann |> Sexp.to_string_hum;
+                ]);
+                say (fun () -> [
+                  Printf.sprintf "Cuda:";
+                  Cuda_ir.fmt_gstmts cuda;
+                ]);
+                [cuda]
+            | None -> []
+          with _ -> []
         ) in
 
         cudas

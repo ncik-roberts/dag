@@ -20,8 +20,8 @@ static inline long minl(long a, long b){
 }
 
 int main(){
-  int NUM_ELEMS = 1 << 10; // 1024 to start. 
-  int NUM_RUNS = 5;
+  int NUM_ELEMS = 1 << 11; // 1024 to start. 
+  int NUM_RUNS = 3;
 
   int len = NUM_ELEMS*NUM_ELEMS;
   int* m3_dag  = (int*) malloc(len*sizeof(int));
@@ -37,12 +37,13 @@ int main(){
   struct timeval t1;
   long elapsed;
 
-  for (int i = 0; i < NUM_RUNS; i++){
     gettimeofday(&t0,NULL);
     multiplyMatrixMatrix(m3_c,m1,m2,NUM_ELEMS);
     gettimeofday(&t1,NULL);
     elapsed = (t1.tv_sec-t0.tv_sec)*1000000 + t1.tv_usec-t0.tv_usec;
     timemmc = minl(elapsed,timemmc);
+
+  for (int i = 0; i < NUM_RUNS; i++){
 
     gettimeofday(&t0,NULL);
     dag_multiplyMatrixMatrix(m3_dag,NUM_ELEMS,NUM_ELEMS,

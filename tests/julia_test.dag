@@ -245,11 +245,11 @@ bool julia (int x, int y, int dim) {
 }
 
 // Tests reusing the same vertex in a nested parallel binding (hah!)
-bool[][] render_julia_DAG(int dimension){
-  int[] dims = range(0, dimension, 1);
+bool[][] render_julia(int dimension){
+  int[] dims = range(dimension);
   return for (int y : dims) {
     return for (int x : dims) {
-      return julia(x, y, dimension / 2); // big ol' parallel
+      return julia(x, y, dimension); // big ol' parallel
     };
   };
 }

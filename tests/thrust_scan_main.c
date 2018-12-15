@@ -11,7 +11,7 @@ void cscan(int* scanned, int* input, int len){
 
 
 int main(){
-  int NUM_ELEMS = 1 << 26;
+  int NUM_ELEMS = 1 << 22;
   int NUM_RUNS = 5;
   int* input = initRandomArrayiRange(NUM_ELEMS,0,5);
   int* result_c = (int*) malloc (NUM_ELEMS * sizeof(int));

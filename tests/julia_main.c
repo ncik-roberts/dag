@@ -1,4 +1,4 @@
-#include <julia_test.h>
+#include "julia_test.h"
 
 typedef struct { 
   float r;
@@ -20,35 +20,32 @@ complex_t complex_add(complex_t a,complex_t b){
 }
 
 // We do some basic flipping with complex numbers.
-int julia (int x, int y, int DIM) {
-  const float scale = 1.5;
-  float jx = scale * (float)(DIM/2 - x)/(DIM/2);
-  float jy = scale * (float)(DIM/2 - y)/(DIM/2);
+bool julia (int x, int y, int DIM) {
+  const float scale = 1.5f;
+  float jx = scale * (float)(DIM - x)/(float) (DIM);
+  float jy = scale * (float)(DIM - y)/(float) (DIM);
   
   complex_t c;
   complex_t a; 
-  c.r = -0.8; c.i =  0.156;
+  c.r = -0.8f; c.i =  0.156f;
   a.r = jx; a.i = jy;
 
   int i = 0;
-  for (i=0; i<200; i++) {
+  for (i=0; i < 50; i++) {
     a = complex_add(complex_mult(a,a),c);
   }
 
   float mag = a.r * a.r + a.i * a.i; 
-  if (mag > 1000.f)
-    return 0;
-  
-  return 1;
+  return mag <= 1000.f;
 }
 
-int* render_julia(int DIM){
-  int* image = (int*) malloc(DIM*DIM*sizeof(int));
+bool* render_julia(int DIM){
+  bool* image = (bool*) malloc(DIM*DIM*sizeof(bool));
   for (int y=0; y<DIM; y++) {
     for (int x=0; x<DIM; x++) {
       int offset = x + y * DIM;
       int juliaValue = julia( x, y, DIM );
-      image[offset] = 255 * juliaValue;
+      image[offset] = juliaValue;
     }
   }
   return image;
@@ -57,10 +54,20 @@ int* render_julia(int DIM){
 int main(){
   int DIM = 1024; 
 
-  int* julia_c = render_julia(DIM);
+  bool* julia_c = render_julia(DIM);
+  int trues = 0; int falses = 0;
+  for (int i = 0; i < DIM * DIM; i++){
+    if(julia_c[i]) trues++; else falses++;
+  }
+  printf("\t  (C) Trues: %d, Falses %d\n",trues,falses);
+  trues = 0; falses = 0;
   bool* julia_dag = (bool*) calloc(DIM*DIM,(sizeof(bool)));
   dag_render_julia(julia_dag,DIM,DIM,DIM); // this is a little awkward
+  for (int i = 0; i < DIM * DIM; i++){
+    if(julia_dag[i]) trues++; else falses++;
+  }
+  printf("\t(DAG) Trues: %d, Falses %d\n",trues,falses);
 
-  verifyArrays("julia",julia_c,julia_dag,DIM*DIM);
+  verifyBoolArrays("julia",julia_c,julia_dag,DIM*DIM);
 }
 

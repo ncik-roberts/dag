@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <stdbool.h>
 
 int* initRandomArrayi(int NUM_ELEMS)
 {
@@ -54,6 +55,32 @@ void verifyArrays(const char* name, int* standard, int* test, int len){
   for (int i = 0; i < len; i++){
       if (standard[i] != test[i]){
         printf("(%s) MISMATCH: Expected %d, Got %d\n",name,standard[i],test[i]);
+        passed += 1;
+      }
+      if(passed >= 10){
+        printf("Too many failures encountered, breaking.");
+        printf("(%s) Test FAILED.\n", name);
+        return;
+      }
+  }
+
+  if (passed == 0){
+    printf("(%s) Test Passed.\n", name);
+  } else {
+    printf("(%s) Test FAILED.\n", name);
+  }
+}
+
+const char* getBool(bool b){
+  return b ? "true" : "false";
+}
+
+void verifyBoolArrays(const char* name, bool* standard, bool* test, int len){
+  int passed = 0;
+  for (int i = 0; i < len; i++){
+      if (standard[i] != test[i]){
+        printf("(%s : %d) MISMATCH: Expected %s, Got %s\n",name, i,
+                     getBool(standard[i]),getBool(test[i]));
         passed += 1;
       }
       if(passed >= 10){

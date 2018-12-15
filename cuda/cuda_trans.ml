@@ -1222,7 +1222,9 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
   Option.map (CU.top_sort (List.map ~f:snd params) (hd @ malloc'ing @ body @ tl))
     ~f:(fun body ->
       List.concat [
-        [ CU.Include "dag_utils.cpp"; ];
+        [ CU.Include "\"dag_utils.cpp\""; CU.Include "<thrust/scan.h>";
+          CU.Include "<thrust/device_ptr.h>"; CU.Include "<thrust/device_malloc.h>";
+          CU.Include "<thrust/device_free.h>"];
         struct_decls;
         gdecls |> List.map ~f:(fun x -> CU.Function x);
         List.concat_map zipped_fn_ptr_definitions ~f:(fun (_, f1, f2) -> [f1; f2;]);

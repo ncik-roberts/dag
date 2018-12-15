@@ -1,17 +1,18 @@
 #include "thrust_scan_test.h"
+#include <sys/time.h>
 
 void cscan(int* scanned, int* input, int len){
   int total = 0;
   for (int i = 0; i < len; i++){
-    total += input[i];
     scanned[i] = total;
+    total += input[i];
   }
 }
 
 
 int main(){
-  int NUM_ELEMS = 1 << 10;
-  int NUM_RUNS = 2;
+  int NUM_ELEMS = 1 << 26;
+  int NUM_RUNS = 5;
   int* input = initRandomArrayiRange(NUM_ELEMS,0,5);
   int* result_c = (int*) malloc (NUM_ELEMS * sizeof(int));
   int* result_d = (int*) malloc (NUM_ELEMS * sizeof(int));

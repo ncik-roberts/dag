@@ -223,6 +223,14 @@ let upto (ir : Ir.t) (dag : Temp_dag.dag) ~n : Air.t list =
           [(ctx, Air.(Par_stmt (Reduce (dest, op, o, (reduce_temp, v)))))]
       | _ -> failwith "Invalid reduce."
     end
+  | Ir.Fun_call (dest, Ir.Scan op, srcs) ->
+    begin
+      match List.map ~f:(canonicalize ctx) srcs with
+      | [ `Operand o; `Array_view v; ] ->
+          let reduce_temp = Temp.next (Ir.type_of_dest dest) () in
+          [(ctx, Air.(Par_stmt (Scan (dest, op, o, (reduce_temp, v)))))]
+      | _ -> failwith "Invalid scan."
+    end
   | Ir.Fun_call (dest, Ir.Filter_with, srcs) ->
     begin
       match List.map ~f:(canonicalize ctx) srcs with

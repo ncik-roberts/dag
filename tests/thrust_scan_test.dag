@@ -1,4 +1,4 @@
 
-int[] thrustScanifier(int[] input){
+int[] thrust_scan(int[] input){
   return scan(+,0,input);
 }

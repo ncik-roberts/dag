@@ -307,7 +307,7 @@ and fmt_stmt n stm =
    in block ^ grid ^ launch
  | ThrustCall (ident,dest,src,lng) -> 
     let num = call_counter () in
-    let devtyp = "thrust::device_pointer<int>" in
+    let devtyp = "thrust::device_ptr<int>" in
     let d_in = sprintf "d_input%d" num in let d_out = sprintf "d_output%d" num in
     let m1 = sprintf "%s%s %s = thrust::device_malloc<int>(%s)" sp devtyp d_in  (fmt_expr lng) in
     let m2 = sprintf "%s%s %s = thrust::device_malloc<int>(%s)" sp devtyp d_out (fmt_expr lng) in

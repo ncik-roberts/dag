@@ -113,4 +113,6 @@ void verifyFloat(const char* name, float a, float b){
   }
 }
 
-
+static inline long minl(long a, long b){
+  return a < b ? a : b;
+}

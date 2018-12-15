@@ -15,12 +15,8 @@ void multiplyMatrixMatrix(int* m3, int* m1, int* m2, int n)
   }
 }
 
-static inline long minl(long a, long b){
-  return a < b ? a : b;
-}
-
 int main(){
-  int NUM_ELEMS = 1 << 11; // 1024 to start. 
+  int NUM_ELEMS = 1 << 10; // 1024 to start. 
   int NUM_RUNS = 3;
 
   int len = NUM_ELEMS*NUM_ELEMS;

@@ -3,13 +3,10 @@ open Core
 module Cuda = Cuda_ir
 
 type t = {
-  (* Memory allocation counts the total number of
-   * multiplicands in calls to cudaMalloc.
-   * If we perform: cudaMalloc(&x, i1 * i2 * i3 * sizeof(int)),
-   * this would contribute 3 to memory_allocation (because there
-   * are three multiplicands: i1, i2, i3).
-   *)
-  memory_allocation : int;
+
+  (* Negative times the amount of parallel operations (kernel launches,
+   * calls to thrust, etc.). It's negative so that smaller is better. *)
+  neg_parallelism : int;
 
   (* Number of total transfer instructions, where the first element
    * of the tuple is the number of nested levels of loops. (This
@@ -19,10 +16,15 @@ type t = {
    *)
   transfers : (int * int) list;
 
-  (* Negative times the amount of parallel operations (kernel launches,
-   * calls to thrust, etc.). It's negative so that smaller is better. *)
-  neg_parallelism : int;
-} [@@deriving compare]
+  (* Memory allocation counts the total number of
+   * multiplicands in calls to cudaMalloc.
+   * If we perform: cudaMalloc(&x, i1 * i2 * i3 * sizeof(int)),
+   * this would contribute 3 to memory_allocation (because there
+   * are three multiplicands: i1, i2, i3).
+   *)
+  memory_allocation : int;
+
+} [@@deriving sexp, compare]
 
 let empty : t = {
   memory_allocation = 0;
@@ -63,8 +65,21 @@ let rec convert_stmt : Cuda.cuda_stmt -> t =
   function
     | Nop | Sync | DeclareArray _ | Return _ | InitStruct _ | Assign _ | AssignOp _ | Expression _
     | Declare _ | DeclareAssign _ | Malloc _ | Free _  | Memcpy _ -> empty
-    | ThrustCall _ -> { empty with neg_parallelism = -1 }
-    | Cuda_malloc (_, _, expr) -> { empty with memory_allocation = count_multiplicands expr }
+    | ThrustCall ("reduce", _, [_;_;_;length;]) ->
+        let n = count_multiplicands length in
+        { neg_parallelism = -1;
+          memory_allocation = n;
+          transfers = [(n, 1)];
+        }
+    | ThrustCall ("scan", _, [_;_;_;length;]) ->
+        let n = count_multiplicands length in
+        { neg_parallelism = -1;
+          memory_allocation = 2 * n;
+          transfers = [(n, 2)];
+        }
+    | ThrustCall _ -> failwith "That's it."
+    | Cuda_malloc (_, _, expr) ->
+        { empty with memory_allocation = count_multiplicands expr }
     | Launch _ -> { empty with neg_parallelism = -1 }
     | Transfer (_, _, size, _) -> { empty with transfers = [ (count_multiplicands size, 1) ] }
     | Loop ((_, loop_guard, _), body) ->

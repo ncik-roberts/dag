@@ -1,4 +1,4 @@
-type t [@@deriving compare]
+type t [@@deriving sexp, compare]
 
 (* Way of casting a cuda function into something that can be
  * sorted. *)

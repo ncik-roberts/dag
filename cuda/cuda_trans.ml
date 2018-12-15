@@ -1236,6 +1236,20 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
 
   Option.map (CU.top_sort (List.map ~f:snd params) (hd @ malloc'ing @ body @ tl))
     ~f:(fun body ->
+      let main = CU.{
+        typ = Host;
+        ret = begin
+          match Ano.(result.out_param) with
+          | None -> trans_type Air.(program.return_type)
+          | Some _ -> ret_ty
+        end;
+        name = "dag_" ^ Air.(program.fn_name);
+        params;
+        body;
+      } in
+
+      print_endline (Sexp.to_string_hum (Heuristics.sexp_of_t (Heuristics.into main)));
+
       List.concat [
         [ CU.Include "\"dag_utils.cpp\"";      CU.Include "<thrust/scan.h>";
           CU.Include "<thrust/device_ptr.h>";  CU.Include "<thrust/device_malloc.h>";
@@ -1244,14 +1258,5 @@ let trans (fn_ptr_programs : (Air.t * Ano.result) list)
         struct_decls;
         gdecls |> List.map ~f:(fun x -> CU.Function x);
         List.concat_map zipped_fn_ptr_definitions ~f:(fun (_, f1, f2) -> [f1; f2;]);
-        List.return
-          CU.(Function { typ = Host;
-                ret = begin
-                  match Ano.(result.out_param) with
-                  | None -> trans_type Air.(program.return_type)
-                  | Some _ -> ret_ty
-                end;
-                name = "dag_" ^ Air.(program.fn_name);
-                params;
-                body; })
+        List.return (CU.Function main);
       ])

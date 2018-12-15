@@ -1,2 +1,1 @@
-true: include, annot, bin_annot, thread
-true: package(core, ppx_jane)
+true: include, annot, bin_annot, thread, package(core, ppx_jane)

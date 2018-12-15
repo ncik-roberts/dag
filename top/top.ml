@@ -84,15 +84,20 @@ let run_on_ast (ast : unit Ast.t) (to_compile : string option) : Cuda_ir.t =
           | None -> []
         ) in
 
-        note "annotation + trans";
         cudas
       end else []) |>
-    function
-      | [] -> failwith "Could not find function to compile."
-      | x :: _ ->
-          List.iter !timing ~f:(fun (msg, ts) ->
-            Printf.printf "%s: %s\n" msg (Time.Span.to_string_hum ts));
-          x
+    fun cudas ->
+      let zipped_with_ts = List.map cudas ~f:(fun x ->
+        let main = match List.rev x with
+          | Cuda_ir.Function f :: _ -> f
+          | _ -> failwith "Did not find main."
+        in
+        (Heuristics.into main, x)) in
+      match List.min_elt zipped_with_ts ~compare:(fun (t1, x1) (t2, x2) ->
+        Heuristics.compare t1 t2)
+      with
+      | None -> failwith "No function to compile found. :("
+      | Some (_, cuda) -> cuda
 
   with e ->
     List.iter !timing ~f:(fun (msg, ts) ->

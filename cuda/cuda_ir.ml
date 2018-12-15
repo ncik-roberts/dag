@@ -69,6 +69,7 @@ type kernel_variable =
 
 (* Simple nested expressions. *)
 type cuda_expr =
+  | Block_size
   | IConst of Int64.t
   | FConst of float
   | BConst of bool
@@ -221,6 +222,7 @@ let get_thrust_op = function
   | _ -> failwith "Let's not's reduce's this."
 
 let rec fmt_expr = function
+  | Block_size -> "BLOCK_SIZE"
   | IConst c -> Int64.to_string c
   | FConst f -> string_of_float f ^ "f"
   | BConst b -> string_of_bool b
@@ -422,7 +424,7 @@ let primitive_transpose : t = [
 
 module S = String.Set
 let rec used_of_expr : cuda_expr -> S.t = function
-  | IConst _ | FConst _ | BConst _ | Size_of _ | KVar _ -> S.empty
+  | Block_size | IConst _ | FConst _ | BConst _ | Size_of _ | KVar _ -> S.empty
   | Var x -> S.singleton x
   | Cast (_, expr) | Unop (_, expr) | Address expr | Deref expr | Field (expr, (_ : string)) ->
       used_of_expr expr

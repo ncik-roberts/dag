@@ -955,7 +955,7 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
       let total_length = multiply_cuda_exprs bound_temp_lengths in
 
       let gdim = (CU.IConst 256L, CU.IConst 1L, CU.IConst 1L) in
-      let bdim = (CU.Binop (CU.DIV, total_length, CU.IConst 256L), CU.IConst 1L, CU.IConst 1L) in (* Todo: make this blocks/thrd  *)
+      let bdim = (CU.Binop (CU.DIV, CU.Binop (CU.DIV, total_length, CU.IConst 256L), CU.Block_size), CU.IConst 1L, CU.IConst 1L) in (* Todo: make this blocks/thrd  *)
       let index_expr =
         (* blockDim.x * blockIdx.x + threadIdx.x *)
         (* TODO: change this? *)
@@ -975,24 +975,35 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
             let acc_temp = Temp.next Tc.Int () in
             let acc = temp_to_var acc_temp in
             let lvalue = List.fold_left indices
-              ~init:(Expr.Temp output_buffer_param) ~f:(fun acc i -> Expr.Index (acc, Expr.Temp i)) in
+              ~init:(Expr.Temp output_buffer_param)
+              ~f:(fun acc i -> Expr.Index (acc, Expr.Temp i)) in
             List.concat [
               [ CU.DeclareAssign (CU.Integer, temp_name i_temp, index_expr);
                 CU.DeclareAssign (CU.Integer, temp_name acc_temp, i);
               ];
-              List.concat_map (List.zip_exn indices bound_temp_lengths) ~f:(fun (idx, len) ->
-                [ CU.DeclareAssign (CU.Integer, temp_name idx, CU.Binop (CU.MOD, acc, len));
-                  CU.Assign (acc, CU.Binop (CU.DIV, acc, len));
-                ]
-              );
-              trans_seq_stmt { ctx with in_kernel = true; lvalue = Some lvalue; lvalue_filter =
-                update_lvalue_with ctx lengths
-                  (get_filtered_lengths_of_dest ctx dest)
-                  lvalue_filter
-                  bound_array_views;
-              } body;
+              let n = List.length indices in
+              List.concat_mapi (List.zip_exn indices bound_temp_lengths) ~f:(fun i (idx, len) ->
+                if i < n-1 then
+                  [ CU.DeclareAssign (CU.Integer, temp_name idx, CU.Binop (CU.MOD, acc, len));
+                    CU.Assign (acc, CU.Binop (CU.DIV, acc, len));
+                  ]
+                else
+                  let t = Temp.next Tc.Int () in
+                  [ CU.DeclareAssign (CU.Integer, temp_name t, CU.Binop (CU.MOD, acc, CU.Binop (CU.DIV, len, CU.Block_size)));
+                    CU.Loop ((CU.DeclareAssign (CU.Integer, temp_name idx, CU.Binop (CU.MUL, CU.Block_size, temp_to_var t)),
+                              CU.Binop (CU.LT, temp_to_var idx, CU.Binop (CU.MUL, CU.Block_size, CU.Binop (CU.ADD, temp_to_var t, CU.IConst 1L))),
+                              CU.AssignOp (CU.ADD, temp_to_var idx, CU.IConst 1L)),
+                            begin
+                              trans_seq_stmt { ctx with in_kernel = true; lvalue = Some lvalue; lvalue_filter =
+                                update_lvalue_with ctx lengths
+                                  (get_filtered_lengths_of_dest ctx dest)
+                                  lvalue_filter
+                                  bound_array_views;
+                              } body
+                            end);
+                  ])
             ]
-          end;
+        end
       }) in
 
       let memcpy tfr a b = List.map2_exn a b ~f:(fun dest src ->

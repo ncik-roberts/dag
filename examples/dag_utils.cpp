@@ -11,6 +11,8 @@
 #include <thrust/extrema.h>
 #include <vector>
 
+#define BLOCK_SIZE 8
+
 static unsigned int _dag_ilog2(unsigned int x) {
   int result = 0;
   while (x >>= 1) result++;

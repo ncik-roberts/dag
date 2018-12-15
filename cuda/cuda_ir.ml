@@ -13,6 +13,7 @@ type cuda_type =
   | ConstType of cuda_type
   | Struct of cuda_ident
   | Dim of int
+  | StringType of string
   [@@deriving sexp]
 
 type cuda_mem_type =
@@ -125,7 +126,7 @@ and cuda_stmt =
   | Memcpy of cuda_expr * cuda_expr * cuda_expr
     (* Launch dimension, blocks/thread, kernel, arguments *)
   | Launch of int * grid_dim * grid_dim * cuda_func * cuda_expr list
-
+  | ThrustCall of cuda_ident  * cuda_expr * cuda_expr * cuda_expr
   | Return of cuda_expr
   | Free of cuda_ident
   | Sync
@@ -154,6 +155,7 @@ let rec fmt_typ = function
   | ConstType t -> "const "^(fmt_typ t)
   | Pointer t -> (fmt_typ t)^"*"
   | Struct s -> "struct " ^ s
+  | StringType s -> s
   | Dim i -> "dim"^(string_of_int i)
 
 let fmt_mem_hdr = function
@@ -210,6 +212,11 @@ let fmt_kvar = function
   | GridDim   idx ->   "gridDim."^fmt_dim idx
   | ThreadIdx idx -> "threadIdx."^fmt_dim idx
 
+let cc = ref 0 
+let call_counter () = 
+  let n = !cc in
+  let _ = cc := n+1 in n
+
 let rec fmt_expr = function
   | IConst c -> Int64.to_string c
   | FConst f -> string_of_float f ^ "f"
@@ -251,7 +258,7 @@ and fmt_stmt n stm =
  | Declare (typ, id) -> sprintf "%s%s %s" sp (fmt_typ typ) id
  | DeclareAssign (typ, id, exp) ->
    sprintf "%s%s %s = %s" sp (fmt_typ typ) id (fmt_expr exp)
-
+ 
  | DeclareArray (mem, typ, id, sizes) ->
    let arr_exps = String.concat(List.map sizes ~f:(fun e -> "["^fmt_expr e^"]")) in
    sprintf "%s%s%s %s %s" sp (fmt_mem_hdr mem) (fmt_typ typ) id arr_exps
@@ -298,6 +305,19 @@ and fmt_stmt n stm =
    let grid = sprintf "%sdim3 dimBlock%d(%s, %s, %s);\n" sp i (fmt_expr x) (fmt_expr y) (fmt_expr z) in
    let launch = sprintf "%s%s<<<dimGrid%d,dimBlock%d>>>%s" sp name i i (comma_delineated (List.map ~f:fmt_expr args))
    in block ^ grid ^ launch
+ | ThrustCall (ident,dest,src,lng) -> 
+    let num = call_counter () in
+    let devtyp = "thrust::device_pointer<int>" in
+    let d_in = sprintf "d_input%d" num in let d_out = sprintf "d_output%d" num in
+    let m1 = sprintf "%s%s %s = thrust::device_malloc<int>(%s)" sp devtyp d_in  (fmt_expr lng) in
+    let m2 = sprintf "%s%s %s = thrust::device_malloc<int>(%s)" sp devtyp d_out (fmt_expr lng) in
+    let mcpy = sprintf "%scudaMemcpy(%s.get(),%s,%s*sizeof(int),cudaMemcpyHostToDevice)" sp d_in (fmt_expr src) (fmt_expr lng) in
+    let scan = sprintf "%sthrust::%s(%s,%s + %s,%s)" sp ident d_in (d_in) (fmt_expr lng) d_out in
+    let sync = sprintf "%scudaThreadSynchronize()" sp in
+    let back = sprintf "%scudaMemcpy(%s,%s.get(),%s*sizeof(int),cudaMemcpyDeviceToHost)" sp (fmt_expr dest) (d_out) (fmt_expr lng) in
+    let f1 = sprintf "thrust::device_free(%s)" d_in in
+    let f2 = sprintf "thrust::device_free(%s)" d_out in
+    String.concat ~sep:";\n" [m1;m2;mcpy;scan;sync;back;f1;f2]
 
  | Sync -> sprintf "%s %s\n" sp "__syncthreads()"
  | Free id -> sprintf "%s cudaFree(%s)\n" sp id
@@ -421,6 +441,7 @@ let rec used_of_stmt : cuda_stmt -> S.t = function
   | Transfer (expr1, expr2, expr3, _) -> used_of_exprs [ expr1; expr2; expr3; ]
   | Memcpy (expr1, expr2, expr3) -> used_of_exprs [ expr1; expr2; expr3; ]
   | Launch (_, _, _, _, exprs) -> used_of_exprs exprs
+  | ThrustCall (_,exp1,exp2,exp3) -> used_of_exprs [exp1; exp2; exp3]
 and used_of_stmts stmts = S.union_list (List.map ~f:used_of_stmt stmts)
 
 let top_sort : cuda_ident list -> cuda_stmt list -> cuda_stmt list option =
@@ -430,7 +451,7 @@ let top_sort : cuda_ident list -> cuda_stmt list -> cuda_stmt list option =
       let stmt' = match stmt with
         | Sync | Nop | Declare _ | Free _ | AssignOp _ | Assign _ | DeclareArray _
         | InitStruct _ | Malloc _ | Cuda_malloc _ | DeclareAssign _ | Expression _ | Return _
-        | Transfer _ | Memcpy _ | Launch _ -> stmt
+        | Transfer _ | Memcpy _ | Launch _  | ThrustCall _ -> stmt
         | Condition (e, stmt1, stmt2) -> Condition (e, loop stmt1 defined, loop stmt2 defined)
         | Loop (hdr, stmts) ->
             let defined' = Option.value_map (defined_of_stmt (Tuple3.get1 hdr)) defined

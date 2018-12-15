@@ -709,7 +709,14 @@ and trans_par_stmt (ctx : context) (stmt : Air.par_stmt) : CU.cuda_stmt list =
   | Air.Par_stmt (Air.Run (a, b)) -> trans_seq_stmt ctx (Air.Seq_stmt (Air.Run (a, b)))
   | Air.Par_stmt (Air.Reduce (a, b, c, d)) -> trans_seq_stmt ctx (Air.Seq_stmt (Air.Reduce (a, b, c, d)))
   | Air.Par_stmt (Air.Filter_with (a, b, c)) -> trans_seq_stmt ctx (Air.Seq_stmt (Air.Filter_with (a, b, c)))
-  | Air.Par_stmt (Air.Scan (a, b, c, d)) -> trans_seq_stmt ctx (Air.Seq_stmt (Air.Scan (a, b, c, d)))
+  | Air.Par_stmt (Air.Scan (dest, Ir.Operator.Binop(Ast.Plus), init, (t, (_, Air.Array t_src) as source))) -> 
+        let dd = dest_to_lvalue_exn ctx dest in
+        let len = get_length ctx source in 
+        let src = temp_to_var t_src in
+        [CU.ThrustCall("exclusive_scan",dd,src,len)] 
+    
+  | Air.Par_stmt (Air.Scan (a,b,c,d)) -> trans_seq_stmt ctx (Air.Seq_stmt (Air.Scan (a, b, c, d)))
+
   | Air.Par_stmt par_stmt -> trans_par_stmt_stmt ctx par_stmt
 
   | Air.Parallel (dest, id, bound_array_views, body) ->
@@ -1056,7 +1063,7 @@ let rec extract_kernel_launches : CU.cuda_stmt list -> CU.cuda_func list =
   List.fold_left ~init:[] ~f:(fun kernel_launches -> function
     | CU.Return _ | CU.Sync | CU.Nop | CU.DeclareArray _ | CU.DeclareAssign _ | CU.Assign _ | CU.Declare _
     | CU.AssignOp _ | CU.Cuda_malloc _ | CU.Malloc _ | CU.Free _ | CU.Transfer _ | CU.InitStruct _
-    | CU.Expression _ | CU.Memcpy _ -> kernel_launches
+    | CU.Expression _ | CU.Memcpy _ | CU.ThrustCall _ -> kernel_launches
     | CU.Launch (_, _, _, cuda_func, _) -> cuda_func :: kernel_launches
     | CU.Loop (_, stmts) -> extract_kernel_launches stmts @ kernel_launches
     | CU.Condition (_, stmts1, stmts2) ->
@@ -1068,7 +1075,7 @@ let rec extract_kernel_launches : CU.cuda_stmt list -> CU.cuda_func list =
   List.fold_left ~init:[] ~f:(fun kernel_launches -> function
     | CU.Sync | CU.Nop | CU.DeclareArray _ | CU.DeclareAssign _ | CU.Assign _ | CU.Declare _
     | CU.AssignOp _ | CU.Malloc _ | CU.Cuda_malloc _ | CU.Free _ | CU.Transfer _
-    | CU.Expression _ | CU.Memcpy _ | CU.Return _ | CU.InitStruct _ -> kernel_launches
+    | CU.Expression _ | CU.Memcpy _ | CU.Return _ | CU.InitStruct _ | CU.ThrustCall _ -> kernel_launches
     | CU.Launch (_, _, _, cuda_func, _) -> cuda_func :: kernel_launches
     | CU.Loop (_, stmts) -> extract_kernel_launches stmts @ kernel_launches
     | CU.Condition (_, stmts1, stmts2) ->
